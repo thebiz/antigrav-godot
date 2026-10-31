@@ -1027,8 +1027,41 @@ func _hud() -> void:
 	hud.fire_sb = fsb
 	hud.res = mk.call(34, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.res.anchor_right = 1.0
-	hud.res.anchor_top = 0.42
-	hud.res.anchor_bottom = 0.42
+	hud.res.anchor_top = 0.36
+	hud.res.anchor_bottom = 0.36
+	# Knöpfe nach dem Rennen: Wiederholung oder neues Rennen
+	var bx = VBoxContainer.new()
+	bx.anchor_left = 0.5
+	bx.anchor_right = 0.5
+	bx.anchor_top = 0.5
+	bx.anchor_bottom = 0.5
+	bx.offset_left = -230
+	bx.offset_right = 230
+	bx.offset_top = 0
+	bx.offset_bottom = 260
+	bx.add_theme_constant_override("separation", 22)
+	bx.visible = false
+	cl.add_child(bx)
+	var b1 = _btn("REPLAY", true)
+	b1.pressed.connect(_replay_start)
+	bx.add_child(b1)
+	var b2 = _btn("RACE AGAIN")
+	b2.pressed.connect(func(): get_tree().reload_current_scene())
+	bx.add_child(b2)
+	hud.resb = bx
+	var rb = _btn("EXIT REPLAY")
+	rb.anchor_left = 0.5
+	rb.anchor_right = 0.5
+	rb.anchor_top = 1.0
+	rb.anchor_bottom = 1.0
+	rb.offset_left = -200
+	rb.offset_right = 200
+	rb.offset_top = -200
+	rb.offset_bottom = -88
+	rb.visible = false
+	rb.pressed.connect(_replay_end)
+	cl.add_child(rb)
+	hud.rpx = rb
 	for sd in [-1, 1]:
 		var b = mk.call(70, HORIZONTAL_ALIGNMENT_CENTER)
 		b.text = "‹" if sd < 0 else "›"
@@ -1248,8 +1281,6 @@ func _input(ev: InputEvent) -> void:
 				fire_req = true
 				return
 			touches[ev.index] = ev.position.x
-			if state == "done" and t_state > 1.5:
-				get_tree().reload_current_scene()
 		else:
 			touches.erase(ev.index)
 	elif ev is InputEventScreenDrag:
@@ -1318,6 +1349,7 @@ var big_t = 0.0
 
 
 func _big(t: String, c: Color) -> void:
+	_rev(["big", t, c])
 	hud.big.text = t
 	hud.big.modulate = c
 	big_t = 2.4
@@ -1525,6 +1557,7 @@ func _fire_ball(pos: Vector3, k: float) -> void:
 
 # Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
 func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
+	_rev(["gb", z, lat])
 	_fx_res()
 	var f = T.frame(z)
 	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.6
@@ -1587,6 +1620,17 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	_snd("gbomb", 3.0, 1.0, pos)
 
 
+func _gb_damage(e: Dictionary) -> void:
+	for o in ships:
+		if o.out or o.idx == e.own:
+			continue
+		var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
+		var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
+		if kk > 0.0:
+			_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0))
+			o.slow = minf(o.slow, 0.4)
+
+
 func _glow_mat(c: Color, e: float) -> StandardMaterial3D:
 	var m = StandardMaterial3D.new()
 	m.albedo_color = c
@@ -1603,7 +1647,7 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 	var cr: MeshInstance3D = e.core
 	var rg: MeshInstance3D = e.ring
 	# Sog: Gegner in der Nähe werden zur Mitte des Lochs gezogen und abgebremst (der Schütze nicht)
-	if t < 0.62:
+	if t < 0.62 and e.own != -2:
 		for o in ships:
 			if o.out or o.idx == e.own or (o.idx == 0 and (o.shield > 0.0 or o.auto > 0.0)):
 				continue
@@ -1620,15 +1664,8 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		e.l.light_energy = 6.0 * u
 	elif not e.snap:
 		e.snap = true
-		# Schaden je nach Nähe – wer schon direkt getroffen wurde, bekommt nur den Rest
-		for o in ships:
-			if o.out or o.idx == e.own:
-				continue
-			var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
-			var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
-			if kk > 0.0:
-				_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0))
-				o.slow = minf(o.slow, 0.4)
+		if e.own != -2:
+			_gb_damage(e)
 		cr.visible = false
 		rg.visible = false
 		_fx_res()
@@ -1669,6 +1706,7 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 
 
 func _explode(z: float, lat: float, big := false) -> void:
+	_rev(["boom", z, lat, big])
 	_fx_res()
 	var k = 2.2 if big else 1.5
 	var f = T.frame(z)
@@ -1831,13 +1869,10 @@ func _fire() -> void:
 			shake = maxf(shake, 1.5)
 			_flash(Color(1.0, 0.5, 0.15), 0.45)
 		"wand":
-			var bx = BoxMesh.new()
-			bx.size = Vector3(T.TW * 2.0, 1.4, 0.06)
-			var mi = _glow_node(bx, Color(1.0, 0.5, 0.1), 3.0, 0.45)
+			var mi = _wall_node()
 			var z = g.z + 12.0
-			var f = T.frame(z)
-			mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * 0.7)
-			walls.append({"z": z, "age": 0.0, "hit": [], "n": mi})
+			_wall_pose(mi, z, 0.0, 0.0)
+			walls.append({"z": z, "age": 0.0, "hit": [], "n": mi, "hf": 0.0})
 			_snd("wallon")
 		"auto":
 			g.auto = 5.0
@@ -1849,15 +1884,6 @@ func _weapons(dt: float, racing: bool) -> void:
 	msg_t -= dt
 	if msg_t <= 0.0:
 		hud.msg.text = ""
-	big_t -= dt
-	if big_t <= 0.0:
-		hud.big.text = ""
-	else:
-		var bu = 2.4 - big_t
-		hud.big.size.x = get_viewport().get_visible_rect().size.x
-		hud.big.pivot_offset = Vector2(hud.big.size.x * 0.5, hud.big.size.y * 0.5)
-		hud.big.scale = Vector2.ONE * (1.0 + 0.6 * exp(-bu * 9.0))
-		hud.big.modulate.a = clampf(minf(bu / 0.08, big_t / 0.4), 0.0, 1.0)
 	# Waffenfeld: jedes zweite Feld (alle 70 Einheiten)
 	var zz = g.z
 	var wk = int(floor((zz - 17.0) / 35.0))
@@ -1956,11 +1982,13 @@ func _weapons(dt: float, racing: bool) -> void:
 		for o in ships:
 			if o.idx != 0 and not o.out and not w.hit.has(o.idx) and o.z >= w.z and o.z - o.spd * dt * 1.5 < w.z + 0.01:
 				w.hit.append(o.idx)
-				o.slowT = 1.0
+				o.slowT = 2.5
+				w.hf = 1.0
 				_dmg(o, 0.1)
-				_snd("zap", 0.0, 1.0, (o.node as Node3D).global_position)
-		var mat: StandardMaterial3D = (w.n as MeshInstance3D).material_override
-		mat.albedo_color.a = 0.45 * clampf(minf(w.age / 0.3, (5.3 - w.age) / 0.4), 0.0, 1.0)
+				_zap_ship(o)
+				_snd("zap", 2.0, 1.0, (o.node as Node3D).global_position)
+		w.hf = maxf(0.0, w.hf - dt * 2.5)
+		_wall_pose(w.n, w.z, w.age, w.hf)
 		if w.age > 5.3:
 			w.n.queue_free()
 			walls.remove_at(i)
@@ -1981,6 +2009,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		var qs = 1.3 * clampf(quake.age / 0.25, 0.0, 1.0) * clampf((16.0 - quake.age) / 1.5, 0.0, 1.0) * clampf((560.0 - (quake.z - g.z)) / 40.0, 0.0, 1.0)
 		quake.n.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * (qs * 1.6))
 		quake.l.light_energy = 8.0 * qs
+		quake.qs = qs
 		mats.road.set_shader_parameter("qz", quake.z)
 		mats.road.set_shader_parameter("qs", qs)
 		shake = maxf(shake, 0.35 * clampf(1.0 - (quake.z - g.z) / 40.0, 0.0, 1.0))
@@ -1988,7 +2017,170 @@ func _weapons(dt: float, racing: bool) -> void:
 			quake.n.queue_free()
 			quake = null
 			mats.road.set_shader_parameter("qs", 0.0)
-	# Explosionen: Druckwelle wächst, Licht verlischt
+	_fx_update(dt)
+	# Schild: leuchtende Hülle in Schiffsform
+	var shn: Node3D = (g.node as Node3D).get_meta("shield") if (g.node as Node3D).has_meta("shield") else null
+	if g.shield > 0.0 and shn == null:
+		shn = _shield_for(g.node)
+	if shn != null:
+		var on = g.shield > 0.0 and (g.shield > 1.2 or fmod(g.shield, 0.25) < 0.15)
+		shn.visible = on
+
+
+# ---------------------------------------------------------------- Energiewand: Wabengitter, Lauflicht, zuckende Blitze
+var wall_code = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+uniform float a=1.;
+uniform float hit=0.;
+uniform float sd=0.;
+float h11(float x){return fract(sin(x*127.1)*43758.5453);}
+float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float n1(float x){float i=floor(x),f=fract(x);return mix(h11(i),h11(i+1.),f*f*(3.-2.*f));}
+void fragment(){
+	vec2 uv=UV;vec2 p=vec2(uv.x*4.8,uv.y*1.4)*5.;
+	vec2 r=vec2(1.,1.732),hh=r*.5;vec2 ga=mod(p,r)-hh,gb=mod(p-hh,r)-hh;vec2 gv=dot(ga,ga)<dot(gb,gb)?ga:gb;
+	vec2 ag=abs(gv);float he=max(dot(ag,normalize(vec2(1.,1.732))),ag.x);
+	vec2 id=floor((p-gv)*2.+.5);
+	float fl=step(.55,h21(id+floor(TIME*10.)+sd));
+	float edge=smoothstep(.4,.5,he);
+	float cell=fl*(1.-he*1.4)*.35;
+	vec3 o=vec3(1.,.5,.1);
+	vec3 c=o*(.06+.12*pow(n1(uv.x*26.+TIME*3.+sd),4.));
+	c+=o*edge*(.35+.6*fl)+o*cell;
+	c+=o*1.5*exp(-pow((fract(uv.y*.999-TIME*.8+sd)-.5)*9.,2.))*.35;
+	c+=vec3(1.,.65,.25)*smoothstep(.07,0.,min(uv.y,1.-uv.y))*2.8;
+	c+=vec3(1.,.65,.25)*smoothstep(.025,0.,min(uv.x,1.-uv.x))*2.2;
+	for(int i=0;i<4;i++){
+		float fi=float(i);float tq=floor(TIME*(11.+fi*2.)+fi*3.7+sd*5.);
+		float on=step(.4-hit*.4,h11(tq*1.31+fi*9.1));
+		float y0=.15+.7*h11(tq+fi*2.3);
+		float pth=y0+(n1(uv.x*6.+tq*3.1)-.5)*.42+(n1(uv.x*21.+tq*5.7)-.5)*.14+(n1(uv.x*60.+tq)-.5)*.04;
+		float d=abs(uv.y-pth);
+		c+=(vec3(.75,.9,1.)*exp(-d*170.)*4.+vec3(.5,.6,1.)*exp(-d*28.)*.45)*on;
+	}
+	ALBEDO=c*a*(1.+hit*2.5);
+}"""
+
+
+func _wall_node() -> MeshInstance3D:
+	var q = QuadMesh.new()
+	q.size = Vector2(T.TW * 2.0, 1.4)
+	var mi = MeshInstance3D.new()
+	mi.mesh = q
+	var m = _shader_mat(wall_code)
+	m.set_shader_parameter("sd", randf() * 10.0)
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var l = OmniLight3D.new()
+	l.light_color = Color(1.0, 0.55, 0.15)
+	l.omni_range = 6.0
+	l.position = Vector3(0, -0.2, 0)
+	mi.add_child(l)
+	mi.set_meta("l", l)
+	add_child(mi)
+	return mi
+
+
+func _wall_pose(mi: MeshInstance3D, z: float, age: float, hf: float) -> void:
+	var f = T.frame(z)
+	mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * 0.72)
+	var a = clampf(minf(age / 0.3, (5.3 - age) / 0.4), 0.0, 1.0)
+	var m: ShaderMaterial = mi.material_override
+	m.set_shader_parameter("a", a)
+	m.set_shader_parameter("hit", hf)
+	var l: OmniLight3D = mi.get_meta("l")
+	l.light_energy = (2.2 + randf() * 1.2 + hf * 6.0) * a
+
+
+# Blitze, die um ein Schiff zucken, nachdem es durch die Wand geflogen ist
+var zaps = []
+var zap_mat: StandardMaterial3D
+
+
+func _zap_ship(o: Dictionary) -> void:
+	_rev(["zap", o.idx])
+	if zap_mat == null:
+		zap_mat = StandardMaterial3D.new()
+		zap_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		zap_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		zap_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		zap_mat.albedo_color = Color(2.2, 2.8, 4.0)
+		zap_mat.no_depth_test = false
+	var nd: Node3D = o.node
+	for z0 in zaps:
+		if z0.o == o:
+			z0.t = 0.0
+			return
+	var mi = MeshInstance3D.new()
+	mi.mesh = ImmediateMesh.new()
+	mi.material_override = zap_mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	nd.add_child(mi)
+	var l = OmniLight3D.new()
+	l.light_color = Color(0.55, 0.75, 1.0)
+	l.omni_range = 4.5
+	l.position = Vector3(0, 0.3, 0)
+	nd.add_child(l)
+	zaps.append({"o": o, "t": 0.0, "mi": mi, "l": l, "rt": 0.0})
+
+
+func _zap_update(dt: float) -> void:
+	for i in range(zaps.size() - 1, -1, -1):
+		var e = zaps[i]
+		e.t += dt
+		e.rt -= dt
+		var nd: Node3D = e.o.node
+		var life = 2.5
+		if e.t > life or not nd.visible:
+			e.mi.queue_free()
+			e.l.queue_free()
+			zaps.remove_at(i)
+			continue
+		var fade = clampf((life - e.t) / 0.8, 0.0, 1.0)
+		e.l.light_energy = (randf() * 4.0 + 1.0) * fade if randf() < 0.75 else 0.0
+		if e.rt > 0.0:
+			continue
+		e.rt = 0.045
+		var im: ImmediateMesh = e.mi.mesh
+		im.clear_surfaces()
+		var bb: AABB = nd.get_meta("bb")
+		var rad = bb.size * 0.5 * Vector3(1.15, 1.5, 1.05) + Vector3.ONE * 0.08
+		var ctr = bb.get_center()
+		var cd = (nd.global_transform.affine_inverse() * cam.global_position).normalized()
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		var na = 2 + int(randf() * 3.0 * fade + 0.5)
+		for a in range(na):
+			if randf() > fade + 0.2:
+				continue
+			var d0 = Vector3(randf_range(-1, 1), randf_range(-0.6, 1), randf_range(-1, 1)).normalized()
+			var d1 = (d0 + Vector3(randf_range(-1.4, 1.4), randf_range(-0.8, 0.8), randf_range(-1.4, 1.4))).normalized()
+			var pts = []
+			var ns = 9
+			for k in range(ns + 1):
+				var u = float(k) / ns
+				var d = d0.slerp(d1, u) if d0.dot(d1) > -0.95 else d0.lerp(d1, u).normalized()
+				var j = 1.0 + (randf_range(-0.22, 0.22) if k > 0 and k < ns else 0.0)
+				pts.append(ctr + d * rad * j)
+			for k in range(ns):
+				var pa: Vector3 = pts[k]
+				var pb: Vector3 = pts[k + 1]
+				var sd = (pb - pa).cross(cd).normalized() * 0.018
+				im.surface_add_vertex(pa - sd)
+				im.surface_add_vertex(pa + sd)
+				im.surface_add_vertex(pb + sd)
+				im.surface_add_vertex(pa - sd)
+				im.surface_add_vertex(pb + sd)
+				im.surface_add_vertex(pb - sd)
+		# immer mindestens ein Dreieck, sonst meckert Godot über eine leere Fläche
+		im.surface_add_vertex(ctr)
+		im.surface_add_vertex(ctr)
+		im.surface_add_vertex(ctr)
+		im.surface_end()
+
+
+# Explosionen, schwarze Löcher, Blitze: laufen im Rennen und in der Wiederholung
+func _fx_update(dt: float) -> void:
 	for i in range(fxs.size() - 1, -1, -1):
 		var e = fxs[i]
 		if e.get("gb", false):
@@ -2016,13 +2208,232 @@ func _weapons(dt: float, racing: bool) -> void:
 		if tl >= 2.2:
 			lt2.queue_free()
 			fxs.remove_at(i)
-	# Schild: leuchtende Hülle in Schiffsform
-	var shn: Node3D = (g.node as Node3D).get_meta("shield") if (g.node as Node3D).has_meta("shield") else null
-	if g.shield > 0.0 and shn == null:
-		shn = _shield_for(g.node)
-	if shn != null:
-		var on = g.shield > 0.0 and (g.shield > 1.2 or fmod(g.shield, 0.25) < 0.15)
-		shn.visible = on
+	_zap_update(dt)
+	big_t -= dt
+	if big_t <= 0.0:
+		hud.big.text = ""
+	else:
+		var bu = 2.4 - big_t
+		hud.big.size.x = get_viewport().get_visible_rect().size.x
+		hud.big.pivot_offset = Vector2(hud.big.size.x * 0.5, hud.big.size.y * 0.5)
+		hud.big.scale = Vector2.ONE * (1.0 + 0.6 * exp(-bu * 9.0))
+		hud.big.modulate.a = clampf(minf(bu / 0.08, big_t / 0.4), 0.0, 1.0)
+
+
+# ---------------------------------------------------------------- Wiederholung: Aufzeichnung (30 Bilder/s) und Abspielen mit Fernsehkameras
+var rec = []
+var rec_ev = []
+var rec_clk = 0.0
+var rec_acc = 0.0
+var rp = {}
+const RP_CAMS = [["chase", "Chase", 6.0], ["side", "Trackside", 7.0], ["cock", "Cockpit", 6.0], ["side", "Trackside", 7.0], ["heli", "Aerial", 6.0], ["front", "Front", 5.0]]
+
+
+func _rev(ev: Array) -> void:
+	if state == "race" or state == "done":
+		rec_ev.append(ev)
+
+
+func _record(dt: float) -> void:
+	if not (state == "race" or (state == "done" and t_state < 5.0)):
+		return
+	rec_clk += dt
+	rec_acc += dt
+	if rec_acc < 1.0 / 30.0 and not rec.is_empty() and rec_ev.is_empty():
+		return
+	rec_acc = 0.0
+	var sh = []
+	for o in ships:
+		sh.append([o.z, o.lat, o.h, o.psi, o.roll, o.boost, o.spd, 0 if o.out else 1])
+	var w = []
+	for x in shots:
+		w.append([x.z, x.lat])
+	var m = []
+	for x in mines:
+		m.append([x.z, x.lat])
+	var wl = []
+	for x in walls:
+		wl.append([x.z, x.age, x.hf])
+	rec.append({"t": rec_clk, "s": sh, "w": w, "m": m, "wl": wl, "q": [quake.z, quake.get("qs", 0.0)] if quake != null else null,
+		"sh": ships[0].shield, "ev": rec_ev, "pl": hud.top.text})
+	rec_ev = []
+
+
+func _pool(key: String, n: int, mk: Callable) -> Array:
+	if not rp.has(key):
+		rp[key] = []
+	var a: Array = rp[key]
+	while a.size() < n:
+		a.append(mk.call())
+	for i in range(a.size()):
+		a[i].visible = i < n
+	return a
+
+
+func _replay_start() -> void:
+	if rec.size() < 10 or state == "replay":
+		return
+	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0}
+	state = "replay"
+	hud.resb.visible = false
+	hud.res.visible = false
+	hud.rpx.visible = true
+	hud.fire.visible = false
+	hud.en_bg.visible = false
+	for x in walls:
+		x.n.queue_free()
+	walls.clear()
+	for x in shots:
+		x.n.queue_free()
+	shots.clear()
+	for x in mines:
+		x.n.queue_free()
+	mines.clear()
+
+
+func _replay_end() -> void:
+	if state != "replay":
+		return
+	for k in ["shots", "mines", "walls"]:
+		for n in rp.get(k, []):
+			n.queue_free()
+	rp = {}
+	state = "done"
+	t_state = 5.0
+	hud.resb.visible = true
+	hud.res.visible = true
+	hud.rpx.visible = false
+	mats.road.set_shader_parameter("qs", 0.0)
+	hud.fire.visible = true
+	hud.en_bg.visible = true
+	hud.top.text = rec[rec.size() - 1].pl
+	for o in ships:
+		(o.node as Node3D).visible = not o.out
+
+
+func _replay(dt: float) -> void:
+	rp.t += dt
+	var F = rec
+	while rp.i < F.size() - 2 and F[rp.i + 1].t <= rp.t:
+		rp.i += 1
+	# Ereignisse der überflogenen Bilder auslösen
+	while rp.ei < rp.i:
+		rp.ei += 1
+		for ev in F[rp.ei].ev:
+			match ev[0]:
+				"boom":
+					_explode(ev[1], ev[2], ev[3])
+				"gb":
+					_gbomb(ev[1], ev[2], -2)
+				"zap":
+					_zap_ship(ships[ev[1]])
+					_snd("zap", 0.0, 1.0, (ships[ev[1]].node as Node3D).global_position)
+				"big":
+					_big(ev[1], ev[2])
+	if rp.t > F[F.size() - 1].t + 0.4:
+		_replay_end()
+		return
+	var f0 = F[rp.i]
+	var f1 = F[mini(F.size() - 1, rp.i + 1)]
+	var u = clampf((rp.t - f0.t) / maxf(0.001, f1.t - f0.t), 0.0, 1.0)
+	for k in range(ships.size()):
+		var a: Array = f0.s[k]
+		var b: Array = f1.s[k]
+		var o: Dictionary = ships[k]
+		o.z = lerpf(a[0], b[0], u)
+		o.lat = lerpf(a[1], b[1], u)
+		o.h = lerpf(a[2], b[2], u)
+		o.psi = lerpf(a[3], b[3], u)
+		o.roll = lerpf(a[4], b[4], u)
+		o.boost = lerpf(a[5], b[5], u)
+		o.spd = lerpf(a[6], b[6], u)
+		(o.node as Node3D).visible = a[7] == 1 and not (k == 0 and RP_CAMS[rp.ci][0] == "cock")
+	var g: Dictionary = ships[0]
+	g.shield = f0.sh
+	g.auto = 0.0
+	var ps = _pool("shots", f0.w.size(), func():
+		var cap = CapsuleMesh.new()
+		cap.radius = 0.06
+		cap.height = 0.5
+		return _glow_node(cap, Color(1.0, 0.6, 0.2), 8.0))
+	for i in range(f0.w.size()):
+		var fr = T.frame(f0.w[i][0])
+		ps[i].global_transform = Transform3D(Basis(fr.rr, fr.fw, -fr.uu), fr.c + fr.rr * f0.w[i][1] + fr.uu * 0.25)
+	var pm = _pool("mines", f0.m.size(), func():
+		var sp = SphereMesh.new()
+		sp.radius = 0.12
+		sp.height = 0.24
+		return _glow_node(sp, Color(1, 0.15, 0.1), 6.0))
+	for i in range(f0.m.size()):
+		pm[i].position = T.world(f0.m[i][0], f0.m[i][1], 0.12)
+	var pw = _pool("walls", f0.wl.size(), _wall_node)
+	for i in range(f0.wl.size()):
+		_wall_pose(pw[i], f0.wl[i][0], f0.wl[i][1], f0.wl[i][2])
+	if f0.q != null:
+		mats.road.set_shader_parameter("qz", f0.q[0])
+		mats.road.set_shader_parameter("qs", f0.q[1])
+	else:
+		mats.road.set_shader_parameter("qs", 0.0)
+	# Kamera-Regie wie im Fernsehen
+	rp.ct += dt
+	var cm = RP_CAMS[rp.ci]
+	if cm[0] == "side":
+		if (rp.sp != null and g.z > rp.sp + 9.0 and rp.ct > 2.5) or rp.ct > cm[2] * 1.6:
+			_rp_next()
+	elif rp.ct > cm[2]:
+		_rp_next()
+	hud.top.text = "REPLAY · %s     %s" % [RP_CAMS[rp.ci][1], _fmt(minf(rp.t, F[F.size() - 1].t))]
+	_fx_update(dt)
+	var sh_n: Node3D = (g.node as Node3D).get_meta("shield") if (g.node as Node3D).has_meta("shield") else null
+	if g.shield > 0.0 and sh_n == null:
+		sh_n = _shield_for(g.node)
+	if sh_n != null:
+		sh_n.visible = g.shield > 0.0 and (g.shield > 1.2 or fmod(g.shield, 0.25) < 0.15)
+
+
+func _rp_next() -> void:
+	rp.ci = (rp.ci + 1) % RP_CAMS.size()
+	rp.ct = 0.0
+	rp.sp = null
+
+
+func _rp_cam(dt: float) -> bool:
+	var cm = RP_CAMS[rp.ci][0]
+	if cm == "chase":
+		return false
+	var g: Dictionary = ships[0]
+	var f = T.frame(g.z)
+	var S0: Vector3 = f.c + f.rr * g.lat + f.uu * (0.16 + g.h)
+	var nd: Node3D = g.node
+	var SF: Vector3 = nd.global_transform.basis.z.normalized()
+	var SU: Vector3 = nd.global_transform.basis.y.normalized()
+	var ro: Vector3
+	var ta: Vector3
+	var up = Vector3.UP
+	if cm == "side":
+		if rp.sp == null:
+			rp.sk = -rp.sk
+			rp.sp = g.z + 20.0 + randf() * 8.0
+		var inT = T.in_tun(T.lz(rp.sp), 2.0)
+		ro = T.world(rp.sp, rp.sk * (T.TW * 0.8 if inT else T.TW + 1.5), 1.3 if inT else 0.9)
+		ta = S0 + f.fw * 0.6
+	elif cm == "cock":
+		ro = S0 + SF * 0.3 + SU * 0.2
+		ta = S0 + SF * 10.0 + SU * 0.15
+		up = SU
+	elif cm == "heli":
+		ro = S0 - f.fw * 6.0 + Vector3.UP * 6.0 + f.rr * 2.0
+		ta = S0 + f.fw * 4.0
+	else:
+		ro = S0 + f.fw * 6.5 + f.uu * 1.0 + f.rr * 0.9
+		ta = S0 + f.uu * 0.15
+	shake = maxf(0.0, shake - dt * 1.8)
+	if flash_rect != null and flash_rect.color.a > 0.0:
+		flash_rect.color.a = maxf(0.0, flash_rect.color.a - dt * 2.2)
+	cam.global_position = ro
+	cam.look_at(ta, up)
+	cam.fov = 52.0 if cm != "side" else 38.0
+	return true
 
 
 # ---------------------------------------------------------------- Fahrphysik (wie HTML-Version: Nase lenken, Flugrichtung folgt mit begrenzter Haftung)
@@ -2049,7 +2460,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		return
 	if s.slowT > 0.0:
 		s.slowT -= dt
-	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow * (0.5 if s.slowT > 0.0 else 1.0) if racing or state == "done" else 0.0
+	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow * (0.75 if s.slowT > 0.0 else 1.0) if racing or state == "done" else 0.0
 	var fwd: float = s.spd * cos(s.vpsi)
 	s.z += fwd * dt
 	s.lat += s.spd * sin(s.vpsi) * dt
@@ -2112,6 +2523,8 @@ func _notification(what: int) -> void:
 				ui.main.visible = true
 			else:
 				get_tree().quit()
+		elif state == "replay":
+			_replay_end()
 		else:
 			get_tree().reload_current_scene()
 
@@ -2134,6 +2547,19 @@ func _process(delta: float) -> void:
 		_post_update(dt)
 		_shot()
 		return
+	if state == "replay":
+		_replay(dt)
+		if state == "replay":
+			var lr = int(floor((g.z - 20.0) / T.LAP))
+			for i in range(3):
+				laps[i].position = Vector3(0, 0, (lr - 1 + i) * T.LAP)
+			_tunnel(dt)
+			_pose_all(dt)
+			_camera(dt)
+			_sound_update(dt)
+			_post_update(dt)
+			_shot()
+			return
 	var racing = state == "race"
 	if state == "intro" and t_state > 1.2:
 		state = "count"
@@ -2220,15 +2646,19 @@ func _process(delta: float) -> void:
 	if racing and g.out:
 		state = "done"
 		t_state = 0.0
-		hud.res.text = "ELIMINATED\n\nTap to return"
+		hud.res.text = "ELIMINATED"
+		hud.resb.visible = true
 	elif racing and g.z >= finish:
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
 		_snd("win")
-		hud.res.text = "%s  ·  %s\n\nTap to race again" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
+		hud.resb.visible = true
+		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
-	hud.top.text = "%d/4     Lap %d/%d     %s" % [place, lap, T.LAPS, _fmt(race_t)]
+	if state != "done" or t_state < 0.1:
+		hud.top.text = "%d/4     Lap %d/%d     %s" % [place, lap, T.LAPS, _fmt(race_t)]
+	_record(dt)
 	# Rundenkopien mitwandern lassen
 	var l0 = int(floor((g.z - 20.0) / T.LAP))
 	for i in range(3):
@@ -2261,10 +2691,15 @@ func _shot() -> void:
 				elif p[3].begins_with("gb"):
 					_gbomb(ships[0].z + 9.0, 0.0)
 					ships[0].boost = 1.5
-				else:
+				elif not p[3].begins_with("rep"):
 					ships[0].wpn = p[3]
 					fire_req = true
-			if shot_n == ({"boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
+			if p.size() > 3 and p[3].begins_with("rep") and shot_n == 70:
+				state = "done"
+				_replay_start()
+				for k in range(int(p[3].substr(3))):
+					_rp_next()
+			if shot_n == ({"rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				get_tree().quit()
 
@@ -2328,7 +2763,8 @@ func _pose_all(dt: float) -> void:
 		var bob = 0.012 * sin(tt * 2.7 + s.ai)
 		var pos: Vector3 = f.c + f.rr * s.lat + f.uu * (0.16 + s.h + bob)
 		var dir: Vector3 = (f.fw * cos(s.psi) + f.rr * sin(s.psi)).normalized()
-		s.roll += (s.u * 0.32 - s.roll) * (1.0 - exp(-dt / 0.15))
+		if state != "replay":
+			s.roll += (s.u * 0.32 - s.roll) * (1.0 - exp(-dt / 0.15))
 		var up: Vector3 = f.uu.rotated(dir, s.roll)
 		var x = up.cross(dir).normalized()
 		up = dir.cross(x).normalized()
@@ -2345,6 +2781,8 @@ func _pose_all(dt: float) -> void:
 
 # Kamera: hinter dem Gleiter, folgt der Nase gedämpft, bleibt beim Boost kurz zurück
 func _camera(dt: float) -> void:
+	if state == "replay" and _rp_cam(dt):
+		return
 	var g: Dictionary = ships[0]
 	var f = T.frame(g.z)
 	var S0: Vector3 = f.c + f.rr * g.lat + f.uu * (0.16 + g.h)
