@@ -364,9 +364,13 @@ func _apply_cfg() -> void:
 	var q = int(cfg.gfx)
 	wenv.ssr_enabled = q >= 2
 	wenv.ssao_enabled = q >= 2
+	# Medium: ein einfacher, kurzer Schatten statt zwei Stufen, schnelle Kantenglättung (FXAA) statt MSAA
 	moon.shadow_enabled = q >= 1
-	get_viewport().msaa_3d = Viewport.MSAA_4X if q >= 2 else (Viewport.MSAA_2X if q == 1 else Viewport.MSAA_DISABLED)
-	get_viewport().scaling_3d_scale = [0.7, 0.85, 1.0][q] * float(cfg.res)
+	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if q >= 2 else DirectionalLight3D.SHADOW_ORTHOGONAL
+	moon.directional_shadow_max_distance = 35.0 if q >= 2 else 18.0
+	get_viewport().msaa_3d = Viewport.MSAA_4X if q >= 2 else Viewport.MSAA_DISABLED
+	get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 1 else Viewport.SCREEN_SPACE_AA_DISABLED
+	get_viewport().scaling_3d_scale = [0.7, 0.8, 1.0][q] * float(cfg.res)
 	wenv.glow_intensity = 1.6 * float(cfg.glow) * (0.7 if _noir() else 1.0)
 	wenv.adjustment_contrast = 1.18 if _noir() else 1.05
 	wenv.glow_strength = 0.6 + 0.6 * float(cfg.glow)
@@ -1286,7 +1290,7 @@ func _menu() -> void:
 		var b = _btn(["Low", "Medium", "High"][q])
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.toggle_mode = true
-		b.pressed.connect(func(): cfg.gfx = q; _refresh_ui(); _apply_cfg(); _save_cfg())
+		b.pressed.connect(func(): cfg.gfx = q; _refresh_ui(); _apply_cfg(); _save_cfg(); _rewarm())
 		gr.add_child(b)
 		ui.gfx.append(b)
 	sp.add_child(_lbl("Look", 32))
@@ -2707,6 +2711,15 @@ var warm = false
 var warm_t = 0.0
 var warm_before = []
 var warm_cover: CanvasLayer
+
+
+# nach dem Umstellen der Grafikstufe neu vorwärmen (andere Kantenglättung = neue Grafik-Programme)
+func _rewarm() -> void:
+	if warm_t >= 0.0:
+		return
+	warm_t = 0.0
+	warm_before = []
+	warm_cover = null
 
 
 func _warm_step(delta: float) -> void:
