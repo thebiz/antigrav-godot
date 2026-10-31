@@ -59,6 +59,7 @@ var cam_d = 0.0
 func _ready() -> void:
 	_load_cfg()
 	_env()
+	_post()
 	_build_track()
 	_build_city()
 	_spawn_ships()
@@ -76,7 +77,7 @@ func _ready() -> void:
 # ---------------------------------------------------------------- Klänge aus dem alten Spiel (Dateien in sfx/)
 func _sounds() -> void:
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
-			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav"]:
+			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	for k in ["engine", "idle", "field"]:
 		var p = AudioStreamPlayer.new()
@@ -184,6 +185,107 @@ func _sound_update(dt: float) -> void:
 
 
 var scr_v = 0.0
+
+
+# ---------------------------------------------------------------- Bildfilter über der 3D-Szene (unter der Anzeige)
+var post: ShaderMaterial
+
+
+func _post() -> void:
+	var cl = CanvasLayer.new()
+	cl.layer = 0
+	add_child(cl)
+	var r = ColorRect.new()
+	r.set_anchors_preset(Control.PRESET_FULL_RECT)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	post = _shader_mat("""
+shader_type canvas_item;
+// Geschwindigkeit (Zoom-Unschärfe, Farbversatz, Speed-Linien), Gravitationsbombe (Sog, schwarzer Kern, Einstein-Ring, Rückstoß-Welle), Phasen-Glitch
+uniform sampler2D scr:hint_screen_texture,filter_linear_mipmap;
+uniform float spd=0.;
+uniform vec2 gc=vec2(.5);
+uniform float gs=0.;
+uniform float gr=-1.;
+uniform float gk=0.;
+uniform float gl=0.;
+uniform float asp=.46;
+float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+void fragment(){
+	vec2 uv=SCREEN_UV;
+	// Gravitationsbombe: Bild wird zur Mitte gesogen, danach läuft eine Welle nach außen
+	vec2 dd=uv-gc;dd.x*=asp;float r=length(dd)+1e-4;vec2 dir=dd/r;dir.x/=asp;
+	float pull=gs*.05/(r*r*30.+.12)*smoothstep(0.,.03,r);
+	float rip=gr>=0.?sin((r-gr)*60.)*exp(-pow((r-gr)*9.,2.))*.022*gk:0.;
+	uv-=dir*(pull-rip);
+	// Phasen-Glitch: Zeilen verrutschen, Farben laufen auseinander
+	float band=floor(uv.y*46.+floor(TIME*24.)*3.1);float go=(h21(vec2(band,floor(TIME*30.)))-.5)*.05*gl*step(.55,h21(vec2(band,1.7)));
+	uv.x+=go;
+	// Geschwindigkeit: radiale Zoom-Unschärfe mit Farbversatz zu den Rändern
+	vec2 cd=uv-vec2(.5,.47);float e=smoothstep(.12,.75,length(cd*vec2(asp,1.)));
+	float ca=.004*spd*e+.006*gl+.01*abs(gs);
+	vec3 col=vec3(0.);
+	for(int i=0;i<8;i++){float f=1.-float(i)*.011*spd*e;vec2 q=vec2(.5,.47)+cd*f;
+		col+=vec3(texture(scr,q-cd*ca).r,texture(scr,q).g,texture(scr,q+cd*ca).b);}
+	col/=8.;
+	// schwarzer Kern und leuchtender Ring der Bombe
+	float gp=max(gs,0.);
+	col*=1.-smoothstep(.06*gp+.01,.0,r)*gp;
+	col+=vec3(.75,.55,1.)*exp(-pow((r-.075*gp)*55.,2.))*gp*1.6;
+	if(gr>=0.)col+=vec3(.6,.45,1.)*exp(-pow((r-gr)*30.,2.))*gk*.8;
+	// Speed-Linien: helle Streifen fliegen von der Mitte nach außen
+	float an=atan(cd.y,cd.x*asp);float lane=floor(an*70.);float hl=h21(vec2(lane,3.));
+	float sl=step(.93,hl)*smoothstep(.0,.15,fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl))*smoothstep(.5,.1,fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl));
+	col+=vec3(.75,.88,1.)*sl*spd*e*.45;
+	// Vignette bei Tempo
+	col*=1.-spd*.25*smoothstep(.3,.9,length(cd*vec2(asp,1.))*1.4);
+	COLOR=vec4(col,1.);
+}""")
+	r.material = post
+	cl.add_child(r)
+
+
+func _post_update(dt: float) -> void:
+	if post == null:
+		return
+	var vp = get_viewport().get_visible_rect().size
+	post.set_shader_parameter("asp", vp.x / maxf(1.0, vp.y))
+	var g: Dictionary = ships[0]
+	var q = int(cfg.gfx)
+	var sp = 0.0
+	if state == "race" or state == "done":
+		sp = clampf((g.spd / BASE_DEF - 1.1) * 0.35 + g.boost * 0.55 + (0.4 if g.turbo > 0.0 else 0.0), 0.0, 1.0)
+	post_spd += (sp - post_spd) * (1.0 - exp(-dt / 0.25))
+	post.set_shader_parameter("spd", post_spd * (1.0 if q >= 1 else 0.0))
+	gl_v = maxf(0.0, gl_v - dt * 1.4)
+	post.set_shader_parameter("gl", gl_v)
+	# stärkste aktive Gravitationsbombe
+	var best = null
+	var bk = 0.0
+	for e in fxs:
+		if e.get("gb", false):
+			var k = clampf(1.0 - (e.pos - cam.global_position).length() / 50.0, 0.0, 1.0)
+			if not cam.is_position_behind(e.pos) and k > bk:
+				bk = k
+				best = e
+	if best == null:
+		post.set_shader_parameter("gs", 0.0)
+		post.set_shader_parameter("gr", -1.0)
+		return
+	var c = cam.unproject_position(best.pos) / vp
+	post.set_shader_parameter("gc", c)
+	var t: float = best.t
+	var gs = 0.0
+	if t < 0.55:
+		gs = pow(t / 0.55, 1.6) * 1.2
+	elif t < 0.62:
+		gs = -1.2
+	post.set_shader_parameter("gs", gs * bk)
+	post.set_shader_parameter("gr", (t - 0.55) * 1.1 if t >= 0.55 else -1.0)
+	post.set_shader_parameter("gk", bk * clampf(1.0 - (t - 0.55) / 0.8, 0.0, 1.0))
+
+
+var post_spd = 0.0
+var gl_v = 0.0
 
 
 # ---------------------------------------------------------------- Einstellungen (im Handy gespeichert)
@@ -800,6 +902,22 @@ void fragment(){
 	c.position = m.position * 1.08 - Vector3(0, 0.03, 0)
 	piv.add_child(c)
 	root.set_meta("shield", c)
+	# Phasen-Geister: zwei verschobene Kopien in Magenta und Cyan
+	var gh = []
+	for col in [Color(1.0, 0.2, 0.7), Color(0.2, 0.9, 1.0)]:
+		var gm = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_add,cull_back,depth_draw_never,shadows_disabled;
+uniform vec3 col;
+void fragment(){float fr=pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),1.6);ALBEDO=col*(fr*1.6+.12)*(.6+.4*sin(TIME*45.+VERTEX.z*25.));}""")
+		gm.set_shader_parameter("col", Vector3(col.r, col.g, col.b))
+		var gc2: Node3D = c.duplicate()
+		for mi in gc2.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).material_override = gm
+		piv.add_child(gc2)
+		gh.append(gc2)
+	root.set_meta("ghosts", gh)
+	root.set_meta("base_pos", c.position)
 	return c
 
 
@@ -1187,6 +1305,7 @@ func _flash(c: Color, a: float) -> void:
 		flash_rect = ColorRect.new()
 		flash_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
 		flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		flash_rect.color = Color(0, 0, 0, 0)
 		cl.add_child(flash_rect)
 	flash_rect.color = Color(c.r, c.g, c.b, maxf(flash_rect.color.a, a))
 
@@ -1351,6 +1470,131 @@ func _fire_ball(pos: Vector3, k: float) -> void:
 		_curve([[0.0, 0.5], [0.2, 1.4], [1.0, 2.2]]), false, false, 0.5 * k)
 
 
+# Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
+func _gbomb(z: float, lat: float) -> void:
+	_fx_res()
+	var f = T.frame(z)
+	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.6
+	var core = MeshInstance3D.new()
+	var sm = SphereMesh.new()
+	sm.radius = 1.0
+	sm.height = 2.0
+	core.mesh = sm
+	var cm = StandardMaterial3D.new()
+	cm.albedo_color = Color(0, 0, 0)
+	cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core.material_override = cm
+	core.position = pos
+	core.scale = Vector3.ONE * 0.05
+	core.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(core)
+	var ring = MeshInstance3D.new()
+	var tm = TorusMesh.new()
+	tm.inner_radius = 0.9
+	tm.outer_radius = 1.12
+	tm.rings = 48
+	ring.mesh = tm
+	var rmt = StandardMaterial3D.new()
+	rmt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rmt.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	rmt.albedo_color = Color(1.6, 1.2, 3.0)
+	ring.material_override = rmt
+	ring.position = pos
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(ring)
+	# Funken werden ins Loch gezogen
+	var p = GPUParticles3D.new()
+	var m = ParticleProcessMaterial.new()
+	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE_SURFACE
+	m.emission_sphere_radius = 4.5
+	m.radial_accel_min = -45.0
+	m.radial_accel_max = -30.0
+	m.gravity = Vector3.ZERO
+	m.particle_flag_align_y = true
+	m.color_ramp = _ramp([[0.0, Color(0.6, 0.4, 2.5, 0)], [0.3, Color(1.5, 1.0, 4.0, 1)], [1.0, Color(3, 2.5, 5, 1)]])
+	p.process_material = m
+	p.draw_pass_1 = fxr.spark
+	p.amount = 120
+	p.lifetime = 0.55
+	p.one_shot = true
+	p.explosiveness = 0.85
+	p.position = pos
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.visibility_aabb = AABB(Vector3(-8, -8, -8), Vector3(16, 16, 16))
+	add_child(p)
+	p.emitting = true
+	get_tree().create_timer(1.2).timeout.connect(p.queue_free)
+	var lt = OmniLight3D.new()
+	lt.light_color = Color(0.65, 0.5, 1.0)
+	lt.omni_range = 12.0
+	lt.light_energy = 0.0
+	lt.position = pos
+	add_child(lt)
+	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": 0.0, "f": f, "lat": lat, "snap": false})
+	_snd("gbomb", 3.0, 1.0, pos)
+
+
+func _glow_mat(c: Color, e: float) -> StandardMaterial3D:
+	var m = StandardMaterial3D.new()
+	m.albedo_color = c
+	m.emission_enabled = true
+	m.emission = c
+	m.emission_energy_multiplier = e
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	return m
+
+
+func _gb_update(e: Dictionary, dt: float) -> bool:
+	e.t += dt
+	var t: float = e.t
+	var cr: MeshInstance3D = e.core
+	var rg: MeshInstance3D = e.ring
+	if t < 0.55:
+		var u = t / 0.55
+		cr.scale = Vector3.ONE * (0.1 + 0.9 * pow(u, 1.5))
+		rg.scale = Vector3.ONE * (2.6 - 1.4 * u)
+		e.l.light_energy = 6.0 * u
+	elif not e.snap:
+		e.snap = true
+		cr.visible = false
+		rg.visible = false
+		_fx_res()
+		var f = e.f
+		# Rückstoß: Funken und Lichtblitz nach außen, Ring über die Fahrbahn
+		_burst(e.pos, fxr.spark, 140, 1.0, 10.0, 22.0, 180.0, Vector3(0, -6, 0), 0.8, 0.8, 1.6,
+			_ramp([[0.0, Color(5, 4, 9, 1)], [0.6, Color(1.6, 1.0, 4.0, 1)], [1.0, Color(0.4, 0.2, 1.0, 0)]]), null, true, false, 0.3)
+		_burst(e.pos - f.uu * 0.4, fxr.debris, 26, 1.8, 5.0, 12.0, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.4, null, null, false, true, 0.3)
+		var ring = MeshInstance3D.new()
+		ring.mesh = fxr.ring
+		var rm = _shader_mat(fxr.ring_code.replace("vec3(1.,.7,.4)", "vec3(.7,.5,1.)"))
+		ring.material_override = rm
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(ring)
+		e.sw = ring
+		e.swm = rm
+		e.l.light_energy = 9.0
+		var d = (e.pos - cam.global_position).length()
+		var near = clampf(1.0 - d / 40.0, 0.0, 1.0)
+		shake = maxf(shake, 1.6 * near)
+		_flash(Color(0.75, 0.6, 1.0), 0.22 * near)
+	else:
+		var u = clampf((t - 0.55) / 0.7, 0.0, 1.0)
+		rg.visible = false
+		e.l.light_energy = 9.0 * pow(1.0 - u, 2.0)
+		var f = e.f
+		var sc = 0.6 + 9.0 * pow(u, 0.5)
+		e.sw.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
+		e.swm.set_shader_parameter("u", u)
+		if u >= 1.0:
+			for k in ["core", "ring", "l", "sw"]:
+				e[k].queue_free()
+			return true
+	# Ring zeigt immer zur Kamera
+	rg.look_at(cam.global_position, Vector3.UP)
+	rg.rotate_object_local(Vector3(1, 0, 0), PI / 2.0)
+	return false
+
+
 func _explode(z: float, lat: float, big := false) -> void:
 	_fx_res()
 	var k = 2.2 if big else 1.5
@@ -1458,7 +1702,9 @@ func _fire() -> void:
 			_snd("mine", -4.0)
 		"schild":
 			g.shield = 6.0
-			_snd("shield")
+			_snd("phase", 2.0)
+			_snd("shield", -6.0)
+			gl_v = 1.0
 		"turbo":
 			g.turbo = 2.2
 			g.boost = 2.0
@@ -1589,10 +1835,10 @@ func _weapons(dt: float, racing: bool) -> void:
 				hit.slow = 0.35
 				hit.vpsi += randf_range(-0.25, 0.25)
 			_dmg(hit, 0.3 if sh.pl else 0.35)
-			_explode(sh.z, sh.lat)
+			_gbomb(sh.z, sh.lat)
 			dead = true
 		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0:
-			_explode(sh.z, clampf(sh.lat, -T.TW, T.TW))
+			_gbomb(sh.z, clampf(sh.lat, -T.TW, T.TW))
 			dead = true
 		if dead:
 			sh.n.queue_free()
@@ -1645,19 +1891,23 @@ func _weapons(dt: float, racing: bool) -> void:
 					o.h = maxf(o.h, 0.6)
 					o.slow = 0.25
 		var f = T.frame(quake.z)
-		var qs = 1.3 * clampf(quake.age / 0.25, 0.0, 1.0) * clampf((6.0 - quake.age) / 1.0, 0.0, 1.0) * clampf((90.0 - (quake.z - g.z)) / 15.0, 0.0, 1.0)
+		var qs = 1.3 * clampf(quake.age / 0.25, 0.0, 1.0) * clampf((16.0 - quake.age) / 1.5, 0.0, 1.0) * clampf((560.0 - (quake.z - g.z)) / 40.0, 0.0, 1.0)
 		quake.n.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * (qs * 1.6))
 		quake.l.light_energy = 8.0 * qs
 		mats.road.set_shader_parameter("qz", quake.z)
 		mats.road.set_shader_parameter("qs", qs)
 		shake = maxf(shake, 0.35 * clampf(1.0 - (quake.z - g.z) / 40.0, 0.0, 1.0))
-		if quake.z - g.z > 90.0 or quake.age > 6.0:
+		if quake.z - g.z > 560.0 or quake.age > 16.0:
 			quake.n.queue_free()
 			quake = null
 			mats.road.set_shader_parameter("qs", 0.0)
 	# Explosionen: Druckwelle wächst, Licht verlischt
 	for i in range(fxs.size() - 1, -1, -1):
 		var e = fxs[i]
+		if e.get("gb", false):
+			if _gb_update(e, dt):
+				fxs.remove_at(i)
+			continue
 		e.t += dt
 		var u = clampf(e.t / (0.7 if e.big else 0.5), 0.0, 1.0)
 		var sc = (0.6 + (8.0 if e.big else 5.5) * pow(u, 0.5))
@@ -1674,7 +1924,20 @@ func _weapons(dt: float, racing: bool) -> void:
 	if g.shield > 0.0 and shn == null:
 		shn = _shield_for(g.node)
 	if shn != null:
-		shn.visible = g.shield > 0.0 and (g.shield > 1.2 or fmod(g.shield, 0.25) < 0.15)
+		var on = g.shield > 0.0 and (g.shield > 1.2 or fmod(g.shield, 0.25) < 0.15)
+		shn.visible = on
+		var tt = Time.get_ticks_msec() / 1000.0
+		var bp: Vector3 = (g.node as Node3D).get_meta("base_pos")
+		var gh: Array = (g.node as Node3D).get_meta("ghosts")
+		for j in range(gh.size()):
+			var sg = 1.0 if j == 0 else -1.0
+			gh[j].visible = on
+			gh[j].position = bp + Vector3(sg * (0.06 + 0.05 * sin(tt * 37.0 + j)), 0.02 * sin(tt * 53.0), sg * 0.04 * sin(tt * 29.0))
+		# das Schiff selbst zittert leicht, ab und zu ein Glitch
+		var piv: Node3D = (g.node as Node3D).get_child(0)
+		piv.position = Vector3(randf_range(-0.02, 0.02), randf_range(-0.01, 0.01), 0.0) if on else Vector3.ZERO
+		if on and randf() < dt * 1.5:
+			gl_v = maxf(gl_v, 0.5)
 
 
 # ---------------------------------------------------------------- Fahrphysik (wie HTML-Version: Nase lenken, Flugrichtung folgt mit begrenzter Haftung)
@@ -1773,6 +2036,7 @@ func _process(delta: float) -> void:
 		cam.look_at(S0 + Vector3.UP * 0.1, Vector3.UP)
 		cam.fov = 52.0
 		_sound_update(dt)
+		_post_update(dt)
 		_shot()
 		return
 	var racing = state == "race"
@@ -1877,6 +2141,7 @@ func _process(delta: float) -> void:
 	_pose_all(dt)
 	_camera(dt)
 	_sound_update(dt)
+	_post_update(dt)
 	_shot()
 
 
@@ -1897,10 +2162,13 @@ func _shot() -> void:
 			if shot_n == 40 and p.size() > 3:
 				if p[3] == "boom":
 					_explode(ships[0].z + 6.0, 0.0, true)
+				elif p[3].begins_with("gb"):
+					_gbomb(ships[0].z + 9.0, 0.0)
+					ships[0].boost = 1.5
 				else:
 					ships[0].wpn = p[3]
 					fire_req = true
-			if shot_n == ({"boom": 42, "beben": 47}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"boom": 42, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				get_tree().quit()
 
@@ -1956,4 +2224,5 @@ func _camera(dt: float) -> void:
 		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * 0.09
 	cam.global_position = ro
 	cam.look_at(ta, uc)
-	cam.fov = 52.0 * (1.0 + 0.12 * minf(1.5, g.boost))
+	cam.fov = 52.0 * (1.0 + 0.12 * minf(1.5, g.boost) + 0.1 * post_spd)
+	cam.rotate_object_local(Vector3(0, 0, 1), -g.u * 0.05)   # leichtes Mitneigen beim Lenken
