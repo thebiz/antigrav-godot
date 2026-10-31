@@ -7,8 +7,9 @@ const ZST := 20.0
 const LAPS := 3
 const TW := 2.4  # halbe Fahrbahnbreite
 const W := 0.0089759790  # 2π / 700
-const SEG := [[80.0, 120.0, 18.0], [240.0, 140.0, -26.0], [420.0, 110.0, 14.0], [560.0, 110.0, -6.0]]
-const HILL := [[2.4, 2.0, 0.0], [0.8, 5.0, 1.0]]
+# mehr Kurven, aber jede noch rund genug (Versatz/Länge ≤ 0,23), damit das Tempo gleichmäßig bleibt; Kurven in beiden Tunneln, Gerade vor und nach dem Sprung
+const SEG := [[60.0, 120.0, -16.0], [165.0, 80.0, 18.0], [260.0, 70.0, -16.0], [345.0, 50.0, 10.0], [425.0, 80.0, -14.0], [520.0, 90.0, 20.0], [625.0, 85.0, -2.0]]
+const HILL := [[2.4, 2.0, 0.0], [1.2, 5.0, 1.0], [0.5, 9.0, 2.0]]
 const RINGS := [90, 96, 102, 108, 114, 290, 296, 302, 308, 314, 440, 446, 452, 458, 464, 625, 631, 637, 643, 649]
 const TUN := [[160.0, 245.0], [510.0, 595.0]]
 
@@ -127,6 +128,6 @@ static func world(z: float, lat: float, h: float) -> Vector3:
 	return f.c + f.rr * lat + f.uu * h
 
 
-# Boost-Feld k: liegt auf der Kurveninnenseite
+# Boost-Feld k: liegt auf der Kurvenaußenseite
 static func bpx(k: int) -> float:
 	return signf(d2px(k * 35.0 + 6.0)) * 0.5 * TW / 1.6

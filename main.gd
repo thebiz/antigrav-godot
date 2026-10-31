@@ -37,7 +37,7 @@ var ui = {}
 var menu_t = 0.0
 var last_c = 99
 # Waffen und Energie (wie im alten Spiel)
-const WP = [["rak", 0.21], ["lenk", 0.17], ["mine", 0.13], ["schild", 0.12], ["turbo", 0.14], ["beben", 0.08], ["auto", 0.07], ["wand", 0.08]]
+const WP = [["rak", 0.22], ["lenk", 0.22], ["mine", 0.13], ["schild", 0.1], ["turbo", 0.12], ["beben", 0.09], ["auto", 0.05], ["wand", 0.07]]
 const WN = {"rak": "MISSILE", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "WALL"}
 var shots = []
 var mines = []
@@ -485,7 +485,8 @@ func _build_track() -> void:
 		if zw < 25.0 or zw > 715.0 or T.gap(zw + 1.0):
 			continue
 		var wx = _wpx(wk)
-		_strip("wpad", zw - 0.2, zw + 1.8, wx - 0.36, wx + 0.36, 0.009, 0.009)
+		_strip("wpad", zw - 0.25, zw + 2.25, wx - 0.5, wx + 0.5, 0.009, 0.009)
+		wpads.append([zw + 1.0, wx])
 	# Tore mit Lampen (nicht im Tunnel), Werbetafeln, Stützen
 	var gk = 1
 	while gk * 28 + 7 < 720:
@@ -584,10 +585,10 @@ void fragment(){
 shader_type spatial;
 render_mode unshaded,cull_disabled;
 void fragment(){
-	vec2 q=vec2((UV.x-.5)*2.,(UV.y-.5)*.72);float r=length(q);
-	float ring=smoothstep(.035,0.,abs(r-.26))+smoothstep(.08,0.,r)*.8;
+	vec2 q=vec2((UV.x-.5)*2.5,(UV.y-.5)*1.);float r=length(q);
+	float ring=smoothstep(.05,0.,abs(r-.38))+smoothstep(.04,0.,abs(r-.24))*.8+smoothstep(.12,0.,r);
 	vec3 c=.5+.5*cos(6.2832*(atan(q.y,q.x)/6.2832+TIME*.4+vec3(0.,.33,.67)));
-	ALBEDO=c*2.4;ALPHA=clamp(ring,0.,1.);
+	ALBEDO=c*(3.5+1.5*sin(TIME*6.));ALPHA=clamp(ring,0.,1.);
 }""")
 	mats["start"] = _shader_mat("""
 shader_type spatial;
@@ -616,12 +617,38 @@ void fragment(){vec2 q=floor(vec2(UV.x*12.,UV.y*2.));ALBEDO=vec3(mod(q.x+q.y,2.)
 			n.add_child(om)
 			lights_nodes.append(om)
 		add_child(n)
+		# Lichtsäulen über den Waffenfeldern (schon von Weitem zu sehen)
+		if beam_mat == null:
+			beam_mat = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+void fragment(){
+	vec3 c=.5+.5*cos(6.2832*(UV.x+TIME*.3+vec3(0.,.33,.67)));
+	float f=pow(1.-UV.y,0.0)*(1.-UV.y)*(1.-UV.y);
+	ALBEDO=c*1.6*(UV.y)*(.6+.4*sin(TIME*5.+UV.y*12.));
+}""")
+		for wp in wpads:
+			var cy = CylinderMesh.new()
+			cy.top_radius = 0.42
+			cy.bottom_radius = 0.42
+			cy.height = 5.0
+			cy.cap_top = false
+			cy.cap_bottom = false
+			var bm = MeshInstance3D.new()
+			bm.mesh = cy
+			bm.material_override = beam_mat
+			bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var f = T.frame(wp[0])
+			bm.transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * wp[1] + f.uu * 2.5)
+			n.add_child(bm)
 		laps.append(n)
 
 
 var mats = {}
 var lights = []
 var lights_nodes = []
+var wpads = []
+var beam_mat: ShaderMaterial
 
 
 # Boost-Felder und Startlinie: UV aus der Lage im Streifen (x längs, y quer)
@@ -638,7 +665,7 @@ func _fix_uv(st: SurfaceTool, key: String) -> void:
 		var lc = Vector2(1, 1)
 		var ld = Vector2(1, 0)
 		var seg = floorf(float(q))
-		var span = 6.0 if key == "pad" else (4.0 if key == "wpad" else 2.0)
+		var span = 6.0 if key == "pad" else (5.0 if key == "wpad" else 2.0)
 		var x0 = fposmod(seg, span) / span
 		var x1 = x0 + 1.0 / span
 		la = Vector2(x0, 0); lb = Vector2(x0, 1); lc = Vector2(x1, 1); ld = Vector2(x1, 0)
@@ -738,6 +765,35 @@ func _ship_node(idx: int) -> Node3D:
 	root.set_meta("light", lt)
 	add_child(root)
 	return root
+
+
+var shield_mat: ShaderMaterial
+
+
+func _shield_for(root: Node3D) -> Node3D:
+	if shield_mat == null:
+		shield_mat = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_add,cull_back,depth_draw_never,shadows_disabled;
+void fragment(){
+	float fr=pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),2.2);
+	float fl=.75+.25*sin(TIME*28.+VERTEX.y*30.+VERTEX.x*20.);
+	ALBEDO=vec3(.3,.8,1.)*(fr*2.6+.06)*fl;
+}""")
+	var piv: Node3D = root.get_child(0)
+	var m: Node3D = piv.get_child(0)
+	var c: Node3D = m.duplicate()
+	for n in c.find_children("*", "", true, false):
+		if str(n.name).contains("Boost") or str(n.name).contains("Glow"):
+			n.queue_free()
+	for mi in c.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).material_override = shield_mat
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	c.scale = m.scale * 1.08
+	c.position = m.position * 1.08 - Vector3(0, 0.03, 0)
+	piv.add_child(c)
+	root.set_meta("shield", c)
+	return c
 
 
 func _rel_xf(top: Node3D, n: Node) -> Transform3D:
@@ -1112,19 +1168,172 @@ func _msg(t: String, c: Color) -> void:
 var msg_t = 0.0
 
 
+var fxr = {}
+var shake = 0.0
+
+
+func _fx_res() -> void:
+	if not fxr.is_empty():
+		return
+	var gt = GradientTexture2D.new()
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 0.5)
+	var gr = Gradient.new()
+	gr.set_color(0, Color(1, 1, 1, 1))
+	gr.set_color(1, Color(1, 1, 1, 0))
+	gr.add_point(0.45, Color(1, 1, 1, 0.55))
+	gt.gradient = gr
+	gt.width = 64
+	gt.height = 64
+	var mk = func(add: bool) -> StandardMaterial3D:
+		var m = StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD if add else BaseMaterial3D.BLEND_MODE_MIX
+		m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		m.vertex_color_use_as_albedo = true
+		m.albedo_texture = gt
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.disable_receive_shadows = true
+		return m
+	var q = QuadMesh.new()
+	q.size = Vector2(1, 1)
+	q.material = mk.call(true)
+	fxr.fire = q
+	var q2 = QuadMesh.new()
+	q2.size = Vector2(1, 1)
+	q2.material = mk.call(false)
+	fxr.smoke = q2
+	var sp = CapsuleMesh.new()
+	sp.radius = 0.018
+	sp.height = 0.42
+	sp.radial_segments = 4
+	sp.rings = 1
+	var sm = StandardMaterial3D.new()
+	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.vertex_color_use_as_albedo = true
+	sp.material = sm
+	fxr.spark = sp
+	var bx = BoxMesh.new()
+	bx.size = Vector3(0.14, 0.05, 0.12)
+	var bm = StandardMaterial3D.new()
+	bm.albedo_color = Color(0.13, 0.13, 0.15)
+	bm.metallic = 0.8
+	bm.roughness = 0.4
+	bm.emission_enabled = true
+	bm.emission = Color(1.0, 0.4, 0.1)
+	bm.emission_energy_multiplier = 0.6
+	bx.material = bm
+	fxr.debris = bx
+	var ring = QuadMesh.new()
+	ring.size = Vector2(2, 2)
+	ring.orientation = PlaneMesh.FACE_Y
+	fxr.ring = ring
+	fxr.ring_code = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+uniform float u=0.;
+void fragment(){float r=length(UV-.5)*2.;float w=smoothstep(.12,0.,abs(r-.85))*(1.-u);ALBEDO=vec3(1.,.7,.4)*w*3.;}"""
+
+
+func _ramp(cols: Array, hdr := true) -> GradientTexture1D:
+	var g = Gradient.new()
+	g.offsets = PackedFloat32Array(cols.map(func(c): return c[0]))
+	g.colors = PackedColorArray(cols.map(func(c): return c[1]))
+	var t = GradientTexture1D.new()
+	t.gradient = g
+	t.use_hdr = hdr
+	return t
+
+
+func _curve(pts: Array) -> CurveTexture:
+	var c = Curve.new()
+	c.max_value = 4.0
+	for p in pts:
+		c.add_point(Vector2(p[0], p[1]))
+	var t = CurveTexture.new()
+	t.curve = c
+	return t
+
+
+func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vmax: float, spread: float, grav: Vector3, damp: float, smin: float, smax: float, ramp: GradientTexture1D, scurve: CurveTexture, align := false, spin := false, rad := 0.25) -> void:
+	var p = GPUParticles3D.new()
+	var m = ParticleProcessMaterial.new()
+	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	m.emission_sphere_radius = rad
+	m.direction = Vector3(0, 1, 0)
+	m.spread = spread
+	m.initial_velocity_min = vmin
+	m.initial_velocity_max = vmax
+	m.gravity = grav
+	m.damping_min = damp
+	m.damping_max = damp
+	m.scale_min = smin
+	m.scale_max = smax
+	if scurve != null:
+		m.scale_curve = scurve
+	if ramp != null:
+		m.color_ramp = ramp
+	if align:
+		m.particle_flag_align_y = true
+	if spin:
+		m.angular_velocity_min = -720.0
+		m.angular_velocity_max = 720.0
+		m.particle_flag_rotate_y = true
+	p.process_material = m
+	p.draw_pass_1 = mesh
+	p.amount = amount
+	p.lifetime = life
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.randomness = 0.5
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.visibility_aabb = AABB(Vector3(-12, -12, -12), Vector3(24, 24, 24))
+	p.position = pos
+	add_child(p)
+	p.emitting = true
+	get_tree().create_timer(life + 0.6).timeout.connect(p.queue_free)
+
+
 func _explode(z: float, lat: float, big := false) -> void:
-	var sp = SphereMesh.new()
-	sp.radius = 1.0
-	sp.height = 2.0
-	var mi = _glow_node(sp, Color(1.0, 0.55, 0.15), 6.0, 0.9)
-	mi.position = T.world(z, lat, 0.3)
+	_fx_res()
+	var k = 1.7 if big else 1.0
+	var f = T.frame(z)
+	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.35
+	# Feuerball: grell weiß-gelb → orange → dunkelrot
+	_burst(pos, fxr.fire, int(34 * k), 0.85, 1.2 * k, 4.0 * k, 180.0, Vector3(0, 0.8, 0), 3.5, 0.9 * k, 1.8 * k,
+		_ramp([[0.0, Color(8, 6.5, 4, 1)], [0.15, Color(6, 2.6, 0.6, 0.95)], [0.45, Color(2.2, 0.5, 0.08, 0.6)], [1.0, Color(0.2, 0.04, 0.02, 0)]]),
+		_curve([[0.0, 0.4], [0.25, 1.3], [1.0, 1.8]]), false, false, 0.35 * k)
+	# Rauch: steigt langsam auf, wird größer
+	_burst(pos + f.uu * 0.3, fxr.smoke, int(16 * k), 2.4, 0.6, 2.2 * k, 70.0, Vector3(0, 0.9, 0), 1.2, 1.2 * k, 2.2 * k,
+		_ramp([[0.0, Color(0.1, 0.08, 0.08, 0)], [0.12, Color(0.12, 0.1, 0.1, 0.65)], [1.0, Color(0.05, 0.05, 0.06, 0)]], false),
+		_curve([[0.0, 0.5], [1.0, 3.0]]), false, false, 0.4 * k)
+	# Funkenregen
+	_burst(pos, fxr.spark, int(70 * k), 1.1, 6.0 * k, 15.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
+		_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.2)
+	# Trümmer: Stücke der Fahrbahn fliegen weg
+	_burst(pos - f.uu * 0.2, fxr.debris, int(20 * k), 1.8, 4.0 * k, 10.0 * k, 55.0, Vector3(0, -15, 0), 0.2, 0.5, 1.5, null, null, false, true, 0.3)
+	# Druckwelle auf der Fahrbahn
+	var ring = MeshInstance3D.new()
+	ring.mesh = fxr.ring
+	var rm = _shader_mat(fxr.ring_code)
+	ring.material_override = rm
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	ring.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * lat + f.uu * 0.03)
+	add_child(ring)
+	# Lichtblitz
 	var lt = OmniLight3D.new()
-	lt.light_color = Color(1.0, 0.6, 0.25)
-	lt.omni_range = 9.0
-	lt.light_energy = 10.0
-	mi.add_child(lt)
-	fxs.append({"n": mi, "l": lt, "t": 0.0, "big": big})
-	_snd("boom", 0.0, randf_range(0.9, 1.1), mi.position)
+	lt.light_color = Color(1.0, 0.65, 0.3)
+	lt.omni_range = 14.0 * k
+	lt.light_energy = 16.0
+	lt.position = pos + f.uu * 0.6
+	add_child(lt)
+	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": 0.0, "big": big, "f": f, "lat": lat})
+	_snd("boom", 2.0 if big else 0.0, randf_range(0.85, 1.05), pos)
+	# Kamera rüttelt, je näher, desto stärker
+	var d = (pos - cam.global_position).length()
+	shake = maxf(shake, (1.4 if big else 0.9) * clampf(1.0 - d / 30.0, 0.0, 1.0))
 
 
 # Schaden: Schild schützt; leer = ausgeschieden; Meldung oben
@@ -1274,7 +1483,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		for o in ships:
 			if o.out or (sh.pl != (o.idx == 0)):
 				continue
-			if absf(sh.z - o.z) < 0.7 + spd * dt * 1.5 and absf(sh.lat - o.lat) < 0.4:
+			if absf(sh.z - o.z) < 0.8 + spd * dt * 1.5 and absf(sh.lat - o.lat) < (0.4 if sh.pl else 0.6):
 				hit = o
 				break
 		var dead = false
@@ -1282,7 +1491,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			if not (hit.idx == 0 and hit.shield > 0.0):
 				hit.slow = 0.35
 				hit.vpsi += randf_range(-0.25, 0.25)
-			_dmg(hit, 0.3)
+			_dmg(hit, 0.3 if sh.pl else 0.35)
 			_explode(sh.z, sh.lat)
 			dead = true
 		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0:
@@ -1343,31 +1552,26 @@ func _weapons(dt: float, racing: bool) -> void:
 		if quake.z - g.z > 90.0 or quake.age > 6.0:
 			quake.n.queue_free()
 			quake = null
-	# Explosionen: wachsen, verblassen
+	# Explosionen: Druckwelle wächst, Licht verlischt
 	for i in range(fxs.size() - 1, -1, -1):
 		var e = fxs[i]
 		e.t += dt
-		var u = e.t / (0.9 if e.big else 0.6)
-		var sc = (0.3 + (3.2 if e.big else 2.0) * pow(u, 0.6))
-		(e.n as MeshInstance3D).scale = Vector3(sc, sc, sc)
-		var mat: StandardMaterial3D = (e.n as MeshInstance3D).material_override
-		mat.albedo_color.a = 0.9 * (1.0 - u)
-		mat.emission_energy_multiplier = 6.0 * (1.0 - u)
-		e.l.light_energy = 10.0 * (1.0 - u) * (1.0 - u)
+		var u = clampf(e.t / (0.7 if e.big else 0.5), 0.0, 1.0)
+		var sc = (0.4 + (5.0 if e.big else 3.2) * pow(u, 0.5))
+		var f = e.f
+		e.ring.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
+		e.rm.set_shader_parameter("u", u)
+		e.l.light_energy = 16.0 * pow(1.0 - u, 2.0)
 		if u >= 1.0:
-			e.n.queue_free()
+			e.ring.queue_free()
+			e.l.queue_free()
 			fxs.remove_at(i)
-	# Schild um dich
-	if g.shield > 0.0:
-		if not hud.has("shield"):
-			var sp = SphereMesh.new()
-			sp.radius = 1.0
-			sp.height = 1.4
-			hud.shield = _glow_node(sp, Color(0.4, 0.8, 1.0), 2.0, 0.25)
-		hud.shield.visible = true
-		hud.shield.global_position = (g.node as Node3D).global_position + Vector3.UP * 0.15
-	elif hud.has("shield"):
-		hud.shield.visible = false
+	# Schild: leuchtende Hülle in Schiffsform
+	var shn: Node3D = (g.node as Node3D).get_meta("shield") if (g.node as Node3D).has_meta("shield") else null
+	if g.shield > 0.0 and shn == null:
+		shn = _shield_for(g.node)
+	if shn != null:
+		shn.visible = g.shield > 0.0 and (g.shield > 1.2 or fmod(g.shield, 0.25) < 0.15)
 
 
 # ---------------------------------------------------------------- Fahrphysik (wie HTML-Version: Nase lenken, Flugrichtung folgt mit begrenzter Haftung)
@@ -1588,9 +1792,12 @@ func _shot() -> void:
 				for i in range(1, 4):
 					ships[i].z = float(p[1]) + 2.0 + i * 2.5
 			if shot_n == 40 and p.size() > 3:
-				ships[0].wpn = p[3]
-				fire_req = true
-			if shot_n == 90:
+				if p[3] == "boom":
+					_explode(ships[0].z + 6.0, 0.0, true)
+				else:
+					ships[0].wpn = p[3]
+					fire_req = true
+			if shot_n == (42 if p.size() > 3 and p[3] == "boom" else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				get_tree().quit()
 
@@ -1638,6 +1845,10 @@ func _camera(dt: float) -> void:
 	if state == "intro":
 		var u = clampf(t_state / 1.2, 0.0, 1.0)
 		ro = ro.lerp(S0 + fc * 4.0 + uc * 2.5 + f.rr * 2.0, 1.0 - u)
+	shake = maxf(0.0, shake - dt * 1.8)
+	if shake > 0.0:
+		var tt2 = Time.get_ticks_msec() / 1000.0
+		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * 0.09
 	cam.global_position = ro
 	cam.look_at(ta, uc)
 	cam.fov = 52.0 * (1.0 + 0.12 * minf(1.5, g.boost))
