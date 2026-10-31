@@ -2,6 +2,9 @@
 # Bildschirm-Spiegelungen, Schatten, Glühen. Alles wird beim Start im Code aufgebaut.
 extends Node3D
 
+# gespeichertes Replay, das nach dem Neuladen der Szene abgespielt werden soll (bleibt über reload_current_scene erhalten)
+static var pending_rp = ""
+
 const T = preload("res://track.gd")
 # Gleiter: Datei, Name, Nase zeigt im Modell nach hinten (wird umgedreht), Herkunft
 const SHIPS = [
@@ -61,7 +64,17 @@ var cam_psi = 0.0
 var cam_d = 0.0
 
 
+var rpf = {}   # geladenes Replay aus einer Datei
+
+
 func _ready() -> void:
+	if pending_rp != "":
+		var fa = FileAccess.open_compressed(pending_rp, FileAccess.READ, FileAccess.COMPRESSION_ZSTD)
+		if fa != null:
+			var d = fa.get_var()
+			if d is Dictionary and d.has("rec"):
+				rpf = d
+		pending_rp = ""
 	Engine.time_scale = 1.0
 	AudioServer.playback_speed_scale = 1.0
 	_load_cfg()
@@ -1073,6 +1086,8 @@ func _spawn_ships() -> void:
 	others.shuffle()
 	for i in range(4):
 		var sm = int(cfg.ship) if i == 0 else others[(i - 1) % others.size()]
+		if not rpf.is_empty():
+			sm = clampi(int(rpf.sm[i]), 0, SHIPS.size() - 1)
 		var s = {"z": starts[i][0], "lat": starts[i][1], "psi": 0.0, "vpsi": 0.0, "u": 0.0, "spd": 0.0, "boost": 0.0, "slow": 1.0,
 			"h": 0.0, "vy": 0.0, "air": false, "padK": -1, "hitT": -9.0, "sk": (1.0 + (i - 1) * 0.035) * float(cfg.ai) if i > 0 else 1.0, "sk0": 0.0, "lane": randf_range(-0.7, 0.7), "tl": 0.0, "wT": 0.0, "orbs": 0.0,
 			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0,
@@ -1261,6 +1276,7 @@ func _hud() -> void:
 	var el = mk.call(16, HORIZONTAL_ALIGNMENT_LEFT)
 	el.text = "ENERGY"
 	el.position = Vector2(36, 156)
+	hud.el = el
 	el.modulate = Color(1, 1, 1, 0.7)
 	# Waffenknopf: runder Knopf, geladen = orange mit drehendem, pulsierendem Ring
 	var ring = Control.new()
@@ -1350,6 +1366,44 @@ func _hud() -> void:
 	rb.pressed.connect(_replay_end)
 	cl.add_child(rb)
 	hud.rpx = rb
+	# Kamerawahl im Replay
+	var cr = HBoxContainer.new()
+	cr.anchor_left = 0.0
+	cr.anchor_right = 1.0
+	cr.anchor_top = 1.0
+	cr.anchor_bottom = 1.0
+	cr.offset_left = 20
+	cr.offset_right = -20
+	cr.offset_top = -320
+	cr.offset_bottom = -232
+	cr.add_theme_constant_override("separation", 8)
+	cr.visible = false
+	cl.add_child(cr)
+	hud.camrow = cr
+	hud.cambtn = []
+	for it in [["AUTO", -1], ["CHASE", 0], ["TRACK", 1], ["COCKPIT", 2], ["AERIAL", 4], ["FRONT", 5]]:
+		var b = _btn(it[0])
+		b.add_theme_font_size_override("font_size", 17)
+		b.custom_minimum_size = Vector2(0, 76)
+		b.clip_text = true
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var ci: int = it[1]
+		b.pressed.connect(func(): _rp_cam_pick(ci))
+		cr.add_child(b)
+		hud.cambtn.append([b, ci])
+	# Replay speichern
+	var sv = _btn("SAVE REPLAY", true)
+	sv.add_theme_font_size_override("font_size", 24)
+	sv.anchor_left = 1.0
+	sv.anchor_right = 1.0
+	sv.offset_left = -300
+	sv.offset_right = -30
+	sv.offset_top = 120
+	sv.offset_bottom = 200
+	sv.visible = false
+	sv.pressed.connect(_rp_save)
+	cl.add_child(sv)
+	hud.rpsave = sv
 
 
 # ---------------------------------------------------------------- Menü: Gleiterwahl, Start, Einstellungen (Tempo, Grafik)
@@ -1449,6 +1503,9 @@ func _menu() -> void:
 	box.add_child(go)
 	var bs = _btn("Settings")
 	box.add_child(bs)
+	var brl = _btn("Replays")
+	brl.pressed.connect(func(): _show_replays(true))
+	box.add_child(brl)
 	ui.credit = _lbl("", 18)
 	ui.credit.modulate = Color(1, 1, 1, 0.4)
 	ui.credit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1531,6 +1588,74 @@ func _menu() -> void:
 	fl.add_child(ui.fps)
 	hud.layer.visible = false
 	_refresh_ui()
+
+
+# Gespeicherte Replays: Liste, antippen = abspielen, ✕ = löschen
+func _show_replays(on: bool) -> void:
+	if ui.has("rpl"):
+		ui.rpl.queue_free()
+		ui.erase("rpl")
+	ui.main.visible = not on
+	ui.dim.visible = on
+	for t in ui.title:
+		t.visible = not on
+	if not on:
+		return
+	var pnl = VBoxContainer.new()
+	pnl.anchor_left = 0.06
+	pnl.anchor_right = 0.94
+	pnl.anchor_top = 0.08
+	pnl.anchor_bottom = 0.95
+	pnl.add_theme_constant_override("separation", 16)
+	ui.root.add_child(pnl)
+	ui.rpl = pnl
+	pnl.add_child(_lbl("REPLAYS", 40))
+	var sc = ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	pnl.add_child(sc)
+	var lst = VBoxContainer.new()
+	lst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lst.add_theme_constant_override("separation", 12)
+	sc.add_child(lst)
+	var files = []
+	var d = DirAccess.open("user://replays")
+	if d != null:
+		for f in d.get_files():
+			if f.ends_with(".dat"):
+				files.append(f)
+	files.sort()
+	files.reverse()
+	if files.is_empty():
+		var e = _lbl("No saved replays yet.\nAfter a race: Replay → Save replay.", 26)
+		e.modulate = Color(1, 1, 1, 0.6)
+		lst.add_child(e)
+	for f in files:
+		var path = "user://replays/" + f
+		var info = f.trim_prefix("rp_").trim_suffix(".dat")
+		var fa = FileAccess.open_compressed(path, FileAccess.READ, FileAccess.COMPRESSION_ZSTD)
+		if fa != null:
+			var dd = fa.get_var()
+			if dd is Dictionary:
+				info = "%s\n%s" % [dd.get("res", ""), dd.get("date", "")]
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		lst.add_child(row)
+		var b = _btn(info)
+		b.add_theme_font_size_override("font_size", 26)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.pressed.connect(func():
+			pending_rp = path
+			get_tree().reload_current_scene())
+		row.add_child(b)
+		var x = _btn("✕")
+		x.custom_minimum_size = Vector2(100, 0)
+		x.pressed.connect(func():
+			DirAccess.remove_absolute(path)
+			_show_replays(true))
+		row.add_child(x)
+	var back = _btn("Back", true)
+	back.pressed.connect(func(): _show_replays(false))
+	pnl.add_child(back)
 
 
 func _show_settings(on: bool) -> void:
@@ -2788,13 +2913,19 @@ func _pool(key: String, n: int, mk: Callable) -> Array:
 func _replay_start() -> void:
 	if rec.size() < 10 or state == "replay":
 		return
-	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0}
+	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0, "fix": -1}
 	state = "replay"
 	hud.resb.visible = false
 	hud.res.visible = false
 	hud.rpx.visible = true
+	hud.camrow.visible = true
+	hud.rpsave.visible = rpf.is_empty()
+	hud.rpsave.text = "SAVE REPLAY"
+	hud.rpsave.disabled = false
+	_rp_cam_style()
 	hud.fire.visible = false
 	hud.en_bg.visible = false
+	hud.el.visible = false
 	hud.pg.visible = false
 	hud.plbox.visible = false
 	for x in walls:
@@ -2815,14 +2946,21 @@ func _replay_end() -> void:
 		for n in rp.get(k, []):
 			n.queue_free()
 	rp = {}
+	if not rpf.is_empty():
+		# Replay aus der Liste: zurück ins Menü
+		get_tree().reload_current_scene()
+		return
 	state = "done"
 	t_state = 5.0
 	hud.resb.visible = true
 	hud.res.visible = true
 	hud.rpx.visible = false
+	hud.camrow.visible = false
+	hud.rpsave.visible = false
 	mats.road.set_shader_parameter("qs", 0.0)
 	hud.fire.visible = true
 	hud.en_bg.visible = true
+	hud.el.visible = true
 	hud.pg.visible = true
 	hud.plbox.visible = true
 	hud.top.text = rec[rec.size() - 1].pl
@@ -2899,13 +3037,55 @@ func _replay(dt: float) -> void:
 	# Kamera-Regie wie im Fernsehen
 	rp.ct += dt
 	var cm = RP_CAMS[rp.ci]
-	if cm[0] == "side":
+	if rp.get("fix", -1) >= 0:
+		# feste Kamera: Streckenkamera nur neu aufstellen, wenn der Gleiter vorbei ist
+		if cm[0] == "side" and ((rp.sp != null and g.z > rp.sp + 9.0 and rp.ct > 2.5) or rp.ct > cm[2] * 1.6):
+			rp.sp = null
+			rp.ct = 0.0
+	elif cm[0] == "side":
 		if (rp.sp != null and g.z > rp.sp + 9.0 and rp.ct > 2.5) or rp.ct > cm[2] * 1.6:
 			_rp_next()
 	elif rp.ct > cm[2]:
 		_rp_next()
 	hud.top.text = "REPLAY · %s     %s" % [RP_CAMS[rp.ci][1], _fmt(minf(rp.t, F[F.size() - 1].t))]
 	_fx_update(dt)
+
+
+func _rp_cam_pick(ci: int) -> void:
+	if rp.is_empty():
+		return
+	rp.fix = ci
+	if ci >= 0:
+		rp.ci = ci
+		rp.ct = 0.0
+		rp.sp = null
+	_rp_cam_style()
+
+
+func _rp_cam_style() -> void:
+	for it in hud.cambtn:
+		var on = it[1] == rp.get("fix", -1)
+		var st = _style(Color(0.93, 0.41, 0.18) if on else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on else Color(1, 1, 1, 0.22))
+		for k in ["normal", "hover", "focus", "pressed"]:
+			it[0].add_theme_stylebox_override(k, st)
+
+
+func _rp_save() -> void:
+	DirAccess.make_dir_recursive_absolute("user://replays")
+	var t = Time.get_datetime_dict_from_system()
+	var fname = "user://replays/rp_%04d%02d%02d_%02d%02d%02d.dat" % [t.year, t.month, t.day, t.hour, t.minute, t.second]
+	var sm = []
+	for o in ships:
+		sm.append(o.sm)
+	var fa = FileAccess.open_compressed(fname, FileAccess.WRITE, FileAccess.COMPRESSION_ZSTD)
+	if fa == null:
+		hud.rpsave.text = "ERROR"
+		return
+	fa.store_var({"v": 1, "rec": rec, "sm": sm, "res": hud.res.text.replace("\n", " · "),
+		"date": "%02d.%02d.%04d  %02d:%02d" % [t.day, t.month, t.year, t.hour, t.minute]})
+	fa.close()
+	hud.rpsave.text = "SAVED ✓"
+	hud.rpsave.disabled = true
 
 
 func _rp_next() -> void:
@@ -3390,6 +3570,8 @@ func _notification(what: int) -> void:
 		if state == "menu":
 			if ui.setp.visible:
 				_show_settings(false)
+			elif ui.has("rpl"):
+				_show_replays(false)
 			else:
 				get_tree().quit()
 		elif state == "replay":
@@ -3409,6 +3591,12 @@ func _process(delta: float) -> void:
 	var g: Dictionary = ships[0]
 	if warm_t >= 0.0:
 		_warm_step(delta)
+	if state == "menu" and not rpf.is_empty() and warm_t < 0.0:
+		rec = rpf.rec
+		ui.root.visible = false
+		hud.layer.visible = true
+		hud.res.text = rpf.get("res", "")
+		_replay_start()
 	if state == "menu":
 		menu_t += dt
 		_pose_all(dt)
@@ -3590,6 +3778,24 @@ func _shot() -> void:
 		if a.begins_with("--shot="):
 			var p = a.substr(7).split(",")
 			shot_n += 1
+			if not rpf.is_empty():
+				if shot_n == 40:
+					get_viewport().get_texture().get_image().save_png(p[0])
+					get_tree().quit()
+				return
+			if p.size() > 3 and p[3] == "rsave":
+				if shot_n == 70:
+					state = "done"
+					_replay_start()
+					_rp_cam_pick(4)
+				if shot_n == 80:
+					_rp_save()
+					var d = DirAccess.open("user://replays")
+					var fs = d.get_files()
+					fs.sort()
+					pending_rp = "user://replays/" + fs[fs.size() - 1]
+					get_tree().reload_current_scene()
+					return
 			if shot_n == 2 and p.size() > 2:
 				_start()
 				if p[2] != "intro":
