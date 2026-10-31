@@ -1889,12 +1889,13 @@ func _explode(z: float, lat: float, big := false) -> void:
 	# Lichtblitz
 	var lt = OmniLight3D.new()
 	lt.light_color = Color(1.0, 0.92, 0.8)
-	lt.omni_range = 16.0 * k
+	var rg0 = (16.0 if int(cfg.gfx) >= 2 else 10.0) * k
+	lt.omni_range = rg0
 	lt.omni_attenuation = 0.7
 	lt.light_energy = 38.0
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
-	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": 0.0, "big": big, "f": f, "lat": lat, "rg": 16.0 * k})
+	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": 0.0, "big": big, "f": f, "lat": lat, "rg": rg0})
 	_snd("boom", 4.0 if big else 2.0, randf_range(0.85, 1.0), pos)
 	_snd("boom", 2.0, 0.55, pos)   # tiefer Wumms darunter
 	# Kamera rüttelt, je näher, desto stärker
@@ -3188,8 +3189,10 @@ func _tunnel(dt: float) -> void:
 	wenv.fog_density = lerpf(0.012, 0.0, tun_k)
 	wenv.background_energy_multiplier = lerpf(1.0, 0.05, tun_k)
 	moon.light_energy = lerpf(0.45, 0.0, tun_k)
+	# im Tunnel sieht man den Mond nicht: Schattenberechnung sparen
+	moon.shadow_enabled = int(cfg.gfx) >= 1 and tun_k < 0.6
 	if tun_l.is_empty():
-		for i in range(2 if int(cfg.gfx) == 0 else 4):
+		for i in range(4 if int(cfg.gfx) >= 2 else 2):
 			var l = OmniLight3D.new()
 			l.omni_range = 6.0
 			l.omni_attenuation = 1.4
