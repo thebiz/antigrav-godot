@@ -26,7 +26,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9}
+var cfg = {"ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -37,8 +37,9 @@ var ui = {}
 var menu_t = 0.0
 var last_c = 99
 # Waffen und Energie (wie im alten Spiel)
-const WP = [["rak", 0.22], ["lenk", 0.22], ["mine", 0.13], ["schild", 0.1], ["turbo", 0.12], ["beben", 0.09], ["auto", 0.05], ["wand", 0.07]]
-const WN = {"rak": "MISSILE", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "WALL"}
+const WP = [["rak", 0.2], ["lenk", 0.2], ["mine", 0.12], ["schild", 0.09], ["turbo", 0.11], ["beben", 0.08], ["auto", 0.05], ["wand", 0.07], ["orbs", 0.08]]
+const WP_AI = [["lenk", 0.35], ["rak", 0.25], ["mine", 0.2], ["schild", 0.1], ["turbo", 0.1]]
+const WN = {"rak": "MISSILE", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "WALL", "orbs": "ORBS"}
 var shots = []
 var mines = []
 var fxs = []
@@ -58,6 +59,12 @@ var cam_d = 0.0
 
 func _ready() -> void:
 	_load_cfg()
+	if OS.get_cmdline_user_args().has("--noir"):
+		cfg.look = 1
+	if _noir():
+		CY = Color(0.9, 0.92, 0.95)
+		MG = OR
+		AM = OR
 	_env()
 	_post()
 	_build_track()
@@ -209,6 +216,8 @@ uniform float gr=-1.;
 uniform float gk=0.;
 uniform float gl=0.;
 uniform float asp=.46;
+uniform float shp=.6;
+uniform float grn=.035;
 uniform vec4 hz0=vec4(0.);uniform vec4 hz1=vec4(0.);uniform vec4 hz2=vec4(0.);uniform vec4 hz3=vec4(0.);
 vec2 haze(vec2 uv,vec4 h){
 	if(h.w<=0.)return vec2(0.);
@@ -244,6 +253,12 @@ void fragment(){
 	float an=atan(cd.y,cd.x*asp);float lane=floor(an*70.);float hl=h21(vec2(lane,3.));
 	float sl=step(.93,hl)*smoothstep(.0,.15,fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl))*smoothstep(.5,.1,fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl));
 	col+=vec3(.75,.88,1.)*sl*spd*e*.45;
+	// knackig: Kanten schärfen, feines Filmkorn
+	vec2 px=SCREEN_PIXEL_SIZE;
+	vec3 bl=(texture(scr,uv+vec2(px.x,0.)).rgb+texture(scr,uv-vec2(px.x,0.)).rgb+texture(scr,uv+vec2(0.,px.y)).rgb+texture(scr,uv-vec2(0.,px.y)).rgb)*.25;
+	col+=(texture(scr,uv).rgb-bl)*shp;
+	col=max(col,vec3(0.));
+	col+=(h21(floor(uv/px)+fract(TIME*7.3)*91.)-.5)*grn*(.5+.5*(1.-clamp(dot(col,vec3(.33)),0.,1.)));
 	// Vignette bei Tempo
 	col*=1.-spd*.25*smoothstep(.3,.9,length(cd*vec2(asp,1.))*1.4);
 	COLOR=vec4(col,1.);
@@ -257,6 +272,8 @@ func _post_update(dt: float) -> void:
 		return
 	var vp = get_viewport().get_visible_rect().size
 	post.set_shader_parameter("asp", vp.x / maxf(1.0, vp.y))
+	post.set_shader_parameter("shp", 0.9 if _noir() else 0.6)
+	post.set_shader_parameter("grn", 0.06 if _noir() else 0.035)
 	var g: Dictionary = ships[0]
 	var q = int(cfg.gfx)
 	var sp = 0.0
@@ -340,7 +357,8 @@ func _apply_cfg() -> void:
 	moon.shadow_enabled = q >= 1
 	get_viewport().msaa_3d = Viewport.MSAA_4X if q >= 2 else (Viewport.MSAA_2X if q == 1 else Viewport.MSAA_DISABLED)
 	get_viewport().scaling_3d_scale = [0.7, 0.85, 1.0][q]
-	wenv.glow_intensity = 1.6 * float(cfg.glow)
+	wenv.glow_intensity = 1.6 * float(cfg.glow) * (0.7 if _noir() else 1.0)
+	wenv.adjustment_contrast = 1.18 if _noir() else 1.05
 	wenv.glow_strength = 0.6 + 0.6 * float(cfg.glow)
 	for nm in neon_mats:
 		nm[0].emission_energy_multiplier = nm[1] * float(cfg.neon)
@@ -353,7 +371,7 @@ func _apply_cfg() -> void:
 func _env() -> void:
 	var sky_mat = ShaderMaterial.new()
 	sky_mat.shader = Shader.new()
-	sky_mat.shader.code = """
+	sky_mat.shader.code = _nz("""
 shader_type sky;
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 void sky(){
@@ -375,14 +393,16 @@ void sky(){
 	if(h<-.04)c=mix(c,vec3(.006,.005,.012),smoothstep(-.04,-.15,h));
 	COLOR=c;
 }
-"""
+""", [["vec3(.04,.02,.07),vec3(.002,.003,.012)", "vec3(.05),vec3(.004)"], ["vec3(.3,.8,1.):vec3(1.,.7,.45)", "vec3(.9):vec3(.7)"],
+		["(h21(vec2(bx,9.))>.5?vec3(0.,.78,1.):vec3(1.,.06,.42))", "(h21(vec2(bx,9.))>.7?vec3(1.,.36,.03):vec3(.55))"],
+		["vec3(.5,.12,.45)*exp", "vec3(.5,.18,.02)*exp"], ["vec3(.25,.3,.5)*pow", "vec3(.35)*pow"], ["vec3(.006,.005,.012)", "vec3(.007)"]])
 	var sky = Sky.new()
 	sky.sky_material = sky_mat
 	var env = Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.16, 0.12, 0.26)
+	env.ambient_light_color = Color(0.19, 0.19, 0.2) if _noir() else Color(0.16, 0.12, 0.26)
 	env.ambient_light_energy = 0.35
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
@@ -403,7 +423,7 @@ void sky(){
 	env.ssao_enabled = true
 	env.ssao_intensity = 1.6
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.05, 0.03, 0.09)
+	env.fog_light_color = Color(0.045, 0.045, 0.05) if _noir() else Color(0.05, 0.03, 0.09)
 	env.fog_density = 0.012
 	env.fog_sky_affect = 0.0
 	env.adjustment_enabled = true
@@ -415,7 +435,7 @@ void sky(){
 	add_child(we)
 	# Mondlicht mit echten Schatten
 	moon = DirectionalLight3D.new()
-	moon.light_color = Color(0.6, 0.66, 1.0)
+	moon.light_color = Color(0.85, 0.87, 0.9) if _noir() else Color(0.6, 0.66, 1.0)
 	moon.light_energy = 0.45
 	moon.shadow_enabled = true
 	moon.directional_shadow_max_distance = 35.0
@@ -483,9 +503,24 @@ func _shader_mat(code: String) -> ShaderMaterial:
 	return m
 
 
-const CY = Color(0.0, 0.78, 1.0)
-const MG = Color(1.0, 0.06, 0.42)
-const AM = Color(1.0, 0.62, 0.08)
+var CY = Color(0.0, 0.78, 1.0)
+var MG = Color(1.0, 0.06, 0.42)
+var AM = Color(1.0, 0.62, 0.08)
+const OR = Color(1.0, 0.36, 0.03)
+
+
+func _noir() -> bool:
+	return int(cfg.get("look", 0)) == 1
+
+
+# Schwarz-Weiß-Look: Shader-Farben tauschen (nur wenn aktiv)
+func _nz(code: String, pairs: Array) -> String:
+	if not _noir():
+		return code
+	for pr in pairs:
+		assert(code.contains(pr[0]), pr[0])
+		code = code.replace(pr[0], pr[1])
+	return code
 
 
 func _neo(k: float) -> Color:
@@ -672,7 +707,7 @@ func _build_track() -> void:
 			ti += 1
 		_strip("tlight", tu[0], tu[1], -0.06, 0.06, 0.4 + R - 0.04, 0.4 + R - 0.04)
 	# Materialien zusammenstellen
-	mats["road"] = _shader_mat("""
+	mats["road"] = _shader_mat(_nz("""
 shader_type spatial;
 // Fahrbahn wie bei Wipeout: dunkelgraues, gebürstetes Metall in Platten, feine Fugen, Randmarkierung; glatt, leicht glänzend
 float h11(float x){return fract(sin(x*91.7)*4371.3);}
@@ -697,7 +732,7 @@ void fragment(){
 	ALBEDO=base;METALLIC=.8;ROUGHNESS=.38+.1*br+seam*.3+edge*.2;SPECULAR=.45;
 	float cr=max(qh,0.)/max(qs,.01);   // glühender Kamm, aufgerissene Fugen
 	EMISSION=(vec3(1.,.42,.08)*pow(cr,1.5)*6.+vec3(1.,.25,.05)*seam*cr*14.)*step(.01,qs);
-}""")
+}""", [["vec3(.75,.62,.08)", "vec3(.8,.3,.02)"]]))
 	mats["wall"] = _metal(Color(0.07, 0.075, 0.09), 0.22)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
 	mats["tube"] = _metal(Color(0.012, 0.012, 0.016), 0.28, 0.9)
@@ -707,17 +742,17 @@ void fragment(){
 	mats["ringM"] = _neon(MG, 7.0)
 	mats["line"] = _neon(Color(0.8, 0.85, 1.0), 0.6)
 	mats["tlight"] = _neon(Color(0.9, 0.95, 1.0), 4.0)
-	mats["board0"] = _neon(Color(0.1, 0.4, 1.0), 2.2)
-	mats["board1"] = _neon(Color(1.0, 0.2, 0.5), 2.2)
-	mats["board2"] = _neon(Color(1.0, 0.7, 0.1), 2.2)
-	mats["pad"] = _shader_mat("""
+	mats["board0"] = _neon(Color(0.8, 0.8, 0.85) if _noir() else Color(0.1, 0.4, 1.0), 2.2)
+	mats["board1"] = _neon(OR if _noir() else Color(1.0, 0.2, 0.5), 2.2)
+	mats["board2"] = _neon(Color(0.35, 0.35, 0.37) if _noir() else Color(1.0, 0.7, 0.1), 2.2)
+	mats["pad"] = _shader_mat(_nz("""
 shader_type spatial;
 render_mode unshaded,cull_disabled;
 void fragment(){
 	vec2 u=UV;float ch=step(abs(fract(u.x*6.-TIME*2.)-.5-abs(u.y-.5)*.9),.14);
 	ALBEDO=mix(vec3(.05,.6,1.),vec3(1.,.85,.15),ch)*(1.6+ch*1.8);
-}""")
-	mats["wpad"] = _shader_mat("""
+}""", [["vec3(.05,.6,1.),vec3(1.,.85,.15)", "vec3(.8),vec3(1.,.36,.03)"]]))
+	mats["wpad"] = _shader_mat(_nz("""
 shader_type spatial;
 render_mode unshaded,cull_disabled;
 void fragment(){
@@ -725,7 +760,7 @@ void fragment(){
 	float ring=smoothstep(.05,0.,abs(r-.38))+smoothstep(.04,0.,abs(r-.24))*.8+smoothstep(.12,0.,r);
 	vec3 c=.5+.5*cos(6.2832*(atan(q.y,q.x)/6.2832+TIME*.4+vec3(0.,.33,.67)));
 	ALBEDO=c*(3.5+1.5*sin(TIME*6.));ALPHA=clamp(ring,0.,1.);
-}""")
+}""", [["vec3 c=.5+.5*cos(6.2832*(atan(q.y,q.x)/6.2832+TIME*.4+vec3(0.,.33,.67)));", "vec3 c=mix(vec3(1.,.36,.03),vec3(1.),.5+.5*sin(atan(q.y,q.x)*3.+TIME*4.));"]]))
 	mats["start"] = _shader_mat("""
 shader_type spatial;
 render_mode unshaded,cull_disabled;
@@ -760,14 +795,15 @@ shader_type spatial;
 render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
 void fragment(){
 	vec3 c=.5+.5*cos(6.2832*(UV.x+TIME*.3+vec3(0.,.33,.67)));
-	float f=pow(1.-UV.y,0.0)*(1.-UV.y)*(1.-UV.y);
-	ALBEDO=c*1.6*(UV.y)*(.6+.4*sin(TIME*5.+UV.y*12.));
+	ALBEDO=c*.55*pow(UV.y,2.)*(.6+.4*sin(TIME*5.+UV.y*12.));
 }""")
+			if _noir():
+				beam_mat.shader.code = beam_mat.shader.code.replace("vec3 c=.5+.5*cos(6.2832*(UV.x+TIME*.3+vec3(0.,.33,.67)));", "vec3 c=vec3(1.,.36,.03);")
 		for wp in wpads:
 			var cy = CylinderMesh.new()
-			cy.top_radius = 0.42
-			cy.bottom_radius = 0.42
-			cy.height = 5.0
+			cy.top_radius = 0.3
+			cy.bottom_radius = 0.3
+			cy.height = 2.2
 			cy.cap_top = false
 			cy.cap_bottom = false
 			var bm = MeshInstance3D.new()
@@ -775,7 +811,7 @@ void fragment(){
 			bm.material_override = beam_mat
 			bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			var f = T.frame(wp[0])
-			bm.transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * wp[1] + f.uu * 2.5)
+			bm.transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * wp[1] + f.uu * 1.1)
 			n.add_child(bm)
 		laps.append(n)
 
@@ -816,7 +852,7 @@ func _fix_uv(st: SurfaceTool, key: String) -> void:
 func _build_city() -> void:
 	var box = BoxMesh.new()
 	box.size = Vector3(2, 2, 2)
-	box.material = _shader_mat("""
+	box.material = _shader_mat(_nz("""
 shader_type spatial;
 varying vec3 wp;varying vec3 wn;varying vec4 cd;
 void vertex(){wp=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;wn=normalize((MODEL_MATRIX*vec4(NORMAL,0.)).xyz);cd=INSTANCE_CUSTOM;}
@@ -828,7 +864,7 @@ void fragment(){
 	vec3 wc=hh>.93?vec3(.4,.85,1.):(hh>.86?vec3(1.,.4,.75):vec3(1.,.78,.5));
 	ALBEDO=vec3(.015,.017,.025);METALLIC=.7;ROUGHNESS=.18;
 	EMISSION=wc*win*step(.6,hh)*2.2+cd.rgb*smoothstep(cd.a-.8,cd.a-.3,wp.y)*step(wp.y,cd.a)*side*5.;
-}""")
+}""", [["vec3(.4,.85,1.):(hh>.86?vec3(1.,.4,.75):vec3(1.,.78,.5))", "vec3(1.,.36,.03):(hh>.86?vec3(.9):vec3(.7))"]]))
 	bld_mm = MultiMesh.new()
 	bld_mm.transform_format = MultiMesh.TRANSFORM_3D
 	bld_mm.use_custom_data = true
@@ -937,6 +973,15 @@ void fragment(){
 	return c
 
 
+func _shield_vis(o: Dictionary) -> void:
+	var nd: Node3D = o.node
+	var shn: Node3D = nd.get_meta("shield") if nd.has_meta("shield") else null
+	if o.shield > 0.0 and shn == null and not o.out:
+		shn = _shield_for(nd)
+	if shn != null:
+		shn.visible = o.shield > 0.0 and (o.shield > 1.2 or fmod(o.shield, 0.25) < 0.15)
+
+
 func _rel_xf(top: Node3D, n: Node) -> Transform3D:
 	var xf = Transform3D.IDENTITY
 	var c: Node = n
@@ -958,7 +1003,7 @@ func _spawn_ships() -> void:
 	for i in range(4):
 		var sm = int(cfg.ship) if i == 0 else others[(i - 1) % others.size()]
 		var s = {"z": starts[i][0], "lat": starts[i][1], "psi": 0.0, "vpsi": 0.0, "u": 0.0, "spd": 0.0, "boost": 0.0, "slow": 1.0,
-			"h": 0.0, "vy": 0.0, "air": false, "padK": -1, "hitT": -9.0, "sk": 0.95 + (i - 1) * 0.03 if i > 0 else 1.0, "sk0": 0.0,
+			"h": 0.0, "vy": 0.0, "air": false, "padK": -1, "hitT": -9.0, "sk": (1.0 + (i - 1) * 0.035) * float(cfg.ai) if i > 0 else 1.0, "sk0": 0.0, "lane": randf_range(-0.7, 0.7), "tl": 0.0, "wT": 0.0, "orbs": 0.0,
 			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0,
 			"en": 1.0, "out": false, "wpn": "", "wpK": -1, "shield": 0.0, "auto": 0.0, "turbo": 0.0, "slowT": 0.0, "enL": 0, "idx": i}
 		s.sk0 = s.sk
@@ -1175,14 +1220,14 @@ func _menu() -> void:
 	sp.anchor_right = 0.94
 	sp.anchor_top = 1.0
 	sp.anchor_bottom = 1.0
-	sp.offset_top = -1180
+	sp.offset_top = -1500
 	sp.offset_bottom = -70
 	sp.visible = false
 	root.add_child(sp)
 	ui.setp = sp
 	sp.add_child(_lbl("SETTINGS", 40))
 	ui.sl = {}
-	for it in [["speed", 0.5, 4.0], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0]]:
+	for it in [["speed", 0.5, 4.0], ["ai", 0.7, 1.4], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0]]:
 		var k: String = it[0]
 		var lb = _lbl("", 30)
 		sp.add_child(lb)
@@ -1215,6 +1260,22 @@ func _menu() -> void:
 		b.pressed.connect(func(): cfg.gfx = q; _refresh_ui(); _apply_cfg(); _save_cfg())
 		gr.add_child(b)
 		ui.gfx.append(b)
+	sp.add_child(_lbl("Look", 32))
+	var lr = HBoxContainer.new()
+	lr.add_theme_constant_override("separation", 12)
+	sp.add_child(lr)
+	ui.look = []
+	for q in range(2):
+		var b = _btn(["Color", "Noir"][q])
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.toggle_mode = true
+		b.pressed.connect(func():
+			if int(cfg.look) != q:
+				cfg.look = q
+				_save_cfg()
+				get_tree().reload_current_scene())
+		lr.add_child(b)
+		ui.look.append(b)
 	var back = _btn("Done", true)
 	back.pressed.connect(func(): sp.visible = false; box.visible = true)
 	sp.add_child(back)
@@ -1245,6 +1306,9 @@ func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
 	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
+	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
+	for q in range(2):
+		ui.look[q].button_pressed = int(cfg.look) == q
 	ui.sl.glow.text = "Glow  %d %%" % int(round(float(cfg.glow) * 100.0))
 	ui.sl.neon.text = "Neon lights  %d %%" % int(round(float(cfg.neon) * 100.0))
 	ui.sl.vol.text = "Volume  %d %%" % int(round(float(cfg.vol) * 100.0))
@@ -1254,6 +1318,11 @@ func _refresh_ui() -> void:
 		ui.gfx[q].add_theme_stylebox_override("normal", _style(Color(0.93, 0.41, 0.18) if on else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on else Color(1, 1, 1, 0.22)))
 		ui.gfx[q].add_theme_stylebox_override("pressed", ui.gfx[q].get_theme_stylebox("normal"))
 		ui.gfx[q].add_theme_stylebox_override("hover", ui.gfx[q].get_theme_stylebox("normal"))
+	for q in range(2):
+		var on2 = int(cfg.look) == q
+		var st2 = _style(Color(0.93, 0.41, 0.18) if on2 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on2 else Color(1, 1, 1, 0.22))
+		for k in ["normal", "pressed", "hover"]:
+			ui.look[q].add_theme_stylebox_override(k, st2)
 
 
 func _pick_ship(d: int) -> void:
@@ -1268,6 +1337,9 @@ func _pick_ship(d: int) -> void:
 
 
 func _start() -> void:
+	for i in range(1, ships.size()):
+		ships[i].sk = (1.0 + (i - 1) * 0.035) * float(cfg.ai)
+		ships[i].sk0 = ships[i].sk
 	state = "intro"
 	t_state = 0.0
 	ui.root.visible = false
@@ -1649,7 +1721,7 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 	# Sog: Gegner in der Nähe werden zur Mitte des Lochs gezogen und abgebremst (der Schütze nicht)
 	if t < 0.62 and e.own != -2:
 		for o in ships:
-			if o.out or o.idx == e.own or (o.idx == 0 and (o.shield > 0.0 or o.auto > 0.0)):
+			if o.out or o.idx == e.own or _prot(o):
 				continue
 			var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
 			var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
@@ -1756,8 +1828,12 @@ func _explode(z: float, lat: float, big := false) -> void:
 
 
 # Schaden: Schild schützt; leer = ausgeschieden; Meldung oben
+func _prot(o: Dictionary) -> bool:
+	return o.shield > 0.0 or o.orbs > 0.0 or (o.idx == 0 and o.auto > 0.0)
+
+
 func _dmg(o: Dictionary, a: float) -> void:
-	if o.out or state != "race" or (o.idx == 0 and (o.shield > 0.0 or o.auto > 0.0)):
+	if o.out or state != "race" or _prot(o):
 		return
 	o.en = maxf(0.0, o.en - a)
 	var nm = NAMES[o.idx]
@@ -1791,11 +1867,154 @@ func _add_shot(from: Dictionary, at_player := false, homing := false) -> void:
 	if homing:
 		var bd = 220.0
 		for o in ships:
-			if o.idx != 0 and not o.out and o.z - from.z > 0.0 and o.z - from.z < bd:
+			if o.idx != from.idx and not o.out and o.z - from.z > 0.0 and o.z - from.z < bd:
 				bd = o.z - from.z
 				tg = o
 	shots.append({"z": from.z + 1.0, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) if not at_player else 0.0, "n": mi, "own": from.idx})
-	_snd("rak", -2.0, 1.0, mi.position if at_player else null)
+	_snd("rak", -2.0, 1.0, (from.node as Node3D).global_position if from.idx != 0 else null)
+
+
+func _drop_mines(o: Dictionary) -> void:
+	for k in range(3):
+		var sp = SphereMesh.new()
+		sp.radius = 0.12
+		sp.height = 0.24
+		var mi = _glow_node(sp, Color(1, 0.15, 0.1), 6.0)
+		var z = o.z - 1.0 - k * 0.9
+		var lat = o.lat + (k - 1) * 0.35
+		mi.position = T.world(z, lat, 0.12)
+		mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi, "own": o.idx})
+	_snd("mine", -4.0, 1.0, (o.node as Node3D).global_position if o.idx != 0 else null)
+
+
+# Gegner sammeln an den Waffenfeldern auch etwas ein und setzen es klug ein
+func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
+	if not racing or o.out:
+		return
+	o.shield = maxf(0.0, o.shield - dt)
+	if o.turbo > 0.0:
+		o.turbo -= dt
+		o.boost = maxf(o.boost, 1.5)
+	var wk = int(floor((o.z - 17.0) / 35.0))
+	var wz = (o.z - 17.0) / 35.0 - wk
+	if posmod(wk, 2) == 0 and wz < 0.08 and wk != o.wpK and o.wpn == "":
+		o.wpK = wk
+		if randf() < 0.65:
+			var r = randf()
+			for w in WP_AI:
+				r -= w[1]
+				if r <= 0.0:
+					o.wpn = w[0]
+					break
+			o.wT = randf_range(0.6, 2.5)
+	if o.wpn == "":
+		return
+	o.wT -= dt
+	if o.wT > 0.0:
+		return
+	match o.wpn:
+		"schild":
+			o.shield = 6.0
+			o.wpn = ""
+		"turbo":
+			o.turbo = 2.2
+			o.boost = 2.0
+			o.wpn = ""
+		"mine":
+			for x in ships:
+				if x.idx != o.idx and not x.out and o.z - x.z > 2.0 and o.z - x.z < 14.0:
+					_drop_mines(o)
+					o.wpn = ""
+					break
+		_:
+			for x in ships:
+				if x.idx != o.idx and not x.out and x.z - o.z > 3.0 and x.z - o.z < 30.0:
+					_add_shot(o, false, o.wpn == "lenk")
+					o.wpn = ""
+					break
+
+
+# Orbs: zwei Kugeln kreisen um dich, schützen dich und rammen Gegner
+var orb_n = []
+
+
+func _orbs_update(dt: float, live: bool) -> void:
+	var g: Dictionary = ships[0]
+	if live:
+		g.orbs = maxf(0.0, g.orbs - dt)
+	var on = g.orbs > 0.0 and not g.out and (g.orbs > 1.2 or fmod(g.orbs, 0.25) < 0.15)
+	if orb_n.is_empty():
+		if not on:
+			return
+		_fx_res()
+		var gt = GradientTexture2D.new()
+		gt.fill = GradientTexture2D.FILL_RADIAL
+		gt.fill_from = Vector2(0.5, 0.5)
+		gt.fill_to = Vector2(1.0, 0.5)
+		var gr = Gradient.new()
+		gr.set_color(0, Color(1, 1, 1, 1))
+		gr.set_color(1, Color(1, 1, 1, 0))
+		gt.gradient = gr
+		gt.width = 32
+		gt.height = 32
+		for j in range(2):
+			var sp = SphereMesh.new()
+			sp.radius = 0.11
+			sp.height = 0.22
+			var c = Color(1.0, 0.5, 0.12) if _noir() else Color(0.35, 0.85, 1.0)
+			var mi = _glow_node(sp, Color(c.r * 4.0, c.g * 4.0, c.b * 4.0), 3.0)
+			var l = OmniLight3D.new()
+			l.light_color = c
+			l.omni_range = 3.0
+			l.light_energy = 1.5
+			mi.add_child(l)
+			# Schweif: kleiner werdende Kugeln auf der Bahn dahinter
+			var tr = []
+			for k in range(6):
+				var sp2 = SphereMesh.new()
+				sp2.radius = 0.09 * (1.0 - k * 0.14)
+				sp2.height = sp2.radius * 2.0
+				sp2.radial_segments = 12
+				sp2.rings = 6
+				var tn = _glow_node(sp2, Color(c.r * 1.5, c.g * 1.5, c.b * 1.5), 2.5, 0.45 * (1.0 - k * 0.15))
+				(tn.material_override as StandardMaterial3D).blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+				tr.append(tn)
+			mi.set_meta("tr", tr)
+			orb_n.append(mi)
+	var nd: Node3D = g.node
+	var tt = Time.get_ticks_msec() / 1000.0
+	var bb: AABB = nd.get_meta("bb")
+	var ctr: Vector3 = nd.global_transform * (bb.get_center() + Vector3(0, 0.05, 0))
+	var bx = nd.global_transform.basis
+	for j in range(orb_n.size()):
+		var mi: MeshInstance3D = orb_n[j]
+		mi.visible = on
+		var a = tt * 5.5 + j * PI
+		var opos = func(aa: float) -> Vector3:
+			return ctr + (bx.x.normalized() * cos(aa) * 1.0 + bx.z.normalized() * sin(aa) * 1.15) + bx.y.normalized() * (0.08 * sin(aa * 2.0))
+		mi.global_position = opos.call(a)
+		var tr: Array = mi.get_meta("tr")
+		for k in range(tr.size()):
+			tr[k].visible = on
+			tr[k].global_position = opos.call(a - (k + 1) * 0.075)
+		if not on or not live or state != "race":
+			continue
+		for o in ships:
+			if o.idx == 0 or o.out:
+				continue
+			var op: Vector3 = (o.node as Node3D).global_position + Vector3(0, 0.15, 0)
+			if mi.global_position.distance_to(op) < 0.75 and race_t - o.get("orbT", -9.0) > 0.8:
+				o.orbT = race_t
+				var away = signf(o.lat - g.lat) if o.lat != g.lat else 1.0
+				if not _prot(o):
+					o.slow = minf(o.slow, 0.55)
+					o.lat += away * 0.35
+					o.vpsi += away * 0.15
+				_dmg(o, 0.15)
+				_burst(mi.global_position, fxr.spark, 50, 0.6, 5.0, 11.0, 180.0, Vector3(0, -6, 0), 0.6, 0.6, 1.2,
+					_ramp([[0.0, Color(6, 6, 8, 1)], [1.0, Color(1, 0.5, 0.2, 0)]]), null, true, false, 0.1)
+				_snd("zap", 2.0, 1.4, op)
+				shake = maxf(shake, 0.4)
 
 
 func _fire() -> void:
@@ -1808,16 +2027,10 @@ func _fire() -> void:
 		"lenk":
 			_add_shot(g, false, true)
 		"mine":
-			for k in range(3):
-				var sp = SphereMesh.new()
-				sp.radius = 0.12
-				sp.height = 0.24
-				var mi = _glow_node(sp, Color(1, 0.15, 0.1), 6.0)
-				var z = g.z - 1.0 - k * 0.9
-				var lat = g.lat + (k - 1) * 0.35
-				mi.position = T.world(z, lat, 0.12)
-				mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi})
-			_snd("mine", -4.0)
+			_drop_mines(g)
+		"orbs":
+			g.orbs = 10.0
+			_snd("shield", 0.0, 1.3)
 		"schild":
 			g.shield = 6.0
 			_snd("shield")
@@ -1928,7 +2141,7 @@ func _weapons(dt: float, racing: bool) -> void:
 				sh.tg = null
 				var bd = 200.0
 				for o in ships:
-					if o.idx != 0 and not o.out and o.z - sh.z > -1.0 and o.z - sh.z < bd:
+					if o.idx != sh.own and not o.out and o.z - sh.z > -1.0 and o.z - sh.z < bd:
 						bd = o.z - sh.z
 						sh.tg = o
 			if sh.tg != null:
@@ -1937,14 +2150,14 @@ func _weapons(dt: float, racing: bool) -> void:
 			sh.lat += sh.dl * spd * dt
 		var hit = null
 		for o in ships:
-			if o.out or (sh.pl != (o.idx == 0)):
+			if o.out or o.idx == sh.own or (sh.pl and o.idx != 0):
 				continue
 			if absf(sh.z - o.z) < 0.8 + spd * dt * 1.5 and absf(sh.lat - o.lat) < (0.4 if sh.pl else 0.6):
 				hit = o
 				break
 		var dead = false
 		if hit != null:
-			if not (hit.idx == 0 and (hit.shield > 0.0 or hit.auto > 0.0)):
+			if not _prot(hit):
 				hit.slow = 0.35
 				hit.vpsi += randf_range(-0.25, 0.25)
 			_dmg(hit, 0.3 if sh.pl else 0.35)
@@ -1966,8 +2179,9 @@ func _weapons(dt: float, racing: bool) -> void:
 		(m.n as MeshInstance3D).visible = fmod(m.t, 0.5) < 0.35
 		var boom = false
 		for o in ships:
-			if o.idx != 0 and not o.out and absf(o.z - m.z) < 0.5 + o.spd * dt * 1.3 and absf(o.lat - m.lat) < 0.38:
-				o.slow = 0.35
+			if o.idx != m.get("own", 0) and not o.out and absf(o.z - m.z) < 0.5 + o.spd * dt * 1.3 and absf(o.lat - m.lat) < 0.38:
+				if not _prot(o):
+					o.slow = 0.35
 				_dmg(o, 0.2)
 				boom = true
 		if boom or m.t > 40.0:
@@ -2018,13 +2232,10 @@ func _weapons(dt: float, racing: bool) -> void:
 			quake = null
 			mats.road.set_shader_parameter("qs", 0.0)
 	_fx_update(dt)
-	# Schild: leuchtende Hülle in Schiffsform
-	var shn: Node3D = (g.node as Node3D).get_meta("shield") if (g.node as Node3D).has_meta("shield") else null
-	if g.shield > 0.0 and shn == null:
-		shn = _shield_for(g.node)
-	if shn != null:
-		var on = g.shield > 0.0 and (g.shield > 1.2 or fmod(g.shield, 0.25) < 0.15)
-		shn.visible = on
+	# Schild: blaue Hülle (für alle Schiffe)
+	for o in ships:
+		_shield_vis(o)
+	_orbs_update(dt, true)
 
 
 # ---------------------------------------------------------------- Energiewand: Wabengitter, Lauflicht, zuckende Blitze
@@ -2244,7 +2455,7 @@ func _record(dt: float) -> void:
 	rec_acc = 0.0
 	var sh = []
 	for o in ships:
-		sh.append([o.z, o.lat, o.h, o.psi, o.roll, o.boost, o.spd, 0 if o.out else 1])
+		sh.append([o.z, o.lat, o.h, o.psi, o.roll, o.boost, o.spd, 0 if o.out else 1, o.shield])
 	var w = []
 	for x in shots:
 		w.append([x.z, x.lat])
@@ -2255,7 +2466,7 @@ func _record(dt: float) -> void:
 	for x in walls:
 		wl.append([x.z, x.age, x.hf])
 	rec.append({"t": rec_clk, "s": sh, "w": w, "m": m, "wl": wl, "q": [quake.z, quake.get("qs", 0.0)] if quake != null else null,
-		"sh": ships[0].shield, "ev": rec_ev, "pl": hud.top.text})
+		"sh": ships[0].shield, "ob": ships[0].orbs, "ev": rec_ev, "pl": hud.top.text})
 	rec_ev = []
 
 
@@ -2348,9 +2559,12 @@ func _replay(dt: float) -> void:
 		o.boost = lerpf(a[5], b[5], u)
 		o.spd = lerpf(a[6], b[6], u)
 		(o.node as Node3D).visible = a[7] == 1 and not (k == 0 and RP_CAMS[rp.ci][0] == "cock")
+		o.shield = a[8]
+		_shield_vis(o)
 	var g: Dictionary = ships[0]
-	g.shield = f0.sh
+	g.orbs = f0.ob
 	g.auto = 0.0
+	_orbs_update(dt, false)
 	var ps = _pool("shots", f0.w.size(), func():
 		var cap = CapsuleMesh.new()
 		cap.radius = 0.06
@@ -2384,11 +2598,6 @@ func _replay(dt: float) -> void:
 		_rp_next()
 	hud.top.text = "REPLAY · %s     %s" % [RP_CAMS[rp.ci][1], _fmt(minf(rp.t, F[F.size() - 1].t))]
 	_fx_update(dt)
-	var sh_n: Node3D = (g.node as Node3D).get_meta("shield") if (g.node as Node3D).has_meta("shield") else null
-	if g.shield > 0.0 and sh_n == null:
-		sh_n = _shield_for(g.node)
-	if sh_n != null:
-		sh_n.visible = g.shield > 0.0 and (g.shield > 1.2 or fmod(g.shield, 0.25) < 0.15)
 
 
 func _rp_next() -> void:
@@ -2502,17 +2711,18 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 			_snd("boost", -3.0)
 
 
-func _ai_inp(o: Dictionary, t: float) -> float:
+# Gegner fahren ruhig: eigene Spur, sanft zur Kurvenaußenseite (Boost-Felder), Regler auf Wunsch-Querbewegung statt Pendeln
+func _ai_inp(o: Dictionary, t: float, dt: float) -> float:
 	var zz: float = o.z
-	var d2 = T.d2px(zz + 10.0)
-	var tl = signf(d2) * minf(0.55, absf(d2) * 55.0) * T.TW / 1.6
-	var pk = int(floor((zz + 5.0) / 35.0))
-	if (zz + 5.0) / 35.0 - pk < 0.12:
-		tl = T.bpx(pk)
-	tl += 0.1 * sin(t / 1.1 + o.ai)
-	var turn_n: float = T.kap(zz) * o.spd
-	var want = clampf((tl - o.lat) * 0.5, -0.3, 0.3)
-	return clampf((want - o.vpsi) * 1.5 + (want - o.psi) * 0.5 - turn_n / YAW_AI, -1.0, 1.0)
+	var spd = maxf(1.0, o.spd)
+	var d2 = T.d2px(zz + 14.0)
+	var tg = o.lane + signf(d2) * minf(0.5, absf(d2) * 45.0)
+	o.tl += (tg - o.tl) * (1.0 - exp(-dt / 1.2))
+	var turn: float = T.kap(zz) * spd
+	var vd = clampf((o.tl - o.lat) / 0.9, -3.0, 3.0)
+	var vdes = asin(clampf(vd / spd, -0.3, 0.3))
+	var pdes = vdes - turn / 7.0 + (vdes - o.vpsi) * 0.5
+	return clampf((6.0 * (pdes - o.psi) - turn) / YAW_AI, -1.0, 1.0)
 
 
 func _notification(what: int) -> void:
@@ -2607,7 +2817,8 @@ func _process(delta: float) -> void:
 		var o: Dictionary = ships[i]
 		if o.out:
 			continue
-		var inp = _ai_inp(o, tt)
+		var inp = _ai_inp(o, tt, dt)
+		_ai_weapons(o, dt, racing)
 		for k in range(n):
 			_phys(o, inp, false, hdt, racing)
 		# Gummiband: wer hinten liegt, holt auf; wer weit vorn ist, lässt etwas nach
@@ -2633,9 +2844,6 @@ func _process(delta: float) -> void:
 		var fin = T.ZST + T.LAPS * T.LAP
 		if o.z >= fin and o.fin == 0.0 and racing:
 			o.fin = race_t
-		# Gegner schießen ab und zu von hinten auf dich
-		if racing and dz < 0.0 and dz > -25.0 and randf() < dt * 0.02:
-			_add_shot(o, true)
 	# Ziel
 	var finish = T.ZST + T.LAPS * T.LAP
 	var place = 1
@@ -2699,7 +2907,7 @@ func _shot() -> void:
 				_replay_start()
 				for k in range(int(p[3].substr(3))):
 					_rp_next()
-			if shot_n == ({"rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"long": 1500, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				get_tree().quit()
 
