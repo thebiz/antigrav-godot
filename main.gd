@@ -2129,8 +2129,6 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "") -> void:
 		(o.node as Node3D).visible = false
 		if (o.node as Node3D).has_meta("eng"):
 			((o.node as Node3D).get_meta("eng") as AudioStreamPlayer3D).stop()
-		if o.idx != 0 and src == 0 and state == "race" and kc_pending.is_empty() and kc.is_empty():
-			kc_pending = {"idx": o.idx, "t0": rec_clk, "kind": kind}
 		_big("ELIMINATED" if o.idx == 0 else "CONTENDER\nELIMINATED", Color(1, 0.3, 0.25) if o.idx == 0 else Color(1, 0.82, 0.25))
 		if o.idx != 0:
 			_msg(nm.to_upper(), Color(1, 0.85, 0.5))
