@@ -209,9 +209,17 @@ uniform float gr=-1.;
 uniform float gk=0.;
 uniform float gl=0.;
 uniform float asp=.46;
+uniform vec4 hz0=vec4(0.);uniform vec4 hz1=vec4(0.);uniform vec4 hz2=vec4(0.);uniform vec4 hz3=vec4(0.);
+vec2 haze(vec2 uv,vec4 h){
+	if(h.w<=0.)return vec2(0.);
+	vec2 q=uv-h.xy;q.x*=asp;q.y-=h.z*.35;   // Fahne zieht nach unten (zur Kamera hin)
+	float m=smoothstep(1.,0.,length(q*vec2(1.,.75))/h.z)*h.w;
+	return vec2(sin(uv.y*170.-TIME*34.+sin(uv.x*95.+TIME*7.)*2.),cos(uv.x*140.+TIME*27.+uv.y*60.))*.003*m;
+}
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 void fragment(){
 	vec2 uv=SCREEN_UV;
+	uv+=haze(uv,hz0)+haze(uv,hz1)+haze(uv,hz2)+haze(uv,hz3);
 	// Gravitationsbombe: Bild wird zur Mitte gesogen, danach läuft eine Welle nach außen
 	vec2 dd=uv-gc;dd.x*=asp;float r=length(dd)+1e-4;vec2 dir=dd/r;dir.x/=asp;
 	float pull=gs*.05/(r*r*30.+.12)*smoothstep(0.,.03,r);
@@ -258,6 +266,21 @@ func _post_update(dt: float) -> void:
 	post.set_shader_parameter("spd", post_spd * (1.0 if q >= 1 else 0.0))
 	gl_v = maxf(0.0, gl_v - dt * 1.4)
 	post.set_shader_parameter("gl", gl_v)
+	# Hitzeflimmern: Bildschirmposition hinter jedem Triebwerk
+	for i in range(4):
+		var hv = Vector4(0, 0, 0, 0)
+		if i < ships.size() and state != "menu":
+			var s: Dictionary = ships[i]
+			var nd: Node3D = s.node
+			if not s.out and nd.visible:
+				var p0: Vector3 = nd.global_transform * Vector3(0, 0.18, -0.95)
+				var dc = (p0 - cam.global_position).length()
+				if dc < 45.0 and not cam.is_position_behind(p0):
+					var a = cam.unproject_position(p0) / vp
+					var b = cam.unproject_position(p0 + cam.global_transform.basis.x * 0.35) / vp
+					var rad = clampf((b - a).length() / asp_v(vp), 0.004, 0.25)
+					hv = Vector4(a.x, a.y, rad, (0.55 + 0.9 * minf(1.0, s.boost)) * clampf(1.0 - dc / 45.0, 0.0, 1.0) * (1.0 if q >= 1 else 0.6))
+		post.set_shader_parameter("hz%d" % i, hv)
 	# stärkste aktive Gravitationsbombe
 	var best = null
 	var bk = 0.0
@@ -285,6 +308,10 @@ func _post_update(dt: float) -> void:
 
 
 var post_spd = 0.0
+
+
+func asp_v(vp: Vector2) -> float:
+	return vp.y / maxf(1.0, vp.x)
 var gl_v = 0.0
 
 
@@ -673,13 +700,13 @@ void fragment(){
 }""")
 	mats["wall"] = _metal(Color(0.07, 0.075, 0.09), 0.22)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
-	mats["tube"] = _metal(Color(0.035, 0.03, 0.05), 0.35, 0.6)
+	mats["tube"] = _metal(Color(0.012, 0.012, 0.016), 0.28, 0.9)
 	mats["neonL"] = _neon(CY, 5.0)
 	mats["neonR"] = _neon(MG, 5.0)
 	mats["ringC"] = _neon(CY, 7.0)
 	mats["ringM"] = _neon(MG, 7.0)
 	mats["line"] = _neon(Color(0.8, 0.85, 1.0), 0.6)
-	mats["tlight"] = _neon(Color(0.9, 0.95, 1.0), 3.0)
+	mats["tlight"] = _neon(Color(0.9, 0.95, 1.0), 4.0)
 	mats["board0"] = _neon(Color(0.1, 0.4, 1.0), 2.2)
 	mats["board1"] = _neon(Color(1.0, 0.2, 0.5), 2.2)
 	mats["board2"] = _neon(Color(1.0, 0.7, 0.1), 2.2)
@@ -864,6 +891,7 @@ func _ship_node(idx: int) -> Node3D:
 	var s = 1.5 / maxf(0.01, bb.size.z)
 	m.scale = Vector3(s, s, s)
 	m.position = -Vector3(bb.get_center().x, bb.position.y, bb.get_center().z) * s
+	root.set_meta("bb", AABB(Vector3(-bb.size.x * 0.5, 0.0, -bb.size.z * 0.5) * s, bb.size * s))
 	var lt = OmniLight3D.new()
 	lt.light_color = Color(0.6, 0.4, 1.0)
 	lt.light_energy = 1.4
@@ -877,47 +905,35 @@ func _ship_node(idx: int) -> Node3D:
 
 
 var shield_mat: ShaderMaterial
+const GB_R = 9.0
 
 
 func _shield_for(root: Node3D) -> Node3D:
 	if shield_mat == null:
 		shield_mat = _shader_mat("""
 shader_type spatial;
-render_mode unshaded,blend_add,cull_back,depth_draw_never,shadows_disabled;
+// Schutzschild: durchsichtige blaue Hülle, Ränder leuchten, ruhiges Schimmern
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
 void fragment(){
-	float fr=pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),2.2);
-	float fl=.75+.25*sin(TIME*28.+VERTEX.y*30.+VERTEX.x*20.);
-	ALBEDO=vec3(.3,.8,1.)*(fr*2.6+.06)*fl;
+	float fr=pow(1.-abs(dot(NORMAL,VIEW)),2.6);
+	float sh=.85+.15*sin(TIME*3.+VERTEX.y*6.);
+	float scan=smoothstep(.96,1.,fract(UV.y*1.-TIME*.4))*.35;
+	ALBEDO=vec3(.12,.45,1.)*(.012+fr*1.1*sh+scan*.15);
 }""")
-	var piv: Node3D = root.get_child(0)
-	var m: Node3D = piv.get_child(0)
-	var c: Node3D = m.duplicate()
-	for n in c.find_children("*", "", true, false):
-		if str(n.name).contains("Boost") or str(n.name).contains("Glow"):
-			n.queue_free()
-	for mi in c.find_children("*", "MeshInstance3D", true, false):
-		(mi as MeshInstance3D).material_override = shield_mat
-		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	c.scale = m.scale * 1.08
-	c.position = m.position * 1.08 - Vector3(0, 0.03, 0)
-	piv.add_child(c)
+	var bb: AABB = root.get_meta("bb")
+	var sp = SphereMesh.new()
+	sp.radius = 1.0
+	sp.height = 2.0
+	sp.radial_segments = 48
+	sp.rings = 24
+	var c = MeshInstance3D.new()
+	c.mesh = sp
+	c.material_override = shield_mat
+	c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	c.scale = bb.size * 0.5 * Vector3(1.22, 1.6, 1.12) + Vector3.ONE * 0.12
+	c.position = bb.get_center()
+	root.add_child(c)
 	root.set_meta("shield", c)
-	# Phasen-Geister: zwei verschobene Kopien in Magenta und Cyan
-	var gh = []
-	for col in [Color(1.0, 0.2, 0.7), Color(0.2, 0.9, 1.0)]:
-		var gm = _shader_mat("""
-shader_type spatial;
-render_mode unshaded,blend_add,cull_back,depth_draw_never,shadows_disabled;
-uniform vec3 col;
-void fragment(){float fr=pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),1.6);ALBEDO=col*(fr*1.6+.12)*(.6+.4*sin(TIME*45.+VERTEX.z*25.));}""")
-		gm.set_shader_parameter("col", Vector3(col.r, col.g, col.b))
-		var gc2: Node3D = c.duplicate()
-		for mi in gc2.find_children("*", "MeshInstance3D", true, false):
-			(mi as MeshInstance3D).material_override = gm
-		piv.add_child(gc2)
-		gh.append(gc2)
-	root.set_meta("ghosts", gh)
-	root.set_meta("base_pos", c.position)
 	return c
 
 
@@ -970,6 +986,13 @@ func _hud() -> void:
 	hud.mid.anchor_top = 0.3
 	hud.mid.anchor_bottom = 0.3
 	hud.msg = mk.call(32, HORIZONTAL_ALIGNMENT_CENTER)
+	hud.big = mk.call(72, HORIZONTAL_ALIGNMENT_CENTER)
+	hud.big.anchor_right = 1.0
+	hud.big.anchor_top = 0.34
+	hud.big.anchor_bottom = 0.34
+	hud.big.add_theme_color_override("font_outline_color", Color(0.25, 0.05, 0.0, 0.9))
+	hud.big.add_theme_constant_override("outline_size", 10)
+	hud.big.pivot_offset = Vector2(360, 80)
 	hud.msg.anchor_right = 1.0
 	hud.msg.offset_top = 190
 	hud.en_bg = ColorRect.new()
@@ -1291,6 +1314,13 @@ func _msg(t: String, c: Color) -> void:
 
 
 var msg_t = 0.0
+var big_t = 0.0
+
+
+func _big(t: String, c: Color) -> void:
+	hud.big.text = t
+	hud.big.modulate = c
+	big_t = 2.4
 
 
 var fxr = {}
@@ -1370,7 +1400,30 @@ void fragment(){
 	fxr.fire = q
 	var q2 = QuadMesh.new()
 	q2.size = Vector2(1, 1)
-	q2.material = mk.call(false)
+	var smm = _shader_mat("""
+shader_type spatial;
+// Rauch: echte Beleuchtung (Explosionslicht färbt ihn orange), wabernde Ränder
+render_mode blend_mix,cull_disabled,depth_draw_never,shadows_disabled,specular_disabled;
+uniform sampler2D nz:repeat_enable;
+varying float seed;
+void vertex(){
+	float s=length(MODEL_MATRIX[0].xyz);
+	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(INV_VIEW_MATRIX[0]*s,INV_VIEW_MATRIX[1]*s,INV_VIEW_MATRIX[2]*s,MODEL_MATRIX[3]);
+	MODELVIEW_NORMAL_MATRIX=mat3(MODELVIEW_MATRIX);
+	seed=fract(MODEL_MATRIX[3].x*2.31+MODEL_MATRIX[3].y*1.17+MODEL_MATRIX[3].z*3.7);
+}
+void fragment(){
+	vec2 q=UV-.5;float d=length(q)*2.;
+	float n=texture(nz,UV*.55+vec2(seed,seed*1.7)+vec2(TIME*.015,TIME*.03)).r;
+	float n2=texture(nz,UV*1.3-vec2(seed*.5,TIME*.045)).r;
+	float m=smoothstep(1.,.15,d+(n-.5)*1.2+(n2-.5)*.5);
+	ALBEDO=COLOR.rgb*(.55+.9*n*n2);
+	ROUGHNESS=1.;
+	BACKLIGHT=vec3(.2);
+	ALPHA=clamp(m*COLOR.a,0.,1.);
+}""")
+	smm.set_shader_parameter("nz", ft)
+	q2.material = smm
 	fxr.smoke = q2
 	var sp = CapsuleMesh.new()
 	sp.radius = 0.018
@@ -1471,7 +1524,7 @@ func _fire_ball(pos: Vector3, k: float) -> void:
 
 
 # Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
-func _gbomb(z: float, lat: float) -> void:
+func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	_fx_res()
 	var f = T.frame(z)
 	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.6
@@ -1530,7 +1583,7 @@ func _gbomb(z: float, lat: float) -> void:
 	lt.light_energy = 0.0
 	lt.position = pos
 	add_child(lt)
-	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": 0.0, "f": f, "lat": lat, "snap": false})
+	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": 0.0, "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit})
 	_snd("gbomb", 3.0, 1.0, pos)
 
 
@@ -1549,6 +1602,17 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 	var t: float = e.t
 	var cr: MeshInstance3D = e.core
 	var rg: MeshInstance3D = e.ring
+	# Sog: Gegner in der Nähe werden zur Mitte des Lochs gezogen und abgebremst (der Schütze nicht)
+	if t < 0.62:
+		for o in ships:
+			if o.out or o.idx == e.own or (o.idx == 0 and (o.shield > 0.0 or o.auto > 0.0)):
+				continue
+			var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
+			var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
+			if kk > 0.0:
+				o.lat += (e.lat - o.lat) * minf(1.0, dt * 5.0 * kk)
+				o.slow = minf(o.slow, 1.0 - 0.75 * kk)
+				o.vpsi *= 1.0 - minf(1.0, dt * 6.0 * kk)
 	if t < 0.55:
 		var u = t / 0.55
 		cr.scale = Vector3.ONE * (0.1 + 0.9 * pow(u, 1.5))
@@ -1556,6 +1620,15 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		e.l.light_energy = 6.0 * u
 	elif not e.snap:
 		e.snap = true
+		# Schaden je nach Nähe – wer schon direkt getroffen wurde, bekommt nur den Rest
+		for o in ships:
+			if o.out or o.idx == e.own:
+				continue
+			var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
+			var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
+			if kk > 0.0:
+				_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0))
+				o.slow = minf(o.slow, 0.4)
 		cr.visible = false
 		rg.visible = false
 		_fx_res()
@@ -1607,9 +1680,11 @@ func _explode(z: float, lat: float, big := false) -> void:
 	# Feuerball: grell weiß-gelb → orange → dunkelrot
 	_fire_ball(pos, k)
 	# Rauch: steigt langsam auf, wird größer
-	_burst(pos + f.uu * 0.6, fxr.smoke, int(26 * k), 3.0, 0.6, 2.2 * k, 70.0, Vector3(0, 0.9, 0), 1.2, 1.2 * k, 2.2 * k,
-		_ramp([[0.0, Color(0.1, 0.08, 0.08, 0)], [0.12, Color(0.12, 0.1, 0.1, 0.65)], [1.0, Color(0.05, 0.05, 0.06, 0)]], false),
-		_curve([[0.0, 0.5], [1.0, 3.0]]), false, false, 0.4 * k)
+	var smr = _ramp([[0.0, Color(0.16, 0.14, 0.13, 0)], [0.04, Color(0.14, 0.12, 0.11, 0.9)], [0.35, Color(0.1, 0.1, 0.11, 0.7)], [1.0, Color(0.08, 0.08, 0.09, 0)]], false)
+	var smc = _curve([[0.0, 0.35], [0.25, 1.0], [1.0, 1.7]])
+	_burst(pos + f.uu * 0.5, fxr.smoke, int(30 * k), 8.0, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
+	# zweite, dichtere Wolke dicht über der Fahrbahn, hängt noch länger
+	get_tree().create_timer(0.25).timeout.connect(func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(18 * k), 10.0, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
 	# Funkenregen
 	_burst(pos, fxr.spark, int(110 * k), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
 		_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.2)
@@ -1625,12 +1700,14 @@ func _explode(z: float, lat: float, big := false) -> void:
 	add_child(ring)
 	# Lichtblitz
 	var lt = OmniLight3D.new()
-	lt.light_color = Color(1.0, 0.65, 0.3)
-	lt.omni_range = 14.0 * k
-	lt.light_energy = 28.0
-	lt.position = pos + f.uu * 0.6
+	lt.light_color = Color(1.0, 0.92, 0.8)
+	lt.omni_range = 16.0 * k
+	lt.omni_attenuation = 0.7
+	lt.light_energy = 38.0
+	lt.shadow_enabled = int(cfg.gfx) >= 2
+	lt.position = pos + f.uu * 0.9
 	add_child(lt)
-	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": 0.0, "big": big, "f": f, "lat": lat})
+	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": 0.0, "big": big, "f": f, "lat": lat, "rg": 16.0 * k})
 	_snd("boom", 4.0 if big else 2.0, randf_range(0.85, 1.0), pos)
 	_snd("boom", 2.0, 0.55, pos)   # tiefer Wumms darunter
 	# Kamera rüttelt, je näher, desto stärker
@@ -1642,7 +1719,7 @@ func _explode(z: float, lat: float, big := false) -> void:
 
 # Schaden: Schild schützt; leer = ausgeschieden; Meldung oben
 func _dmg(o: Dictionary, a: float) -> void:
-	if o.out or state != "race" or (o.idx == 0 and o.shield > 0.0):
+	if o.out or state != "race" or (o.idx == 0 and (o.shield > 0.0 or o.auto > 0.0)):
 		return
 	o.en = maxf(0.0, o.en - a)
 	var nm = NAMES[o.idx]
@@ -1652,7 +1729,10 @@ func _dmg(o: Dictionary, a: float) -> void:
 		(o.node as Node3D).visible = false
 		if (o.node as Node3D).has_meta("eng"):
 			((o.node as Node3D).get_meta("eng") as AudioStreamPlayer3D).stop()
-		_msg("ELIMINATED" if o.idx == 0 else nm.to_upper() + " ELIMINATED", Color(1, 0.35, 0.3) if o.idx == 0 else Color(1, 0.85, 0.3))
+		_big("ELIMINATED" if o.idx == 0 else "CONTENDER\nELIMINATED", Color(1, 0.3, 0.25) if o.idx == 0 else Color(1, 0.82, 0.25))
+		if o.idx != 0:
+			_msg(nm.to_upper(), Color(1, 0.85, 0.5))
+			_snd("boom", 4.0, 0.42)
 	elif o.idx == 0:
 		_msg("−%d %% ENERGY" % int(round(a * 100.0)), Color(1, 0.48, 0.35))
 	else:
@@ -1676,7 +1756,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false) -> void:
 			if o.idx != 0 and not o.out and o.z - from.z > 0.0 and o.z - from.z < bd:
 				bd = o.z - from.z
 				tg = o
-	shots.append({"z": from.z + 1.0, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) if not at_player else 0.0, "n": mi})
+	shots.append({"z": from.z + 1.0, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) if not at_player else 0.0, "n": mi, "own": from.idx})
 	_snd("rak", -2.0, 1.0, mi.position if at_player else null)
 
 
@@ -1702,9 +1782,7 @@ func _fire() -> void:
 			_snd("mine", -4.0)
 		"schild":
 			g.shield = 6.0
-			_snd("phase", 2.0)
-			_snd("shield", -6.0)
-			gl_v = 1.0
+			_snd("shield")
 		"turbo":
 			g.turbo = 2.2
 			g.boost = 2.0
@@ -1771,6 +1849,15 @@ func _weapons(dt: float, racing: bool) -> void:
 	msg_t -= dt
 	if msg_t <= 0.0:
 		hud.msg.text = ""
+	big_t -= dt
+	if big_t <= 0.0:
+		hud.big.text = ""
+	else:
+		var bu = 2.4 - big_t
+		hud.big.size.x = get_viewport().get_visible_rect().size.x
+		hud.big.pivot_offset = Vector2(hud.big.size.x * 0.5, hud.big.size.y * 0.5)
+		hud.big.scale = Vector2.ONE * (1.0 + 0.6 * exp(-bu * 9.0))
+		hud.big.modulate.a = clampf(minf(bu / 0.08, big_t / 0.4), 0.0, 1.0)
 	# Waffenfeld: jedes zweite Feld (alle 70 Einheiten)
 	var zz = g.z
 	var wk = int(floor((zz - 17.0) / 35.0))
@@ -1831,14 +1918,14 @@ func _weapons(dt: float, racing: bool) -> void:
 				break
 		var dead = false
 		if hit != null:
-			if not (hit.idx == 0 and hit.shield > 0.0):
+			if not (hit.idx == 0 and (hit.shield > 0.0 or hit.auto > 0.0)):
 				hit.slow = 0.35
 				hit.vpsi += randf_range(-0.25, 0.25)
 			_dmg(hit, 0.3 if sh.pl else 0.35)
-			_gbomb(sh.z, sh.lat)
+			_gbomb(sh.z, sh.lat, sh.own, hit.idx)
 			dead = true
 		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0:
-			_gbomb(sh.z, clampf(sh.lat, -T.TW, T.TW))
+			_gbomb(sh.z, clampf(sh.lat, -T.TW, T.TW), sh.own)
 			dead = true
 		if dead:
 			sh.n.queue_free()
@@ -1912,12 +1999,22 @@ func _weapons(dt: float, racing: bool) -> void:
 		var u = clampf(e.t / (0.7 if e.big else 0.5), 0.0, 1.0)
 		var sc = (0.6 + (8.0 if e.big else 5.5) * pow(u, 0.5))
 		var f = e.f
-		e.ring.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
-		e.rm.set_shader_parameter("u", u)
-		e.l.light_energy = 28.0 * pow(1.0 - u, 2.0)
-		if u >= 1.0:
-			e.ring.queue_free()
-			e.l.queue_free()
+		if e.ring != null:
+			e.ring.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
+			e.rm.set_shader_parameter("u", u)
+			if u >= 1.0:
+				e.ring.queue_free()
+				e.ring = null
+		# Licht: greller Blitz, dann langes oranges Nachglühen
+		var lt2: OmniLight3D = e.l
+		var tl = e.t
+		lt2.light_energy = 38.0 * exp(-tl * 7.0) + 7.0 * pow(clampf(1.0 - tl / 2.2, 0.0, 1.0), 1.6) * (1.0 + 0.15 * sin(tl * 37.0))
+		lt2.light_color = Color(1.0, 0.92, 0.8).lerp(Color(1.0, 0.4, 0.08), clampf(tl * 2.2, 0.0, 1.0))
+		lt2.omni_range = e.rg * (0.7 + 0.5 * exp(-tl * 3.0))
+		if tl > 0.3:
+			lt2.shadow_enabled = false
+		if tl >= 2.2:
+			lt2.queue_free()
 			fxs.remove_at(i)
 	# Schild: leuchtende Hülle in Schiffsform
 	var shn: Node3D = (g.node as Node3D).get_meta("shield") if (g.node as Node3D).has_meta("shield") else null
@@ -1926,18 +2023,6 @@ func _weapons(dt: float, racing: bool) -> void:
 	if shn != null:
 		var on = g.shield > 0.0 and (g.shield > 1.2 or fmod(g.shield, 0.25) < 0.15)
 		shn.visible = on
-		var tt = Time.get_ticks_msec() / 1000.0
-		var bp: Vector3 = (g.node as Node3D).get_meta("base_pos")
-		var gh: Array = (g.node as Node3D).get_meta("ghosts")
-		for j in range(gh.size()):
-			var sg = 1.0 if j == 0 else -1.0
-			gh[j].visible = on
-			gh[j].position = bp + Vector3(sg * (0.06 + 0.05 * sin(tt * 37.0 + j)), 0.02 * sin(tt * 53.0), sg * 0.04 * sin(tt * 29.0))
-		# das Schiff selbst zittert leicht, ab und zu ein Glitch
-		var piv: Node3D = (g.node as Node3D).get_child(0)
-		piv.position = Vector3(randf_range(-0.02, 0.02), randf_range(-0.01, 0.01), 0.0) if on else Vector3.ZERO
-		if on and randf() < dt * 1.5:
-			gl_v = maxf(gl_v, 0.5)
 
 
 # ---------------------------------------------------------------- Fahrphysik (wie HTML-Version: Nase lenken, Flugrichtung folgt mit begrenzter Haftung)
@@ -1948,6 +2033,15 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	s.psi = clampf(s.psi + (s.u * (YAW_P if is_p else YAW_AI) + turn) * dt, -0.9, 0.9)
 	var grip = 0.8 if s.air else (9.5 if is_p else 7.0)
 	s.vpsi = clampf(s.vpsi + ((s.psi - s.vpsi) * grip + turn) * dt, -0.9, 0.9)
+	var ap = is_p and s.auto > 0.0 and not s.out
+	if ap:
+		# Autopilot wie im alten Spiel: ruhig auf die Mittellinie gleiten, dann schnurgerade, nichts bremst ihn
+		s.u = 0.0
+		var dl = (0.0 - s.lat) * (1.0 - exp(-dt / 1.4))
+		s.vpsi = atan2(dl / maxf(dt, 1e-4), maxf(1.0, s.spd))
+		s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.15))
+		s.slow = 1.0
+		s.slowT = 0.0
 	s.slow += (1.0 - s.slow) * (1.0 - exp(-dt / 1.4))
 	s.boost *= exp(-dt / 1.4)
 	if s.out:
@@ -1974,7 +2068,8 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 			s.h = 0.0
 			s.air = false
 			s.vy = 0.0
-			s.slow = minf(s.slow, 0.9)
+			if not ap:
+				s.slow = minf(s.slow, 0.9)
 	# Leitplanke: weich parallel ausrichten, etwas bremsen
 	var ml = T.TW - 0.3
 	if absf(s.lat) > ml and not s.air:
@@ -2074,7 +2169,7 @@ func _process(delta: float) -> void:
 	var hdt = dt / n
 	var tt = Time.get_ticks_msec() / 1000.0
 	if g.auto > 0.0:
-		steer = _ai_inp(g, tt)
+		steer = 0.0
 		g.auto -= dt
 	if g.turbo > 0.0:
 		g.turbo -= dt
@@ -2105,7 +2200,7 @@ func _process(delta: float) -> void:
 			_snd("pass", -2.0, 1.0, (o.node as Node3D).global_position)
 		o.pdz = dz
 		# Rempeln
-		if absf(dz) < 1.4 and absf(o.lat - g.lat) < 0.4 and racing and not g.air and not o.air:
+		if absf(dz) < 1.4 and absf(o.lat - g.lat) < 0.4 and racing and not g.air and not o.air and g.auto <= 0.0:
 			var pu = signf(g.lat - o.lat) if g.lat != o.lat else 1.0
 			g.lat += pu * 0.6 * dt * 6.0
 			o.lat -= pu * 0.6 * dt * 6.0
@@ -2138,6 +2233,7 @@ func _process(delta: float) -> void:
 	var l0 = int(floor((g.z - 20.0) / T.LAP))
 	for i in range(3):
 		laps[i].position = Vector3(0, 0, (l0 - 1 + i) * T.LAP)
+	_tunnel(dt)
 	_pose_all(dt)
 	_camera(dt)
 	_sound_update(dt)
@@ -2160,7 +2256,7 @@ func _shot() -> void:
 				for i in range(1, 4):
 					ships[i].z = float(p[1]) + 2.0 + i * 2.5
 			if shot_n == 40 and p.size() > 3:
-				if p[3] == "boom":
+				if p[3].begins_with("boom"):
 					_explode(ships[0].z + 6.0, 0.0, true)
 				elif p[3].begins_with("gb"):
 					_gbomb(ships[0].z + 9.0, 0.0)
@@ -2168,7 +2264,7 @@ func _shot() -> void:
 				else:
 					ships[0].wpn = p[3]
 					fire_req = true
-			if shot_n == ({"boom": 42, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				get_tree().quit()
 
@@ -2178,6 +2274,52 @@ func _fmt(t: float) -> String:
 
 
 # Lage der Gleiter: Bahnpunkt + seitlich + Schweben, Nase um psi gedreht, in Kurven leicht geneigt
+var tun_k = 0.0
+var tun_l = []
+
+
+# Im Tunnel: Umgebungslicht, Himmel und Nebel weg; Lichter wandern mit den Magenta-Ringen vorbei
+func _tunnel(dt: float) -> void:
+	var g: Dictionary = ships[0]
+	var zl = T.lz(g.z)
+	var k = 0.0
+	for tu in T.TUN:
+		k = maxf(k, clampf(minf(zl - tu[0] + 2.0, tu[1] - zl + 2.0) / 7.0, 0.0, 1.0))
+	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
+	wenv.ambient_light_energy = lerpf(0.35, 0.02, tun_k)
+	wenv.fog_density = lerpf(0.012, 0.0, tun_k)
+	wenv.background_energy_multiplier = lerpf(1.0, 0.05, tun_k)
+	moon.light_energy = lerpf(0.45, 0.0, tun_k)
+	if tun_l.is_empty():
+		for i in range(4):
+			var l = OmniLight3D.new()
+			l.omni_range = 6.0
+			l.omni_attenuation = 1.4
+			l.light_energy = 0.0
+			add_child(l)
+			tun_l.append(l)
+	var base = g.z - zl
+	var j = 0
+	for tu in T.TUN:
+		var ti0 = 4
+		while j < tun_l.size():
+			var zr = tu[0] + 1.0 + ti0 * 1.43
+			if zr > tu[1]:
+				break
+			var d = zr - zl
+			if d > -4.0 and d < 24.0:
+				var l: OmniLight3D = tun_l[j]
+				var wv = sin(PI * (d + 4.0) / 28.0)
+				l.light_energy = 5.0 * wv * wv * tun_k
+				l.light_color = MG if (int(ti0 / 5) % 2 == 0) else CY
+				l.global_position = T.world(base + zr, 0.0, 0.4 + T.TW * 0.95)
+				l.visible = true
+				j += 1
+			ti0 += 5
+	for i in range(j, tun_l.size()):
+		tun_l[i].visible = false
+
+
 func _pose_all(dt: float) -> void:
 	var tt = Time.get_ticks_msec() / 1000.0
 	for i in range(ships.size()):
@@ -2196,7 +2338,8 @@ func _pose_all(dt: float) -> void:
 		for j in jets:
 			j.visible = s.boost > 0.25
 		var lt: OmniLight3D = nd.get_meta("light")
-		lt.light_energy = 1.4 + 3.0 * s.boost
+		lt.light_energy = (1.4 + 3.0 * s.boost) * (1.0 + 1.2 * tun_k)
+		lt.omni_range = 4.0 + 4.0 * tun_k
 		lt.light_color = Color(0.6, 0.4, 1.0).lerp(Color(0.3, 0.8, 1.0), clampf(s.boost, 0.0, 1.0))
 
 
