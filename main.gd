@@ -89,7 +89,39 @@ func _ready() -> void:
 
 
 # ---------------------------------------------------------------- Klänge aus dem alten Spiel (Dateien in sfx/)
+# Zwei Kanäle: „Game“ (Motor, Effekte) und „Voice“ (Ansagen). Spricht die Stimme, wird „Game“ kurz abgesenkt (Ducking).
+func _buses() -> void:
+	for nm in ["Game", "Voice"]:
+		if AudioServer.get_bus_index(nm) == -1:
+			AudioServer.add_bus()
+			var i = AudioServer.bus_count - 1
+			AudioServer.set_bus_name(i, nm)
+			AudioServer.set_bus_send(i, "Master")
+	var vi = AudioServer.get_bus_index("Voice")
+	AudioServer.set_bus_volume_db(vi, 6.0)
+	# Begrenzer, damit die lautere Stimme nicht übersteuert
+	if AudioServer.get_bus_effect_count(vi) == 0:
+		var lim = AudioEffectHardLimiter.new()
+		lim.ceiling_db = -0.5
+		AudioServer.add_bus_effect(vi, lim)
+
+
+var duck_until = 0.0
+var duck_db = 0.0
+
+
+func _duck(delta: float) -> void:
+	var now = Time.get_ticks_msec() / 1000.0
+	var target = -14.0 if now < duck_until else 0.0
+	var tau = 0.06 if target < duck_db else 0.45   # schnell runter, sanft wieder hoch
+	duck_db += (target - duck_db) * (1.0 - exp(-delta / tau))
+	var gi = AudioServer.get_bus_index("Game")
+	if gi >= 0:
+		AudioServer.set_bus_volume_db(gi, duck_db)
+
+
 func _sounds() -> void:
+	_buses()
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav"]:
@@ -98,6 +130,7 @@ func _sounds() -> void:
 		var p = AudioStreamPlayer.new()
 		p.stream = _looped(snd[k])
 		p.volume_db = -80.0
+		p.bus = "Game"
 		add_child(p)
 		p.play()
 		loops[k] = p
@@ -144,6 +177,7 @@ void fragment(){
 		p.unit_size = 2.5
 		p.max_distance = 45.0
 		p.volume_db = -4.0
+		p.bus = "Game"
 		nd.add_child(p)
 		p.play()
 		nd.set_meta("eng", p)
@@ -172,6 +206,12 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 	p.stream = snd[k]
 	p.volume_db = db
 	p.pitch_scale = pitch
+	if k.begins_with("vo_"):
+		p.bus = "Voice"
+		# solange die Stimme spricht (ohne den Hall am Ende), alles andere absenken
+		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + maxf(0.4, snd[k].get_length() - 0.45) / maxf(0.1, AudioServer.playback_speed_scale))
+	else:
+		p.bus = "Game"
 	add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)
@@ -3309,6 +3349,7 @@ func _process(delta: float) -> void:
 	var dt = minf(delta, 0.05)
 	t_state += dt
 	ui.fps.text = "%d fps" % Engine.get_frames_per_second()
+	_duck(delta / maxf(0.01, Engine.time_scale))
 	_perf(delta)
 	var g: Dictionary = ships[0]
 	if warm_t >= 0.0:
