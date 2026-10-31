@@ -362,10 +362,10 @@ func _save_cfg() -> void:
 func _apply_cfg() -> void:
 	base_spd = BASE_DEF * float(cfg.speed)
 	var q = int(cfg.gfx)
-	wenv.ssr_enabled = q >= 2
-	wenv.ssao_enabled = q >= 2
+	wenv.ssr_enabled = false
+	wenv.ssao_enabled = false
 	# Medium: ein einfacher, kurzer Schatten statt zwei Stufen, schnelle Kantenglättung (FXAA) statt MSAA
-	moon.shadow_enabled = q >= 1
+	moon.shadow_enabled = false
 	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if q >= 2 else DirectionalLight3D.SHADOW_ORTHOGONAL
 	moon.directional_shadow_max_distance = 35.0 if q >= 2 else 18.0
 	get_viewport().msaa_3d = Viewport.MSAA_4X if q >= 2 else Viewport.MSAA_DISABLED
@@ -429,12 +429,12 @@ void sky(){
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
 	for i in range(1, 7):
 		env.set_glow_level(i, 1.0 if i >= 2 and i <= 5 else 0.0)
-	env.ssr_enabled = true
+	env.ssr_enabled = false
 	env.ssr_max_steps = 72
 	env.ssr_fade_in = 0.1
 	env.ssr_fade_out = 2.5
 	env.ssr_depth_tolerance = 0.35
-	env.ssao_enabled = true
+	env.ssao_enabled = false
 	env.ssao_intensity = 1.6
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.045, 0.045, 0.05) if _noir() else Color(0.05, 0.03, 0.09)
@@ -451,7 +451,7 @@ void sky(){
 	moon = DirectionalLight3D.new()
 	moon.light_color = Color(0.85, 0.87, 0.9) if _noir() else Color(0.6, 0.66, 1.0)
 	moon.light_energy = 0.45
-	moon.shadow_enabled = true
+	moon.shadow_enabled = false
 	moon.directional_shadow_max_distance = 35.0
 	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	moon.rotation = Vector3(deg_to_rad(-62.0), deg_to_rad(150.0), 0.0)
@@ -686,6 +686,12 @@ func _build_track() -> void:
 				mats[key] = _neon(col, 6.0)
 			_box(key, zc, 0.0, 1.245, TW + 0.2, 0.012, 0.05)
 			lights.append([zc, col])
+			# Mondschatten des Querträgers, fest auf die Fahrbahn gemalt
+			var ld = Basis.from_euler(Vector3(deg_to_rad(-62.0), deg_to_rad(150.0), 0.0)) * Vector3(0, 0, -1)
+			var off = Vector3(ld.x, 0.0, ld.z) * (1.34 / maxf(0.2, -ld.y))
+			var zs = zc + off.z
+			var ls = -off.x
+			_strip("gsh", zs - 0.07, zs + 0.07, clampf(-TW + ls, -TW, TW), clampf(TW + ls, -TW, TW), 0.011, 0.011)
 		gk += 1
 	for k in range(1, 36):
 		var zc = k * 20.0 + 10.0
@@ -763,6 +769,12 @@ void fragment(){
 	mats["ringM"] = _neon(MG, 7.0)
 	mats["line"] = _neon(Color(0.8, 0.85, 1.0), 0.6)
 	mats["tlight"] = _neon(Color(0.9, 0.95, 1.0), 4.0)
+	var gsm = StandardMaterial3D.new()
+	gsm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gsm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gsm.albedo_color = Color(0, 0, 0, 0.42)
+	gsm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mats["gsh"] = gsm
 	mats["board0"] = _neon(Color(0.8, 0.8, 0.85) if _noir() else Color(0.1, 0.4, 1.0), 2.2)
 	mats["board1"] = _neon(OR if _noir() else Color(1.0, 0.2, 0.5), 2.2)
 	mats["board2"] = _neon(Color(0.35, 0.35, 0.37) if _noir() else Color(1.0, 0.7, 0.1), 2.2)
@@ -959,6 +971,19 @@ func _ship_node(idx: int) -> Node3D:
 	lt.position = Vector3(0, 0.15, -0.95)
 	root.add_child(lt)
 	root.set_meta("jets", jets)
+	var shq = PlaneMesh.new()
+	shq.size = Vector2(1.0 * s * bb.size.x * 1.35, 1.0 * s * bb.size.z * 1.2)
+	var shm = MeshInstance3D.new()
+	shm.mesh = shq
+	shm.material_override = _shader_mat("""
+shader_type spatial;
+// Schatten unter dem Gleiter: weicher, länglicher dunkler Fleck (kostet fast nichts)
+render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled;
+uniform float a=.6;
+void fragment(){vec2 q=(UV-.5)*2.;float d=length(q*vec2(1.,1.));ALBEDO=vec3(0.);ALPHA=a*smoothstep(1.,.15,d)*(.8+.2*smoothstep(1.,.0,d));}""")
+	shm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(shm)
+	root.set_meta("shd", shm)
 	root.set_meta("light", lt)
 	add_child(root)
 	return root
@@ -1868,11 +1893,11 @@ func _explode(z: float, lat: float, big := false) -> void:
 	# Feuerball: grell weiß-gelb → orange → dunkelrot
 	_fire_ball(pos, k)
 	# Rauch: steigt langsam auf, wird größer
-	var smr = _ramp([[0.0, Color(0.16, 0.14, 0.13, 0)], [0.04, Color(0.14, 0.12, 0.11, 0.9)], [0.35, Color(0.1, 0.1, 0.11, 0.7)], [1.0, Color(0.08, 0.08, 0.09, 0)]], false)
+	var smr = _ramp([[0.0, Color(0.16, 0.14, 0.13, 0)], [0.06, Color(0.14, 0.12, 0.11, 0.5)], [0.4, Color(0.1, 0.1, 0.11, 0.32)], [1.0, Color(0.08, 0.08, 0.09, 0)]], false)
 	var smc = _curve([[0.0, 0.35], [0.25, 1.0], [1.0, 1.7]])
-	_burst(pos + f.uu * 0.5, fxr.smoke, int(10 * k), 8.0, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
+	_burst(pos + f.uu * 0.5, fxr.smoke, int(7 * k), 3.5, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
 	# zweite, dichtere Wolke dicht über der Fahrbahn, hängt noch länger
-	get_tree().create_timer(0.25).timeout.connect(func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(6 * k), 10.0, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
+	get_tree().create_timer(0.25).timeout.connect(func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(4 * k), 4.5, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
 	# Funkenregen
 	_burst(pos, fxr.spark, int(45 * k), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
 		_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.2)
@@ -3189,8 +3214,6 @@ func _tunnel(dt: float) -> void:
 	wenv.fog_density = lerpf(0.012, 0.0, tun_k)
 	wenv.background_energy_multiplier = lerpf(1.0, 0.05, tun_k)
 	moon.light_energy = lerpf(0.45, 0.0, tun_k)
-	# im Tunnel sieht man den Mond nicht: Schattenberechnung sparen
-	moon.shadow_enabled = int(cfg.gfx) >= 1 and tun_k < 0.6
 	if tun_l.is_empty():
 		for i in range(4 if int(cfg.gfx) >= 2 else 2):
 			var l = OmniLight3D.new()
@@ -3239,6 +3262,15 @@ func _pose_all(dt: float) -> void:
 		var jets: Array = nd.get_meta("jets")
 		for j in jets:
 			j.visible = s.boost > 0.25
+		var shd: MeshInstance3D = nd.get_meta("shd")
+		shd.visible = nd.visible and not T.gap(s.z) and not s.out
+		if shd.visible:
+			var hk = clampf(1.0 - s.h / 2.5, 0.0, 1.0)
+			var sc = 1.0 + s.h * 0.35
+			var sx: Vector3 = f.uu.cross(dir).normalized()
+			var sd2: Vector3 = sx.cross(f.uu).normalized()
+			shd.global_transform = Transform3D(Basis(sx * sc, f.uu, sd2 * sc), f.c + f.rr * s.lat + f.uu * 0.02)
+			(shd.material_override as ShaderMaterial).set_shader_parameter("a", 0.62 * hk)
 		var lt: OmniLight3D = nd.get_meta("light")
 		lt.light_energy = (1.4 + 3.0 * s.boost) * (1.0 + 1.2 * tun_k)
 		lt.omni_range = 4.0 + 4.0 * tun_k
