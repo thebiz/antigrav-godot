@@ -1,0 +1,50 @@
+name: AntiGrav-3D-APK bauen
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Godot einrichten (Vorlagen, Android-SDK)
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates ~/.config
+          cp -r /root/.local/share/godot/export_templates/4.3.stable ~/.local/share/godot/export_templates/ || true
+          cp -r /root/.config/godot ~/.config/ || true
+          ls ~/.local/share/godot/export_templates/
+
+      - name: Dateien importieren
+        run: godot --headless --path . --import || godot --headless --path . --editor --quit || true
+
+      - name: Versionsnummer
+        run: |
+          sed -i "s/^version\/code=.*/version\/code=${{ github.run_number }}/" export_presets.cfg
+          sed -i "s/^version\/name=.*/version\/name=\"1.${{ github.run_number }}\"/" export_presets.cfg
+
+      - name: APK bauen
+        # signiert mit dem öffentlichen Standard-Testschlüssel der Bauumgebung (kein Geheimnis; bleibt gleich, solange das Image gleich bleibt)
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: /root/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
+        run: |
+          mkdir -p build
+          godot --headless --verbose --path . --export-release "Android" build/AntiGrav3D-${{ github.run_number }}.apk 2>&1 | tail -80
+          test -f build/AntiGrav3D-${{ github.run_number }}.apk
+
+      - name: Als Release veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: AntiGrav 3D ${{ github.run_number }}
+          files: build/AntiGrav3D-${{ github.run_number }}.apk
+          make_latest: true
