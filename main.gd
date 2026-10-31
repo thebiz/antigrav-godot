@@ -1207,6 +1207,15 @@ func _menu() -> void:
 	sub.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	sub.offset_top = 290
 	root.add_child(sub)
+	ui.title = [title, sub]
+	# dunkler Schleier hinter den Einstellungen, damit alles gut lesbar ist
+	var dim = ColorRect.new()
+	dim.color = Color(0.0, 0.0, 0.0, 0.78)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dim.visible = false
+	root.add_child(dim)
+	ui.dim = dim
 	# Hauptseite
 	var box = VBoxContainer.new()
 	box.add_theme_constant_override("separation", 20)
@@ -1310,9 +1319,9 @@ func _menu() -> void:
 		lr.add_child(b)
 		ui.look.append(b)
 	var back = _btn("Done", true)
-	back.pressed.connect(func(): sp.visible = false; box.visible = true)
+	back.pressed.connect(func(): _show_settings(false))
 	sp.add_child(back)
-	bs.pressed.connect(func(): box.visible = false; sp.visible = true)
+	bs.pressed.connect(func(): _show_settings(true))
 	# Bildrate oben links (zum Prüfen, ob es flüssig läuft)
 	var fl = CanvasLayer.new()
 	fl.layer = 9
@@ -1324,6 +1333,14 @@ func _menu() -> void:
 	fl.add_child(ui.fps)
 	hud.layer.visible = false
 	_refresh_ui()
+
+
+func _show_settings(on: bool) -> void:
+	ui.setp.visible = on
+	ui.main.visible = not on
+	ui.dim.visible = on
+	for t in ui.title:
+		t.visible = not on
 
 
 func _dot(r: int) -> ImageTexture:
@@ -2962,8 +2979,7 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		if state == "menu":
 			if ui.setp.visible:
-				ui.setp.visible = false
-				ui.main.visible = true
+				_show_settings(false)
 			else:
 				get_tree().quit()
 		elif state == "replay":
