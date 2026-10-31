@@ -3,7 +3,13 @@
 extends Node3D
 
 const T = preload("res://track.gd")
-const SHIP_SCENE = preload("res://ships/qirex.glb")
+# Gleiter: Datei, Name, Nase zeigt im Modell nach hinten (wird umgedreht), Herkunft
+const SHIPS = [
+	["res://ships/qirex.glb", "Qirex", false, "“WipeOut – Qirex” by Nobby76, CC BY 4.0"],
+	["res://ships/assegai/scene.gltf", "Assegai", false, "“WipeOut – Assegai” by Nobby76, CC BY 4.0"],
+	["res://ships/apex.glb", "Apex", false, "“Apex Wipeout Anti-grav Racer” by rafta, CC BY-NC 4.0"],
+	["res://ships/rhsx/scene.gltf", "RHS-X", true, "“RHS-X” by Hassan Bassassi, CC BY 4.0"]]
+const CFG_PATH = "user://settings.cfg"
 
 # Lenkung wie in der HTML-Version (von John abgestimmt)
 const RAMP = 0.56
@@ -11,7 +17,7 @@ const START = 0.55
 const SHAPE = 2.3
 const YAW_P = 1.4
 const YAW_AI = 1.5
-const BASE = 5.5
+const BASE_DEF = 12.0  # Grundtempo (Einheiten/s) bei Tempo 100 %
 const NAMES = ["You", "Vega", "Kato", "Mira"]
 
 var laps: Array[Node3D] = []
@@ -19,7 +25,13 @@ var lap_mesh: ArrayMesh
 var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
-var state = "intro"
+var state = "menu"
+var cfg = {"ship": 0, "speed": 1.0, "gfx": 2}
+var base_spd = 12.0
+var wenv: Environment
+var moon: DirectionalLight3D
+var ui = {}
+var menu_t = 0.0
 var t_state = 0.0
 var race_t = 0.0
 var steer_btn = 0
@@ -31,6 +43,7 @@ var cam_d = 0.0
 
 
 func _ready() -> void:
+	_load_cfg()
 	_env()
 	_build_track()
 	_build_city()
@@ -41,6 +54,35 @@ func _ready() -> void:
 	cam.far = 400.0
 	add_child(cam)
 	_hud()
+	_menu()
+	_apply_cfg()
+
+
+# ---------------------------------------------------------------- Einstellungen (im Handy gespeichert)
+func _load_cfg() -> void:
+	var c = ConfigFile.new()
+	if c.load(CFG_PATH) == OK:
+		for k in cfg.keys():
+			cfg[k] = c.get_value("s", k, cfg[k])
+	cfg.ship = clampi(int(cfg.ship), 0, SHIPS.size() - 1)
+
+
+func _save_cfg() -> void:
+	var c = ConfigFile.new()
+	for k in cfg.keys():
+		c.set_value("s", k, cfg[k])
+	c.save(CFG_PATH)
+
+
+# Grafikstufe: 0 niedrig, 1 mittel, 2 hoch
+func _apply_cfg() -> void:
+	base_spd = BASE_DEF * float(cfg.speed)
+	var q = int(cfg.gfx)
+	wenv.ssr_enabled = q >= 2
+	wenv.ssao_enabled = q >= 2
+	moon.shadow_enabled = q >= 1
+	get_viewport().msaa_3d = Viewport.MSAA_4X if q >= 2 else (Viewport.MSAA_2X if q == 1 else Viewport.MSAA_DISABLED)
+	get_viewport().scaling_3d_scale = [0.7, 0.85, 1.0][q]
 
 
 # ---------------------------------------------------------------- Umgebung: Himmel, Licht, Glühen, Spiegelungen, Nebel
@@ -103,11 +145,12 @@ void sky(){
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.15
 	env.adjustment_contrast = 1.05
+	wenv = env
 	var we = WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	# Mondlicht mit echten Schatten
-	var moon = DirectionalLight3D.new()
+	moon = DirectionalLight3D.new()
 	moon.light_color = Color(0.6, 0.66, 1.0)
 	moon.light_energy = 0.45
 	moon.shadow_enabled = true
@@ -484,10 +527,14 @@ void fragment(){
 
 
 # ---------------------------------------------------------------- Gleiter
-func _ship_node() -> Node3D:
+func _ship_node(idx: int) -> Node3D:
 	var root = Node3D.new()
-	var m: Node3D = SHIP_SCENE.instantiate()
-	root.add_child(m)
+	var piv = Node3D.new()
+	root.add_child(piv)
+	if SHIPS[idx][2]:
+		piv.rotation.y = PI
+	var m: Node3D = load(SHIPS[idx][0]).instantiate()
+	piv.add_child(m)
 	var jets = []
 	# Ständer aus dem Modell entfernen, Boost-Strahlen merken
 	for n in m.find_children("*", "", true, false):
@@ -534,10 +581,16 @@ func _rel_xf(top: Node3D, n: Node) -> Transform3D:
 func _spawn_ships() -> void:
 	var z0 = T.ZST
 	var starts = [[z0, 0.0], [z0 + 3.2, -0.5], [z0 + 6.4, 0.5], [z0 + 9.6, 0.0]]
+	var others = []
+	for i in range(SHIPS.size()):
+		if i != int(cfg.ship):
+			others.append(i)
+	others.shuffle()
 	for i in range(4):
+		var sm = int(cfg.ship) if i == 0 else others[(i - 1) % others.size()]
 		var s = {"z": starts[i][0], "lat": starts[i][1], "psi": 0.0, "vpsi": 0.0, "u": 0.0, "spd": 0.0, "boost": 0.0, "slow": 1.0,
 			"h": 0.0, "vy": 0.0, "air": false, "padK": -1, "hitT": -9.0, "sk": 0.95 + (i - 1) * 0.03 if i > 0 else 1.0, "sk0": 0.0,
-			"ai": randf() * 100.0, "node": _ship_node(), "fin": 0.0, "roll": 0.0}
+			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0}
 		s.sk0 = s.sk
 		ships.append(s)
 
@@ -546,6 +599,7 @@ func _spawn_ships() -> void:
 func _hud() -> void:
 	var cl = CanvasLayer.new()
 	add_child(cl)
+	hud.layer = cl
 	var mk = func(sz: int, al: int) -> Label:
 		var l = Label.new()
 		l.add_theme_font_size_override("font_size", sz)
@@ -577,6 +631,196 @@ func _hud() -> void:
 		b.offset_right = 150 if sd < 0 else -30
 		b.offset_top = -230
 		b.offset_bottom = -110
+
+
+# ---------------------------------------------------------------- Menü: Gleiterwahl, Start, Einstellungen (Tempo, Grafik)
+func _style(bg: Color, br: Color) -> StyleBoxFlat:
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = br
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(26)
+	sb.content_margin_top = 18
+	sb.content_margin_bottom = 18
+	return sb
+
+
+func _btn(txt: String, pri := false) -> Button:
+	var b = Button.new()
+	b.text = txt
+	b.add_theme_font_size_override("font_size", 38)
+	b.custom_minimum_size = Vector2(0, 112)
+	var n = _style(Color(0.93, 0.41, 0.18) if pri else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if pri else Color(1, 1, 1, 0.22))
+	b.add_theme_stylebox_override("normal", n)
+	b.add_theme_stylebox_override("hover", n)
+	b.add_theme_stylebox_override("focus", n)
+	b.add_theme_stylebox_override("pressed", _style(Color(0.8, 0.33, 0.12) if pri else Color(1, 1, 1, 0.18), Color(1, 1, 1, 0.4)))
+	return b
+
+
+func _lbl(txt: String, sz: int) -> Label:
+	var l = Label.new()
+	l.text = txt
+	l.add_theme_font_size_override("font_size", sz)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	l.add_theme_constant_override("shadow_offset_y", 2)
+	return l
+
+
+func _menu() -> void:
+	var cl = CanvasLayer.new()
+	cl.layer = 5
+	add_child(cl)
+	var root = Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cl.add_child(root)
+	ui.root = root
+	var title = _lbl("ANTIGRAV", 96)
+	title.add_theme_color_override("font_color", Color(0.75, 0.95, 1.0))
+	title.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	title.offset_top = 170
+	root.add_child(title)
+	var sub = _lbl("3D  ·  NEON NIGHT", 28)
+	sub.modulate = Color(1, 1, 1, 0.6)
+	sub.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	sub.offset_top = 290
+	root.add_child(sub)
+	# Hauptseite
+	var box = VBoxContainer.new()
+	box.add_theme_constant_override("separation", 20)
+	box.anchor_left = 0.06
+	box.anchor_right = 0.94
+	box.anchor_top = 1.0
+	box.anchor_bottom = 1.0
+	box.offset_top = -620
+	box.offset_bottom = -70
+	root.add_child(box)
+	ui.main = box
+	var row = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 16)
+	box.add_child(row)
+	var bp = _btn("‹")
+	bp.custom_minimum_size = Vector2(112, 112)
+	row.add_child(bp)
+	var mid = VBoxContainer.new()
+	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(mid)
+	var sl = _lbl("SHIP", 22)
+	sl.modulate = Color(1, 1, 1, 0.6)
+	mid.add_child(sl)
+	ui.ship = _lbl("", 46)
+	mid.add_child(ui.ship)
+	var bn = _btn("›")
+	bn.custom_minimum_size = Vector2(112, 112)
+	row.add_child(bn)
+	bp.pressed.connect(func(): _pick_ship(-1))
+	bn.pressed.connect(func(): _pick_ship(1))
+	var go = _btn("START RACE", true)
+	go.pressed.connect(_start)
+	box.add_child(go)
+	var bs = _btn("Settings")
+	box.add_child(bs)
+	ui.credit = _lbl("", 18)
+	ui.credit.modulate = Color(1, 1, 1, 0.4)
+	ui.credit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(ui.credit)
+	# Einstellungen
+	var sp = VBoxContainer.new()
+	sp.add_theme_constant_override("separation", 22)
+	sp.anchor_left = 0.06
+	sp.anchor_right = 0.94
+	sp.anchor_top = 1.0
+	sp.anchor_bottom = 1.0
+	sp.offset_top = -760
+	sp.offset_bottom = -70
+	sp.visible = false
+	root.add_child(sp)
+	ui.setp = sp
+	sp.add_child(_lbl("SETTINGS", 44))
+	ui.spd = _lbl("", 32)
+	sp.add_child(ui.spd)
+	var hs = HSlider.new()
+	hs.min_value = 0.5
+	hs.max_value = 2.5
+	hs.step = 0.05
+	hs.value = float(cfg.speed)
+	hs.custom_minimum_size = Vector2(0, 80)
+	hs.add_theme_icon_override("grabber", _dot(40))
+	hs.add_theme_icon_override("grabber_highlight", _dot(46))
+	var track_sb = StyleBoxFlat.new()
+	track_sb.bg_color = Color(1, 1, 1, 0.25)
+	track_sb.content_margin_top = 6
+	track_sb.content_margin_bottom = 6
+	track_sb.set_corner_radius_all(6)
+	hs.add_theme_stylebox_override("slider", track_sb)
+	hs.value_changed.connect(func(v): cfg.speed = v; _refresh_ui(); _apply_cfg(); _save_cfg())
+	sp.add_child(hs)
+	sp.add_child(_lbl("Graphics", 32))
+	var gr = HBoxContainer.new()
+	gr.add_theme_constant_override("separation", 12)
+	sp.add_child(gr)
+	ui.gfx = []
+	for q in range(3):
+		var b = _btn(["Low", "Medium", "High"][q])
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.toggle_mode = true
+		b.pressed.connect(func(): cfg.gfx = q; _refresh_ui(); _apply_cfg(); _save_cfg())
+		gr.add_child(b)
+		ui.gfx.append(b)
+	var back = _btn("Done", true)
+	back.pressed.connect(func(): sp.visible = false; box.visible = true)
+	sp.add_child(back)
+	bs.pressed.connect(func(): box.visible = false; sp.visible = true)
+	# Bildrate oben links (zum Prüfen, ob es flüssig läuft)
+	var fl = CanvasLayer.new()
+	fl.layer = 9
+	add_child(fl)
+	ui.fps = _lbl("", 20)
+	ui.fps.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	ui.fps.position = Vector2(24, 24)
+	ui.fps.modulate = Color(1, 1, 1, 0.55)
+	fl.add_child(ui.fps)
+	hud.layer.visible = false
+	_refresh_ui()
+
+
+func _dot(r: int) -> ImageTexture:
+	var im = Image.create(r, r, false, Image.FORMAT_RGBA8)
+	for y in range(r):
+		for x in range(r):
+			var d = Vector2(x - r / 2.0 + 0.5, y - r / 2.0 + 0.5).length()
+			im.set_pixel(x, y, Color(0.93, 0.41, 0.18, clampf(r / 2.0 - d, 0.0, 1.0)))
+	return ImageTexture.create_from_image(im)
+
+
+func _refresh_ui() -> void:
+	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
+	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · private use only"
+	ui.spd.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
+	for q in range(3):
+		ui.gfx[q].button_pressed = int(cfg.gfx) == q
+		var on = int(cfg.gfx) == q
+		ui.gfx[q].add_theme_stylebox_override("normal", _style(Color(0.93, 0.41, 0.18) if on else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on else Color(1, 1, 1, 0.22)))
+		ui.gfx[q].add_theme_stylebox_override("pressed", ui.gfx[q].get_theme_stylebox("normal"))
+		ui.gfx[q].add_theme_stylebox_override("hover", ui.gfx[q].get_theme_stylebox("normal"))
+
+
+func _pick_ship(d: int) -> void:
+	cfg.ship = (int(cfg.ship) + d + SHIPS.size()) % SHIPS.size()
+	_save_cfg()
+	for s in ships:
+		s.node.queue_free()
+	ships.clear()
+	_spawn_ships()
+	_refresh_ui()
+
+
+func _start() -> void:
+	state = "intro"
+	t_state = 0.0
+	ui.root.visible = false
+	hud.layer.visible = true
 
 
 func _input(ev: InputEvent) -> void:
@@ -617,7 +861,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	s.vpsi = clampf(s.vpsi + ((s.psi - s.vpsi) * grip + turn) * dt, -0.9, 0.9)
 	s.slow += (1.0 - s.slow) * (1.0 - exp(-dt / 1.4))
 	s.boost *= exp(-dt / 1.4)
-	s.spd = BASE * s.sk * (1.0 + 0.6 * s.boost) * s.slow if racing or state == "done" else 0.0
+	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow if racing or state == "done" else 0.0
 	var fwd: float = s.spd * cos(s.vpsi)
 	s.z += fwd * dt
 	s.lat += s.spd * sin(s.vpsi) * dt
@@ -625,7 +869,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	if not s.air and T.gap(s.z):
 		s.air = true
 		s.h = 0.45
-		var tf = 8.5 / maxf(1.0, fwd)
+		var tf = maxf(8.5 / maxf(1.0, fwd), 0.6)  # flacher, gut sichtbarer Sprung, kurze Flugzeit
 		s.vy = (2.0 * tf * tf - s.h) / tf
 	if s.air:
 		s.vy -= 4.0 * dt
@@ -665,10 +909,34 @@ func _ai_inp(o: Dictionary, t: float) -> float:
 	return clampf((want - o.vpsi) * 1.5 + (want - o.psi) * 0.5 - turn_n / YAW_AI, -1.0, 1.0)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if state == "menu":
+			if ui.setp.visible:
+				ui.setp.visible = false
+				ui.main.visible = true
+			else:
+				get_tree().quit()
+		else:
+			get_tree().reload_current_scene()
+
+
 func _process(delta: float) -> void:
 	var dt = minf(delta, 0.05)
 	t_state += dt
+	ui.fps.text = "%d fps" % Engine.get_frames_per_second()
 	var g: Dictionary = ships[0]
+	if state == "menu":
+		menu_t += dt
+		_pose_all(dt)
+		var f = T.frame(g.z)
+		var S0: Vector3 = f.c + f.rr * g.lat + f.uu * 0.16
+		var a = menu_t * 0.25
+		cam.global_position = S0 + f.fw * cos(a) * 3.4 + f.rr * sin(a) * 3.4 + Vector3.UP * (0.9 + 0.25 * sin(a * 1.7))
+		cam.look_at(S0 + Vector3.UP * 0.1, Vector3.UP)
+		cam.fov = 52.0
+		_shot()
+		return
 	var racing = state == "race"
 	if state == "intro" and t_state > 1.2:
 		state = "count"
@@ -751,7 +1019,10 @@ func _shot() -> void:
 		if a.begins_with("--shot="):
 			var p = a.substr(7).split(",")
 			shot_n += 1
-			if shot_n == 3 and p.size() > 1:
+			if shot_n == 2 and p.size() > 2:
+				_start()
+				state = "race"
+			if shot_n == 3 and p.size() > 1 and float(p[1]) > 0.0:
 				ships[0].z = float(p[1])
 				for i in range(1, 4):
 					ships[i].z = float(p[1]) + 2.0 + i * 2.5
