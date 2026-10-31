@@ -41,10 +41,26 @@ jobs:
           godot --headless --verbose --path . --export-release "Android" build/AntiGrav3D-${{ github.run_number }}.apk 2>&1 | tail -80
           test -f build/AntiGrav3D-${{ github.run_number }}.apk
 
+      - name: Test-APK mit Handy-Grafikengine (Mobile-Renderer, eigene App daneben)
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: /root/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
+        run: |
+          sed -i 's/^renderer\/rendering_method.mobile=.*/renderer\/rendering_method.mobile="mobile"/' project.godot
+          sed -i 's/^config\/name=.*/config\/name="AntiGrav 3D M"/' project.godot
+          sed -i 's/^package\/unique_name=.*/package\/unique_name="de.antigrav.godot.m"/' export_presets.cfg
+          sed -i 's/^package\/name=.*/package\/name="AntiGrav 3D M"/' export_presets.cfg
+          grep -n "rendering_method" project.godot
+          godot --headless --verbose --path . --export-release "Android" build/AntiGrav3D-Mobile-${{ github.run_number }}.apk 2>&1 | tail -30
+          test -f build/AntiGrav3D-Mobile-${{ github.run_number }}.apk
+
       - name: Als Release veröffentlichen
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: AntiGrav 3D ${{ github.run_number }}
-          files: build/AntiGrav3D-${{ github.run_number }}.apk
+          files: |
+            build/AntiGrav3D-${{ github.run_number }}.apk
+            build/AntiGrav3D-Mobile-${{ github.run_number }}.apk
           make_latest: true

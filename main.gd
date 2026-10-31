@@ -2872,7 +2872,7 @@ func _perf_text() -> String:
 	var sz = vp.get_visible_rect().size
 	var ws = DisplayServer.window_get_size()
 	var t = "AntiGrav 3D performance\n"
-	t += "Device: %s · %s\n" % [OS.get_model_name(), RenderingServer.get_video_adapter_name()]
+	t += "Device: %s · %s · renderer %s\n" % [OS.get_model_name(), RenderingServer.get_video_adapter_name(), RenderingServer.get_current_rendering_method()]
 	t += "Screen %dx%d (ui %dx%d) · 3D scale %.2f · gfx %s · res %d %% · look %s · speed %d %%\n" % [ws.x, ws.y, sz.x, sz.y, vp.scaling_3d_scale,
 		["Low", "Medium", "High"][int(cfg.gfx)], int(float(cfg.res) * 100), "Noir" if _noir() else "Color", int(float(cfg.speed) * 100)]
 	if pf.n > 0:
