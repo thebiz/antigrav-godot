@@ -1053,6 +1053,32 @@ func _hud() -> void:
 	hud.top = mk.call(34, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.top.anchor_right = 1.0
 	hud.top.offset_top = 70
+	# Platzierung groß oben rechts: „2nd“ und klein „/4“ (Ausgeschiedene zählen nicht mit)
+	var pb = HBoxContainer.new()
+	pb.anchor_left = 1.0
+	pb.anchor_right = 1.0
+	pb.offset_left = -330
+	pb.offset_right = -34
+	pb.offset_top = 118
+	pb.offset_bottom = 238
+	pb.alignment = BoxContainer.ALIGNMENT_END
+	pb.add_theme_constant_override("separation", 6)
+	cl.add_child(pb)
+	hud.pl = Label.new()
+	hud.pl.add_theme_font_size_override("font_size", 96)
+	hud.pl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	hud.pl.add_theme_constant_override("outline_size", 12)
+	hud.pl.size_flags_vertical = Control.SIZE_SHRINK_END
+	pb.add_child(hud.pl)
+	hud.pln = Label.new()
+	hud.pln.add_theme_font_size_override("font_size", 40)
+	hud.pln.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	hud.pln.add_theme_constant_override("outline_size", 8)
+	hud.pln.modulate = Color(1, 1, 1, 0.7)
+	hud.pln.size_flags_vertical = Control.SIZE_SHRINK_END
+	hud.pln.offset_bottom = -14
+	pb.add_child(hud.pln)
+	hud.plbox = pb
 	hud.mid = mk.call(120, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.mid.anchor_right = 1.0
 	hud.mid.anchor_top = 0.3
@@ -1469,6 +1495,9 @@ func _msg(t: String, c: Color) -> void:
 
 
 var msg_t = 0.0
+var last_place = 0
+var pl_flash = 0.0
+var pl_col = Color(1, 1, 1)
 var big_t = 0.0
 
 
@@ -2600,6 +2629,7 @@ func _replay_start() -> void:
 	hud.rpx.visible = true
 	hud.fire.visible = false
 	hud.en_bg.visible = false
+	hud.plbox.visible = false
 	for x in walls:
 		x.n.queue_free()
 	walls.clear()
@@ -2626,6 +2656,7 @@ func _replay_end() -> void:
 	mats.road.set_shader_parameter("qs", 0.0)
 	hud.fire.visible = true
 	hud.en_bg.visible = true
+	hud.plbox.visible = true
 	hud.top.text = rec[rec.size() - 1].pl
 	for o in ships:
 		(o.node as Node3D).visible = not o.out
@@ -3151,7 +3182,21 @@ func _process(delta: float) -> void:
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
 	if state != "done" or t_state < 0.1:
-		hud.top.text = "%d/4     Lap %d/%d     %s" % [place, lap, T.LAPS, _fmt(race_t)]
+		hud.top.text = "Lap %d/%d     %s" % [lap, T.LAPS, _fmt(race_t)]
+		var alive = 1
+		for i in range(1, ships.size()):
+			if not ships[i].out:
+				alive += 1
+		if place != last_place and last_place > 0 and racing:
+			pl_flash = 1.0
+			pl_col = Color(0.35, 1.0, 0.5) if place < last_place else Color(1.0, 0.35, 0.3)
+		last_place = place
+		hud.pl.text = ["1st", "2nd", "3rd", "4th"][clampi(place - 1, 0, 3)]
+		hud.pln.text = "/%d" % alive
+	pl_flash = maxf(0.0, pl_flash - dt * 1.3)
+	hud.pl.modulate = Color(1, 1, 1).lerp(pl_col, pl_flash)
+	hud.plbox.scale = Vector2.ONE * (1.0 + 0.18 * pl_flash)
+	hud.plbox.pivot_offset = hud.plbox.size
 	_record(dt)
 	# Rundenkopien mitwandern lassen
 	var l0 = int(floor((g.z - 20.0) / T.LAP))
