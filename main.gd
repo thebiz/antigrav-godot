@@ -36,6 +36,16 @@ var moon: DirectionalLight3D
 var ui = {}
 var menu_t = 0.0
 var last_c = 99
+# Waffen und Energie (wie im alten Spiel)
+const WP = [["rak", 0.21], ["lenk", 0.17], ["mine", 0.13], ["schild", 0.12], ["turbo", 0.14], ["beben", 0.08], ["auto", 0.07], ["wand", 0.08]]
+const WN = {"rak": "MISSILE", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "WALL"}
+var shots = []
+var mines = []
+var fxs = []
+var walls = []
+var quake = null
+var fire_req = false
+var fire_rect = Rect2()
 var t_state = 0.0
 var race_t = 0.0
 var steer_btn = 0
@@ -93,9 +103,22 @@ func _looped(st: AudioStream) -> AudioStream:
 
 
 # Gegner: eigenes Triebwerk im Raum (lauter, wenn nah; mit Kopfhörern von hinten/vorn/seitlich)
+var bar_mat: ShaderMaterial
+
+
 func _ship_sounds() -> void:
 	if not snd.has("engine"):
 		return
+	if bar_mat == null:
+		bar_mat = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,cull_disabled,depth_draw_never,shadows_disabled;
+instance uniform float fill = 1.0;
+void vertex(){MODELVIEW_MATRIX=VIEW_MATRIX*mat4(INV_VIEW_MATRIX[0],INV_VIEW_MATRIX[1],INV_VIEW_MATRIX[2],MODEL_MATRIX[3]);}
+void fragment(){
+	vec3 c=fill>.5?vec3(.3,1.,.55):(fill>.25?vec3(1.,.85,.25):vec3(1.,.3,.25));
+	ALBEDO=mix(vec3(.3),c*1.8,step(UV.x,fill));ALPHA=.85;
+}""")
 	for i in range(1, ships.size()):
 		var nd: Node3D = ships[i].node
 		if nd.has_meta("eng"):
@@ -108,6 +131,15 @@ func _ship_sounds() -> void:
 		nd.add_child(p)
 		p.play()
 		nd.set_meta("eng", p)
+		var q = QuadMesh.new()
+		q.size = Vector2(0.9, 0.08)
+		var bar = MeshInstance3D.new()
+		bar.mesh = q
+		bar.material_override = bar_mat
+		bar.position = Vector3(0, 0.85, 0)
+		bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		nd.add_child(bar)
+		nd.set_meta("bar", bar)
 
 
 func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
@@ -446,7 +478,14 @@ func _build_track() -> void:
 		if zc < 25.0 or zc > 715.0 or T.gap(zc + 1.4):
 			continue
 		var bx = T.bpx(k)
-		_strip("pad", zc, zc + 2.8, bx - 0.36, bx + 0.36, 0.008, 0.008)
+		_strip("pad", zc, zc + 3.0, bx - 0.36, bx + 0.36, 0.008, 0.008)
+	# Waffenfelder: bunter Ring auf jedem zweiten Feld
+	for wk in range(0, 21, 2):
+		var zw = wk * 35.0 + 17.0
+		if zw < 25.0 or zw > 715.0 or T.gap(zw + 1.0):
+			continue
+		var wx = _wpx(wk)
+		_strip("wpad", zw - 0.2, zw + 1.8, wx - 0.36, wx + 0.36, 0.009, 0.009)
 	# Tore mit Lampen (nicht im Tunnel), Werbetafeln, Stützen
 	var gk = 1
 	while gk * 28 + 7 < 720:
@@ -503,7 +542,25 @@ func _build_track() -> void:
 			ti += 1
 		_strip("tlight", tu[0], tu[1], -0.06, 0.06, 0.4 + R - 0.04, 0.4 + R - 0.04)
 	# Materialien zusammenstellen
-	mats["road"] = _road_mat()
+	mats["road"] = _shader_mat("""
+shader_type spatial;
+// Fahrbahn wie bei Wipeout: dunkelgraues, gebürstetes Metall in Platten, feine Fugen, Randmarkierung; glatt, leicht glänzend
+float h11(float x){return fract(sin(x*91.7)*4371.3);}
+float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
+void fragment(){
+	float x=(UV.x-.5)*4.8,z=UV.y/.08;
+	vec2 pl=vec2(x/1.2,z/2.4),f=fract(pl);
+	float fw=fwidth(pl.x)*1.5+.004,fz=fwidth(pl.y)*1.5+.002;
+	float seam=1.-smoothstep(0.,fw,f.x)*smoothstep(1.,1.-fw,f.x)*smoothstep(0.,fz,f.y)*smoothstep(1.,1.-fz,f.y);
+	float id=h21(floor(pl));
+	float br=mix(.5,h11(floor(x*140.))*.6+h11(floor(x*31.)+3.)*.4,1.-clamp(fwidth(x*140.)*.5,0.,1.));
+	vec3 base=vec3(.12,.125,.14)*(.86+.18*id)*(.93+.12*br);
+	float edge=step(2.4-.42,abs(x))*step(abs(x),2.4-.34);
+	float hz=step(.5,fract(z*.5));
+	base=mix(base,mix(vec3(.75,.62,.08),vec3(.05),hz),edge);
+	base*=1.-seam*.7;
+	ALBEDO=base;METALLIC=.8;ROUGHNESS=.38+.1*br+seam*.3+edge*.2;SPECULAR=.45;
+}""")
 	mats["wall"] = _metal(Color(0.07, 0.075, 0.09), 0.22)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
 	mats["tube"] = _metal(Color(0.035, 0.03, 0.05), 0.35, 0.6)
@@ -523,6 +580,15 @@ void fragment(){
 	vec2 u=UV;float ch=step(abs(fract(u.x*6.-TIME*2.)-.5-abs(u.y-.5)*.9),.14);
 	ALBEDO=mix(vec3(.05,.6,1.),vec3(1.,.85,.15),ch)*(1.6+ch*1.8);
 }""")
+	mats["wpad"] = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,cull_disabled;
+void fragment(){
+	vec2 q=vec2((UV.x-.5)*2.,(UV.y-.5)*.72);float r=length(q);
+	float ring=smoothstep(.035,0.,abs(r-.26))+smoothstep(.08,0.,r)*.8;
+	vec3 c=.5+.5*cos(6.2832*(atan(q.y,q.x)/6.2832+TIME*.4+vec3(0.,.33,.67)));
+	ALBEDO=c*2.4;ALPHA=clamp(ring,0.,1.);
+}""")
 	mats["start"] = _shader_mat("""
 shader_type spatial;
 render_mode unshaded,cull_disabled;
@@ -530,7 +596,7 @@ void fragment(){vec2 q=floor(vec2(UV.x*12.,UV.y*2.));ALBEDO=vec3(mod(q.x+q.y,2.)
 	lap_mesh = ArrayMesh.new()
 	for key in sts.keys():
 		var st: SurfaceTool = sts[key]
-		if key == "pad" or key == "start":
+		if key == "pad" or key == "start" or key == "wpad":
 			_fix_uv(st, key)
 		st.commit(lap_mesh)
 		lap_mesh.surface_set_material(lap_mesh.get_surface_count() - 1, mats[key])
@@ -572,7 +638,7 @@ func _fix_uv(st: SurfaceTool, key: String) -> void:
 		var lc = Vector2(1, 1)
 		var ld = Vector2(1, 0)
 		var seg = floorf(float(q))
-		var span = 5.6 if key == "pad" else 2.0
+		var span = 6.0 if key == "pad" else (4.0 if key == "wpad" else 2.0)
 		var x0 = fposmod(seg, span) / span
 		var x1 = x0 + 1.0 / span
 		la = Vector2(x0, 0); lb = Vector2(x0, 1); lc = Vector2(x1, 1); ld = Vector2(x1, 0)
@@ -696,7 +762,8 @@ func _spawn_ships() -> void:
 		var sm = int(cfg.ship) if i == 0 else others[(i - 1) % others.size()]
 		var s = {"z": starts[i][0], "lat": starts[i][1], "psi": 0.0, "vpsi": 0.0, "u": 0.0, "spd": 0.0, "boost": 0.0, "slow": 1.0,
 			"h": 0.0, "vy": 0.0, "air": false, "padK": -1, "hitT": -9.0, "sk": 0.95 + (i - 1) * 0.03 if i > 0 else 1.0, "sk0": 0.0,
-			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0}
+			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0,
+			"en": 1.0, "out": false, "wpn": "", "wpK": -1, "shield": 0.0, "auto": 0.0, "turbo": 0.0, "slowT": 0.0, "enL": 0, "idx": i}
 		s.sk0 = s.sk
 		ships.append(s)
 
@@ -721,6 +788,39 @@ func _hud() -> void:
 	hud.mid.anchor_right = 1.0
 	hud.mid.anchor_top = 0.3
 	hud.mid.anchor_bottom = 0.3
+	hud.msg = mk.call(32, HORIZONTAL_ALIGNMENT_CENTER)
+	hud.msg.anchor_right = 1.0
+	hud.msg.offset_top = 190
+	hud.en_bg = ColorRect.new()
+	hud.en_bg.color = Color(1, 1, 1, 0.15)
+	hud.en_bg.position = Vector2(36, 140)
+	hud.en_bg.size = Vector2(200, 12)
+	cl.add_child(hud.en_bg)
+	hud.en = ColorRect.new()
+	hud.en.color = Color(0.36, 1.0, 0.6)
+	hud.en.size = Vector2(200, 12)
+	hud.en_bg.add_child(hud.en)
+	var el = mk.call(16, HORIZONTAL_ALIGNMENT_LEFT)
+	el.text = "ENERGY"
+	el.position = Vector2(36, 156)
+	el.modulate = Color(1, 1, 1, 0.7)
+	hud.fire = mk.call(26, HORIZONTAL_ALIGNMENT_CENTER)
+	hud.fire.anchor_left = 0.5
+	hud.fire.anchor_right = 0.5
+	hud.fire.anchor_top = 1.0
+	hud.fire.anchor_bottom = 1.0
+	hud.fire.offset_left = -110
+	hud.fire.offset_right = 110
+	hud.fire.offset_top = -250
+	hud.fire.offset_bottom = -90
+	hud.fire.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var fsb = StyleBoxFlat.new()
+	fsb.bg_color = Color(1, 1, 1, 0.07)
+	fsb.border_color = Color(1, 1, 1, 0.3)
+	fsb.set_border_width_all(3)
+	fsb.set_corner_radius_all(80)
+	hud.fire.add_theme_stylebox_override("normal", fsb)
+	hud.fire_sb = fsb
 	hud.res = mk.call(34, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.res.anchor_right = 1.0
 	hud.res.anchor_top = 0.42
@@ -940,13 +1040,19 @@ func _start() -> void:
 func _input(ev: InputEvent) -> void:
 	if ev is InputEventScreenTouch:
 		if ev.pressed:
+			if state == "race" and fire_rect.has_point(ev.position):
+				fire_req = true
+				return
 			touches[ev.index] = ev.position.x
 			if state == "done" and t_state > 1.5:
 				get_tree().reload_current_scene()
 		else:
 			touches.erase(ev.index)
 	elif ev is InputEventScreenDrag:
-		touches[ev.index] = ev.position.x
+		if touches.has(ev.index):
+			touches[ev.index] = ev.position.x
+	elif ev is InputEventKey and ev.pressed and ev.keycode == KEY_SPACE:
+		fire_req = true
 
 
 func _steer_input() -> int:
@@ -965,6 +1071,305 @@ func _steer_input() -> int:
 	return (1 if r else 0) - (1 if l else 0)
 
 
+# ---------------------------------------------------------------- Waffen und Energie
+func _wpx(k: int) -> float:
+	return -0.55 * sin(posmod(k, 20) * 1.3 + 0.4) * T.TW / 1.6
+
+
+func _pick_w() -> String:
+	var r = randf()
+	for w in WP:
+		r -= w[1]
+		if r < 0.0:
+			return w[0]
+	return "rak"
+
+
+func _glow_node(mesh: Mesh, c: Color, e: float, alpha := 1.0) -> MeshInstance3D:
+	var m = StandardMaterial3D.new()
+	m.albedo_color = Color(c.r, c.g, c.b, alpha)
+	m.emission_enabled = true
+	m.emission = c
+	m.emission_energy_multiplier = e
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	if alpha < 1.0:
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var mi = MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+	return mi
+
+
+func _msg(t: String, c: Color) -> void:
+	hud.msg.text = t
+	hud.msg.modulate = c
+	msg_t = 1.4
+
+
+var msg_t = 0.0
+
+
+func _explode(z: float, lat: float, big := false) -> void:
+	var sp = SphereMesh.new()
+	sp.radius = 1.0
+	sp.height = 2.0
+	var mi = _glow_node(sp, Color(1.0, 0.55, 0.15), 6.0, 0.9)
+	mi.position = T.world(z, lat, 0.3)
+	var lt = OmniLight3D.new()
+	lt.light_color = Color(1.0, 0.6, 0.25)
+	lt.omni_range = 9.0
+	lt.light_energy = 10.0
+	mi.add_child(lt)
+	fxs.append({"n": mi, "l": lt, "t": 0.0, "big": big})
+	_snd("boom", 0.0, randf_range(0.9, 1.1), mi.position)
+
+
+# Schaden: Schild schützt; leer = ausgeschieden; Meldung oben
+func _dmg(o: Dictionary, a: float) -> void:
+	if o.out or state != "race" or (o.idx == 0 and o.shield > 0.0):
+		return
+	o.en = maxf(0.0, o.en - a)
+	var nm = NAMES[o.idx]
+	if o.en <= 0.0:
+		o.out = true
+		_explode(o.z, o.lat, true)
+		(o.node as Node3D).visible = false
+		if (o.node as Node3D).has_meta("eng"):
+			((o.node as Node3D).get_meta("eng") as AudioStreamPlayer3D).stop()
+		_msg("ELIMINATED" if o.idx == 0 else nm.to_upper() + " ELIMINATED", Color(1, 0.35, 0.3) if o.idx == 0 else Color(1, 0.85, 0.3))
+	elif o.idx == 0:
+		_msg("−%d %% ENERGY" % int(round(a * 100.0)), Color(1, 0.48, 0.35))
+	else:
+		_msg("HIT · %s %d %%" % [nm, int(round(o.en * 100.0))], Color(1, 0.75, 0.5))
+
+
+func _add_shot(from: Dictionary, at_player := false, homing := false) -> void:
+	var cap = CapsuleMesh.new()
+	cap.radius = 0.06
+	cap.height = 0.5
+	var mi = _glow_node(cap, Color(1.0, 0.6, 0.2), 8.0)
+	var lt = OmniLight3D.new()
+	lt.light_color = Color(1.0, 0.55, 0.2)
+	lt.omni_range = 4.0
+	lt.light_energy = 3.0
+	mi.add_child(lt)
+	var tg = null
+	if homing:
+		var bd = 220.0
+		for o in ships:
+			if o.idx != 0 and not o.out and o.z - from.z > 0.0 and o.z - from.z < bd:
+				bd = o.z - from.z
+				tg = o
+	shots.append({"z": from.z + 1.0, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) if not at_player else 0.0, "n": mi})
+	_snd("rak", -2.0, 1.0, mi.position if at_player else null)
+
+
+func _fire() -> void:
+	var g: Dictionary = ships[0]
+	var w: String = g.wpn
+	g.wpn = ""
+	match w:
+		"rak":
+			_add_shot(g)
+		"lenk":
+			_add_shot(g, false, true)
+		"mine":
+			for k in range(3):
+				var sp = SphereMesh.new()
+				sp.radius = 0.12
+				sp.height = 0.24
+				var mi = _glow_node(sp, Color(1, 0.15, 0.1), 6.0)
+				var z = g.z - 1.0 - k * 0.9
+				var lat = g.lat + (k - 1) * 0.35
+				mi.position = T.world(z, lat, 0.12)
+				mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi})
+			_snd("mine", -4.0)
+		"schild":
+			g.shield = 6.0
+			_snd("shield")
+		"turbo":
+			g.turbo = 2.2
+			g.boost = 2.0
+			_snd("boost")
+		"beben":
+			var bx = BoxMesh.new()
+			bx.size = Vector3(T.TW * 2.2, 0.5, 0.6)
+			var mi = _glow_node(bx, Color(1.0, 0.45, 0.1), 5.0, 0.7)
+			quake = {"z": g.z + 3.0, "age": 0.0, "hit": [], "n": mi}
+			_snd("boom")
+		"wand":
+			var bx = BoxMesh.new()
+			bx.size = Vector3(T.TW * 2.0, 1.4, 0.06)
+			var mi = _glow_node(bx, Color(1.0, 0.5, 0.1), 3.0, 0.45)
+			var z = g.z + 12.0
+			var f = T.frame(z)
+			mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * 0.7)
+			walls.append({"z": z, "age": 0.0, "hit": [], "n": mi})
+			_snd("wallon")
+		"auto":
+			g.auto = 5.0
+			_snd("shield")
+
+
+func _weapons(dt: float, racing: bool) -> void:
+	var g: Dictionary = ships[0]
+	msg_t -= dt
+	if msg_t <= 0.0:
+		hud.msg.text = ""
+	# Waffenfeld: jedes zweite Feld (alle 70 Einheiten)
+	var zz = g.z
+	var wk = int(floor((zz - 17.0) / 35.0))
+	var wz = (zz - 17.0) / 35.0 - wk
+	if racing and posmod(wk, 2) == 0 and wz < 0.05 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and g.wpn == "":
+		g.wpK = wk
+		g.wpn = _pick_w()
+		_snd("pick")
+	if fire_req:
+		fire_req = false
+		if g.wpn != "" and racing:
+			_fire()
+	hud.fire.text = WN.get(g.wpn, "empty")
+	hud.fire.modulate = Color(1, 1, 1, 1.0 if g.wpn != "" else 0.45)
+	hud.fire_sb.border_color = Color(1.0, 0.6, 0.25, 0.9) if g.wpn != "" else Color(1, 1, 1, 0.3)
+	var vp = get_viewport().get_visible_rect().size
+	var r = (hud.fire as Control).get_global_rect()
+	fire_rect = r.grow(20) if r.size.x > 0 else Rect2(vp.x * 0.5 - 130, vp.y - 270, 260, 200)
+	for o in ships:
+		if o.idx > 0 and (o.node as Node3D).has_meta("bar"):
+			var bar: MeshInstance3D = (o.node as Node3D).get_meta("bar")
+			bar.set_instance_shader_parameter("fill", o.en)
+			bar.visible = state == "race" and o.z - g.z > 1.5 and o.z - g.z < 40.0
+	hud.en.size.x = 200.0 * g.en
+	hud.en.color = Color(0.36, 1.0, 0.6) if g.en > 0.5 else (Color(1.0, 0.85, 0.25) if g.en > 0.25 else Color(1.0, 0.35, 0.3))
+	# Neue Runde: 25 % Energie zurück
+	for o in ships:
+		var ln = int(floor((o.z - T.ZST) / T.LAP))
+		if ln > o.enL and not o.out:
+			o.enL = ln
+			o.en = minf(1.0, o.en + 0.25)
+	var spd = base_spd * 2.8
+	# Geschosse
+	for i in range(shots.size() - 1, -1, -1):
+		var sh = shots[i]
+		sh.t += dt
+		sh.z += spd * dt
+		if sh.pl:
+			sh.lat += (g.lat - sh.lat) * minf(1.0, dt * 3.0)
+		elif sh.hm:
+			if sh.tg == null or sh.tg.out or sh.tg.z < sh.z - 1.5:
+				sh.tg = null
+				var bd = 200.0
+				for o in ships:
+					if o.idx != 0 and not o.out and o.z - sh.z > -1.0 and o.z - sh.z < bd:
+						bd = o.z - sh.z
+						sh.tg = o
+			if sh.tg != null:
+				sh.lat += (sh.tg.lat - sh.lat) * minf(1.0, dt * 5.0)
+		else:
+			sh.lat += sh.dl * spd * dt
+		var hit = null
+		for o in ships:
+			if o.out or (sh.pl != (o.idx == 0)):
+				continue
+			if absf(sh.z - o.z) < 0.7 + spd * dt * 1.5 and absf(sh.lat - o.lat) < 0.4:
+				hit = o
+				break
+		var dead = false
+		if hit != null:
+			if not (hit.idx == 0 and hit.shield > 0.0):
+				hit.slow = 0.35
+				hit.vpsi += randf_range(-0.25, 0.25)
+			_dmg(hit, 0.3)
+			_explode(sh.z, sh.lat)
+			dead = true
+		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0:
+			_explode(sh.z, clampf(sh.lat, -T.TW, T.TW))
+			dead = true
+		if dead:
+			sh.n.queue_free()
+			shots.remove_at(i)
+		else:
+			var f = T.frame(sh.z)
+			sh.n.global_transform = Transform3D(Basis(f.rr, f.fw, -f.uu), f.c + f.rr * sh.lat + f.uu * 0.25)
+	# Minen
+	for i in range(mines.size() - 1, -1, -1):
+		var m = mines[i]
+		m.t += dt
+		(m.n as MeshInstance3D).visible = fmod(m.t, 0.5) < 0.35
+		var boom = false
+		for o in ships:
+			if o.idx != 0 and not o.out and absf(o.z - m.z) < 0.5 + o.spd * dt * 1.3 and absf(o.lat - m.lat) < 0.38:
+				o.slow = 0.35
+				_dmg(o, 0.2)
+				boom = true
+		if boom or m.t > 40.0:
+			if boom:
+				_explode(m.z, m.lat)
+			m.n.queue_free()
+			mines.remove_at(i)
+	# Wall: Gegner, die durchfliegen, werden 1 s gebremst und verlieren 10 %
+	for i in range(walls.size() - 1, -1, -1):
+		var w = walls[i]
+		w.age += dt
+		for o in ships:
+			if o.idx != 0 and not o.out and not w.hit.has(o.idx) and o.z >= w.z and o.z - o.spd * dt * 1.5 < w.z + 0.01:
+				w.hit.append(o.idx)
+				o.slowT = 1.0
+				_dmg(o, 0.1)
+				_snd("zap", 0.0, 1.0, (o.node as Node3D).global_position)
+		var mat: StandardMaterial3D = (w.n as MeshInstance3D).material_override
+		mat.albedo_color.a = 0.45 * clampf(minf(w.age / 0.3, (5.3 - w.age) / 0.4), 0.0, 1.0)
+		if w.age > 5.3:
+			w.n.queue_free()
+			walls.remove_at(i)
+	# Beben: rollt nach vorn, wirft Gegner hoch
+	if quake != null:
+		quake.z += base_spd * 3.2 * dt
+		quake.age += dt
+		for o in ships:
+			if o.idx != 0 and not o.out and not quake.hit.has(o.idx) and absf(o.z - quake.z) < 2.6:
+				quake.hit.append(o.idx)
+				_dmg(o, 0.2)
+				if not o.out:
+					o.air = true
+					o.vy = 5.8
+					o.h = maxf(o.h, 0.6)
+					o.slow = 0.25
+		var f = T.frame(quake.z)
+		quake.n.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * 0.25)
+		if quake.z - g.z > 90.0 or quake.age > 6.0:
+			quake.n.queue_free()
+			quake = null
+	# Explosionen: wachsen, verblassen
+	for i in range(fxs.size() - 1, -1, -1):
+		var e = fxs[i]
+		e.t += dt
+		var u = e.t / (0.9 if e.big else 0.6)
+		var sc = (0.3 + (3.2 if e.big else 2.0) * pow(u, 0.6))
+		(e.n as MeshInstance3D).scale = Vector3(sc, sc, sc)
+		var mat: StandardMaterial3D = (e.n as MeshInstance3D).material_override
+		mat.albedo_color.a = 0.9 * (1.0 - u)
+		mat.emission_energy_multiplier = 6.0 * (1.0 - u)
+		e.l.light_energy = 10.0 * (1.0 - u) * (1.0 - u)
+		if u >= 1.0:
+			e.n.queue_free()
+			fxs.remove_at(i)
+	# Schild um dich
+	if g.shield > 0.0:
+		if not hud.has("shield"):
+			var sp = SphereMesh.new()
+			sp.radius = 1.0
+			sp.height = 1.4
+			hud.shield = _glow_node(sp, Color(0.4, 0.8, 1.0), 2.0, 0.25)
+		hud.shield.visible = true
+		hud.shield.global_position = (g.node as Node3D).global_position + Vector3.UP * 0.15
+	elif hud.has("shield"):
+		hud.shield.visible = false
+
+
 # ---------------------------------------------------------------- Fahrphysik (wie HTML-Version: Nase lenken, Flugrichtung folgt mit begrenzter Haftung)
 func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> void:
 	var z: float = s.z
@@ -975,7 +1380,12 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	s.vpsi = clampf(s.vpsi + ((s.psi - s.vpsi) * grip + turn) * dt, -0.9, 0.9)
 	s.slow += (1.0 - s.slow) * (1.0 - exp(-dt / 1.4))
 	s.boost *= exp(-dt / 1.4)
-	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow if racing or state == "done" else 0.0
+	if s.out:
+		s.spd = 0.0
+		return
+	if s.slowT > 0.0:
+		s.slowT -= dt
+	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow * (0.5 if s.slowT > 0.0 else 1.0) if racing or state == "done" else 0.0
 	var fwd: float = s.spd * cos(s.vpsi)
 	s.z += fwd * dt
 	s.lat += s.spd * sin(s.vpsi) * dt
@@ -1091,11 +1501,20 @@ func _process(delta: float) -> void:
 		steer = clampf(-g.lat * 0.6 - g.vpsi * 2.0, -1.0, 1.0)
 	var n = maxi(1, int(ceil(dt / 0.0125)))
 	var hdt = dt / n
+	var tt = Time.get_ticks_msec() / 1000.0
+	if g.auto > 0.0:
+		steer = _ai_inp(g, tt)
+		g.auto -= dt
+	if g.turbo > 0.0:
+		g.turbo -= dt
+		g.boost = maxf(g.boost, 1.5)
+	g.shield = maxf(0.0, g.shield - dt)
 	for k in range(n):
 		_phys(g, steer, true, hdt, racing)
-	var tt = Time.get_ticks_msec() / 1000.0
 	for i in range(1, ships.size()):
 		var o: Dictionary = ships[i]
+		if o.out:
+			continue
 		var inp = _ai_inp(o, tt)
 		for k in range(n):
 			_phys(o, inp, false, hdt, racing)
@@ -1122,13 +1541,21 @@ func _process(delta: float) -> void:
 		var fin = T.ZST + T.LAPS * T.LAP
 		if o.z >= fin and o.fin == 0.0 and racing:
 			o.fin = race_t
+		# Gegner schießen ab und zu von hinten auf dich
+		if racing and dz < 0.0 and dz > -25.0 and randf() < dt * 0.02:
+			_add_shot(o, true)
 	# Ziel
 	var finish = T.ZST + T.LAPS * T.LAP
 	var place = 1
 	for i in range(1, ships.size()):
-		if ships[i].z > g.z:
+		if ships[i].z > g.z and not ships[i].out:
 			place += 1
-	if racing and g.z >= finish:
+	_weapons(dt, racing)
+	if racing and g.out:
+		state = "done"
+		t_state = 0.0
+		hud.res.text = "ELIMINATED\n\nTap to return"
+	elif racing and g.z >= finish:
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
@@ -1160,6 +1587,9 @@ func _shot() -> void:
 				ships[0].z = float(p[1])
 				for i in range(1, 4):
 					ships[i].z = float(p[1]) + 2.0 + i * 2.5
+			if shot_n == 40 and p.size() > 3:
+				ships[0].wpn = p[3]
+				fire_req = true
 			if shot_n == 90:
 				get_viewport().get_texture().get_image().save_png(p[0])
 				get_tree().quit()
