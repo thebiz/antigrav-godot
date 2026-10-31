@@ -40,7 +40,10 @@ var last_c = 99
 # Waffen und Energie (wie im alten Spiel)
 const WP = [["rak", 0.2], ["lenk", 0.2], ["mine", 0.12], ["schild", 0.09], ["turbo", 0.11], ["beben", 0.08], ["auto", 0.05], ["wand", 0.07], ["orbs", 0.08]]
 const WP_AI = [["lenk", 0.35], ["rak", 0.25], ["mine", 0.2], ["schild", 0.1], ["turbo", 0.1]]
-const WN = {"rak": "MISSILE", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "WALL", "orbs": "ORBS"}
+# eigene Farbe je Waffe, damit man sie im Augenwinkel unterscheiden kann
+const WC = {"rak": Color(1.0, 0.55, 0.12), "lenk": Color(1.0, 0.18, 0.22), "mine": Color(1.0, 0.86, 0.1), "orbs": Color(0.3, 0.6, 1.0),
+	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95)}
+const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "WALL", "orbs": "ORBS"}
 var shots = []
 var mines = []
 var fxs = []
@@ -88,7 +91,8 @@ func _ready() -> void:
 # ---------------------------------------------------------------- Klänge aus dem alten Spiel (Dateien in sfx/)
 func _sounds() -> void:
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
-			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav"]:
+			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
+			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	for k in ["engine", "idle", "field"]:
 		var p = AudioStreamPlayer.new()
@@ -1207,7 +1211,7 @@ func _hud() -> void:
 		var t = Time.get_ticks_msec() / 1000.0
 		var c = ring.size * 0.5
 		var pu = 0.5 + 0.5 * sin(t * 5.0)
-		var oc = Color(1.0, 0.55, 0.15)
+		var oc: Color = hud.get("wc", Color(1.0, 0.55, 0.15))
 		# pulsierender Außenring
 		ring.draw_arc(c, 112.0 + 9.0 * pu, 0.0, TAU, 64, Color(oc.r, oc.g, oc.b, 0.55 * (1.0 - pu) + 0.15), 3.0, true)
 		# drei drehende Bogenstücke
@@ -1277,35 +1281,6 @@ func _hud() -> void:
 	rb.pressed.connect(_replay_end)
 	cl.add_child(rb)
 	hud.rpx = rb
-	# Lenk-Pedale: schlichte, abgerundete Konturen links und rechts unten, leuchten beim Drücken
-	hud.ped = []
-	for sd in [-1, 1]:
-		var pnl = Panel.new()
-		var sb = StyleBoxFlat.new()
-		sb.bg_color = Color(1, 1, 1, 0.0)
-		sb.border_color = Color(1, 1, 1, 0.3)
-		sb.set_border_width_all(3)
-		sb.set_corner_radius_all(26)
-		pnl.add_theme_stylebox_override("panel", sb)
-		pnl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		pnl.anchor_top = 1.0
-		pnl.anchor_bottom = 1.0
-		pnl.anchor_left = 0.0 if sd < 0 else 1.0
-		pnl.anchor_right = pnl.anchor_left
-		pnl.offset_left = 44 if sd < 0 else -144
-		pnl.offset_right = 144 if sd < 0 else -44
-		pnl.offset_top = -300
-		pnl.offset_bottom = -110
-		cl.add_child(pnl)
-		# drei feine Querrillen wie auf einem Pedal
-		for k in range(3):
-			var ln = ColorRect.new()
-			ln.color = Color(1, 1, 1, 0.22)
-			ln.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			ln.position = Vector2(30, 66 + k * 28)
-			ln.size = Vector2(40, 3)
-			pnl.add_child(ln)
-		hud.ped.append([pnl, sb])
 
 
 # ---------------------------------------------------------------- Menü: Gleiterwahl, Start, Einstellungen (Tempo, Grafik)
@@ -2091,6 +2066,7 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "") -> void:
 		if o.idx != 0:
 			_msg(nm.to_upper(), Color(1, 0.85, 0.5))
 			_snd("boom", 4.0, 0.42)
+			_snd("vo_elim", 4.0)
 	elif o.idx == 0:
 		_msg("−%d %% ENERGY" % int(round(a * 100.0)), Color(1, 0.48, 0.35))
 	else:
@@ -2348,7 +2324,8 @@ func _weapons(dt: float, racing: bool) -> void:
 	if racing and posmod(wk, 2) == 0 and wz < 0.05 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and g.wpn == "":
 		g.wpK = wk
 		g.wpn = _pick_w()
-		_snd("pick")
+		_snd("pick", -4.0)
+		_snd("vo_" + g.wpn, 3.0)   # Ansage, was du eingesammelt hast
 	if fire_req:
 		fire_req = false
 		if g.wpn != "" and racing:
@@ -2357,14 +2334,12 @@ func _weapons(dt: float, racing: bool) -> void:
 	var armed = g.wpn != ""
 	hud.armed = armed
 	hud.fire.modulate = Color(1, 1, 1, 1.0 if armed else 0.4)
-	hud.fire_sb.border_color = Color(1.0, 0.6, 0.25, 1.0) if armed else Color(1, 1, 1, 0.25)
-	hud.fire_sb.bg_color = Color(1.0, 0.45, 0.1, 0.22 + 0.08 * sin(Time.get_ticks_msec() / 200.0)) if armed else Color(1, 1, 1, 0.05)
+	var wc: Color = WC.get(g.wpn, Color(1, 1, 1))
+	hud.wc = wc
+	hud.fire_sb.border_color = Color(wc.r, wc.g, wc.b, 1.0) if armed else Color(1, 1, 1, 0.25)
+	hud.fire_sb.bg_color = Color(wc.r, wc.g, wc.b, 0.22 + 0.08 * sin(Time.get_ticks_msec() / 200.0)) if armed else Color(1, 1, 1, 0.05)
 	hud.ring.queue_redraw()
-	for k in range(2):
-		var on = steer_btn == (-1 if k == 0 else 1) and state == "race"
-		var sb: StyleBoxFlat = hud.ped[k][1]
-		sb.bg_color = Color(1, 1, 1, 0.22 if on else 0.0)
-		sb.border_color = Color(1, 1, 1, 0.75 if on else 0.3)
+
 	var vp = get_viewport().get_visible_rect().size
 	var r = (hud.fire as Control).get_global_rect()
 	fire_rect = r.grow(20) if r.size.x > 0 else Rect2(vp.x * 0.5 - 130, vp.y - 270, 260, 200)
