@@ -209,7 +209,7 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 	if k.begins_with("vo_"):
 		p.bus = "Voice"
 		# solange die Stimme spricht (ohne den Hall am Ende), alles andere absenken
-		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + maxf(0.4, snd[k].get_length() - 0.45) / maxf(0.1, AudioServer.playback_speed_scale))
+		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + maxf(0.4, snd[k].get_length() - 0.25) / maxf(0.1, AudioServer.playback_speed_scale))
 	else:
 		p.bus = "Game"
 	add_child(p)
@@ -1210,6 +1210,16 @@ func _hud() -> void:
 	hud.mid.anchor_right = 1.0
 	hud.mid.anchor_top = 0.3
 	hud.mid.anchor_bottom = 0.3
+	# Warnung, wenn gegnerische Minen vor dir liegen
+	hud.mw = mk.call(34, HORIZONTAL_ALIGNMENT_CENTER)
+	hud.mw.text = "▲  MINES AHEAD  ▲"
+	hud.mw.anchor_right = 1.0
+	hud.mw.anchor_top = 0.62
+	hud.mw.anchor_bottom = 0.62
+	hud.mw.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2))
+	hud.mw.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	hud.mw.add_theme_constant_override("outline_size", 8)
+	hud.mw.visible = false
 	hud.msg = mk.call(32, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.big = mk.call(72, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.big.anchor_right = 1.0
@@ -3158,6 +3168,32 @@ func _kc_cam() -> bool:
 	return true
 
 
+# Minen-Warnung: „düt, düt, düt“, je näher die gegnerischen Minen vor dir liegen, desto schneller und höher
+var mine_bt = 0.0
+
+
+func _mine_warn(dt: float, racing: bool) -> void:
+	var g: Dictionary = ships[0]
+	var best = 999.0
+	if racing and not g.out:
+		for m in mines:
+			if m.get("own", 0) == 0:
+				continue
+			var dz: float = m.z - g.z
+			if dz > 1.0 and dz < 35.0 and absf(m.lat - g.lat) < 1.4 and dz < best:
+				best = dz
+	if best > 100.0:
+		hud.mw.visible = false
+		mine_bt = 0.0
+		return
+	var k = clampf(best / 35.0, 0.0, 1.0)
+	hud.mw.visible = fmod(Time.get_ticks_msec() / 1000.0, 0.4) < 0.26
+	mine_bt -= dt
+	if mine_bt <= 0.0:
+		_snd("beep", -2.0, 1.25 + (1.0 - k) * 0.55)
+		mine_bt = lerpf(0.09, 0.5, k)
+
+
 # ---------------------------------------------------------------- Leistungsmessung: Bildzeiten im Rennen, Ruckler mit Umständen
 var pf = {"n": 0, "sum": 0.0, "hist": [0, 0, 0, 0, 0], "sec": [], "acc": 0.0, "an": 0, "aw": 0.0, "sp": [], "ev": {}}
 
@@ -3473,6 +3509,7 @@ func _process(delta: float) -> void:
 		if ships[i].z > g.z and not ships[i].out:
 			place += 1
 	_weapons(dt, racing)
+	_mine_warn(dt, racing)
 	if racing and g.out:
 		state = "done"
 		t_state = 0.0
