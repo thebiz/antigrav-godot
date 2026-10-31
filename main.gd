@@ -496,10 +496,17 @@ func _road_mat() -> StandardMaterial3D:
 	return m
 
 
+var shader_cache = {}
+
+
 func _shader_mat(code: String) -> ShaderMaterial:
+	# gleicher Code = gleicher Shader: wird nur einmal kompiliert (sonst ruckelt jede Explosion)
+	if not shader_cache.has(code):
+		var sh = Shader.new()
+		sh.code = code
+		shader_cache[code] = sh
 	var m = ShaderMaterial.new()
-	m.shader = Shader.new()
-	m.shader.code = code
+	m.shader = shader_cache[code]
 	return m
 
 
@@ -798,6 +805,9 @@ void fragment(){
 	ALBEDO=c*.55*pow(UV.y,2.)*(.6+.4*sin(TIME*5.+UV.y*12.));
 }""")
 			if _noir():
+				var bsh = Shader.new()
+				bsh.code = beam_mat.shader.code
+				beam_mat.shader = bsh
 				beam_mat.shader.code = beam_mat.shader.code.replace("vec3 c=.5+.5*cos(6.2832*(UV.x+TIME*.3+vec3(0.,.33,.67)));", "vec3 c=vec3(1.,.36,.03);")
 		for wp in wpads:
 			var cy = CylinderMesh.new()
@@ -1561,27 +1571,50 @@ uniform float u=0.;
 void fragment(){float r=length(UV-.5)*2.;float w=smoothstep(.12,0.,abs(r-.85))*(1.-u);ALBEDO=vec3(1.,.7,.4)*w*3.;}"""
 
 
+var tex_cache = {}
+
+
 func _ramp(cols: Array, hdr := true) -> GradientTexture1D:
+	var key = var_to_str(cols) + str(hdr)
+	if tex_cache.has(key):
+		return tex_cache[key]
 	var g = Gradient.new()
 	g.offsets = PackedFloat32Array(cols.map(func(c): return c[0]))
 	g.colors = PackedColorArray(cols.map(func(c): return c[1]))
 	var t = GradientTexture1D.new()
 	t.gradient = g
 	t.use_hdr = hdr
+	tex_cache[key] = t
 	return t
 
 
 func _curve(pts: Array) -> CurveTexture:
+	var key = var_to_str(pts)
+	if tex_cache.has(key):
+		return tex_cache[key]
 	var c = Curve.new()
 	c.max_value = 4.0
 	for p in pts:
 		c.add_point(Vector2(p[0], p[1]))
 	var t = CurveTexture.new()
 	t.curve = c
+	tex_cache[key] = t
 	return t
 
 
+var live_bursts = 0
+
+
 func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vmax: float, spread: float, grav: Vector3, damp: float, smin: float, smax: float, ramp: GradientTexture1D, scurve: CurveTexture, align := false, spin := false, rad := 0.25) -> void:
+	# Budget: je nach Grafikstufe und wie viel gerade schon los ist
+	var q = [0.45, 0.7, 1.0][clampi(int(cfg.gfx), 0, 2)]
+	if live_bursts > 10:
+		q *= 0.5
+	if live_bursts > 22:
+		return
+	amount = maxi(3, int(amount * q))
+	live_bursts += 1
+	get_tree().create_timer(life + 0.6).timeout.connect(func(): live_bursts -= 1)
 	var p = GPUParticles3D.new()
 	var m = ParticleProcessMaterial.new()
 	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
@@ -1622,9 +1655,9 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 
 # Feuerball aus vielen wabernden Flammen: grell weiß-gelb → orange → dunkelrot, steigt etwas auf
 func _fire_ball(pos: Vector3, k: float) -> void:
-	_burst(pos, fxr.fire, int(55 * k), 1.1, 2.0 * k, 6.0 * k, 180.0, Vector3(0, 1.6, 0), 4.0, 1.4 * k, 2.6 * k,
+	_burst(pos, fxr.fire, int(16 * k), 1.0, 2.0 * k, 5.5 * k, 180.0, Vector3(0, 1.6, 0), 4.0, 1.1 * k, 1.9 * k,
 		_ramp([[0.0, Color(12, 10, 7, 1)], [0.1, Color(9, 4.5, 1.2, 1)], [0.35, Color(4, 1.1, 0.15, 0.85)], [0.7, Color(1.0, 0.2, 0.04, 0.45)], [1.0, Color(0.1, 0.02, 0.01, 0)]]),
-		_curve([[0.0, 0.5], [0.2, 1.4], [1.0, 2.2]]), false, false, 0.5 * k)
+		_curve([[0.0, 0.5], [0.2, 1.25], [1.0, 1.6]]), false, false, 0.5 * k)
 
 
 # Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
@@ -1672,7 +1705,7 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	m.color_ramp = _ramp([[0.0, Color(0.6, 0.4, 2.5, 0)], [0.3, Color(1.5, 1.0, 4.0, 1)], [1.0, Color(3, 2.5, 5, 1)]])
 	p.process_material = m
 	p.draw_pass_1 = fxr.spark
-	p.amount = 120
+	p.amount = 50
 	p.lifetime = 0.55
 	p.one_shot = true
 	p.explosiveness = 0.85
@@ -1743,9 +1776,9 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		_fx_res()
 		var f = e.f
 		# Rückstoß: Funken und Lichtblitz nach außen, Ring über die Fahrbahn
-		_burst(e.pos, fxr.spark, 140, 1.0, 10.0, 22.0, 180.0, Vector3(0, -6, 0), 0.8, 0.8, 1.6,
+		_burst(e.pos, fxr.spark, 60, 1.0, 10.0, 22.0, 180.0, Vector3(0, -6, 0), 0.8, 0.8, 1.6,
 			_ramp([[0.0, Color(5, 4, 9, 1)], [0.6, Color(1.6, 1.0, 4.0, 1)], [1.0, Color(0.4, 0.2, 1.0, 0)]]), null, true, false, 0.3)
-		_burst(e.pos - f.uu * 0.4, fxr.debris, 26, 1.8, 5.0, 12.0, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.4, null, null, false, true, 0.3)
+		_burst(e.pos - f.uu * 0.4, fxr.debris, 12, 1.8, 5.0, 12.0, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.4, null, null, false, true, 0.3)
 		var ring = MeshInstance3D.new()
 		ring.mesh = fxr.ring
 		var rm = _shader_mat(fxr.ring_code.replace("vec3(1.,.7,.4)", "vec3(.7,.5,1.)"))
@@ -1784,22 +1817,22 @@ func _explode(z: float, lat: float, big := false) -> void:
 	var f = T.frame(z)
 	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.35
 	# Nachexplosionen: zwei, drei kleinere Feuerbälle rundherum, kurz versetzt
-	for j in range(3 if big else 2):
+	for j in range(2 if big else 1):
 		var off = f.rr * randf_range(-1.2, 1.2) + f.uu * randf_range(0.2, 1.4) + f.fw * randf_range(-1.0, 1.5)
-		get_tree().create_timer(0.08 + j * 0.11).timeout.connect(func(): _fire_ball(pos + off, k * 0.6))
+		get_tree().create_timer(0.08 + j * 0.11).timeout.connect(func(): _fire_ball(pos + off, k * 0.5))
 	# Feuerball: grell weiß-gelb → orange → dunkelrot
 	_fire_ball(pos, k)
 	# Rauch: steigt langsam auf, wird größer
 	var smr = _ramp([[0.0, Color(0.16, 0.14, 0.13, 0)], [0.04, Color(0.14, 0.12, 0.11, 0.9)], [0.35, Color(0.1, 0.1, 0.11, 0.7)], [1.0, Color(0.08, 0.08, 0.09, 0)]], false)
 	var smc = _curve([[0.0, 0.35], [0.25, 1.0], [1.0, 1.7]])
-	_burst(pos + f.uu * 0.5, fxr.smoke, int(30 * k), 8.0, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
+	_burst(pos + f.uu * 0.5, fxr.smoke, int(10 * k), 8.0, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
 	# zweite, dichtere Wolke dicht über der Fahrbahn, hängt noch länger
-	get_tree().create_timer(0.25).timeout.connect(func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(18 * k), 10.0, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
+	get_tree().create_timer(0.25).timeout.connect(func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(6 * k), 10.0, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
 	# Funkenregen
-	_burst(pos, fxr.spark, int(110 * k), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
+	_burst(pos, fxr.spark, int(45 * k), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
 		_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.2)
 	# Trümmer: Stücke der Fahrbahn fliegen weg
-	_burst(pos - f.uu * 0.2, fxr.debris, int(30 * k), 2.0, 5.0 * k, 12.0 * k, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.6, null, null, false, true, 0.3)
+	_burst(pos - f.uu * 0.2, fxr.debris, int(12 * k), 2.0, 5.0 * k, 12.0 * k, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.6, null, null, false, true, 0.3)
 	# Druckwelle auf der Fahrbahn
 	var ring = MeshInstance3D.new()
 	ring.mesh = fxr.ring
@@ -1814,7 +1847,6 @@ func _explode(z: float, lat: float, big := false) -> void:
 	lt.omni_range = 16.0 * k
 	lt.omni_attenuation = 0.7
 	lt.light_energy = 38.0
-	lt.shadow_enabled = int(cfg.gfx) >= 2
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
 	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": 0.0, "big": big, "f": f, "lat": lat, "rg": 16.0 * k})
@@ -2414,8 +2446,6 @@ func _fx_update(dt: float) -> void:
 		lt2.light_energy = 38.0 * exp(-tl * 7.0) + 7.0 * pow(clampf(1.0 - tl / 2.2, 0.0, 1.0), 1.6) * (1.0 + 0.15 * sin(tl * 37.0))
 		lt2.light_color = Color(1.0, 0.92, 0.8).lerp(Color(1.0, 0.4, 0.08), clampf(tl * 2.2, 0.0, 1.0))
 		lt2.omni_range = e.rg * (0.7 + 0.5 * exp(-tl * 3.0))
-		if tl > 0.3:
-			lt2.shadow_enabled = false
 		if tl >= 2.2:
 			lt2.queue_free()
 			fxs.remove_at(i)
@@ -2653,7 +2683,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	s.psi = clampf(s.psi + (s.u * (YAW_P if is_p else YAW_AI) + turn) * dt, -0.9, 0.9)
 	var grip = 0.8 if s.air else (9.5 if is_p else 7.0)
 	s.vpsi = clampf(s.vpsi + ((s.psi - s.vpsi) * grip + turn) * dt, -0.9, 0.9)
-	var ap = is_p and s.auto > 0.0 and not s.out
+	var ap = is_p and (s.auto > 0.0 or state == "done" or state == "replay") and not s.out
 	if ap:
 		# Autopilot wie im alten Spiel: ruhig auf die Mittellinie gleiten, dann schnurgerade, nichts bremst ihn
 		s.u = 0.0
