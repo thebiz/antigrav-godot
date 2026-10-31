@@ -85,7 +85,7 @@ func _ready() -> void:
 # ---------------------------------------------------------------- Klänge aus dem alten Spiel (Dateien in sfx/)
 func _sounds() -> void:
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
-			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav", "gsnap.wav"]:
+			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	for k in ["engine", "idle", "field"]:
 		var p = AudioStreamPlayer.new()
@@ -313,7 +313,7 @@ func _post_update(dt: float) -> void:
 	var bk = 0.0
 	for e in fxs:
 		if e.get("gb", false):
-			var k = clampf(1.0 - (e.pos - cam.global_position).length() / 70.0, 0.0, 1.0)
+			var k = clampf(1.0 - (e.pos - cam.global_position).length() / 50.0, 0.0, 1.0)
 			if not cam.is_position_behind(e.pos) and k > bk:
 				bk = k
 				best = e
@@ -325,13 +325,13 @@ func _post_update(dt: float) -> void:
 	post.set_shader_parameter("gc", c)
 	var t: float = best.t
 	var gs = 0.0
-	if t < GB_T:
-		gs = pow(t / GB_T, 1.4) * 1.9
-	elif t < GB_T + 0.08:
-		gs = -1.8
+	if t < 0.55:
+		gs = pow(t / 0.55, 1.6) * 1.2
+	elif t < 0.62:
+		gs = -1.2
 	post.set_shader_parameter("gs", gs * bk)
-	post.set_shader_parameter("gr", (t - GB_T) * 1.1 if t >= GB_T else -1.0)
-	post.set_shader_parameter("gk", bk * clampf(1.0 - (t - GB_T) / 0.9, 0.0, 1.0))
+	post.set_shader_parameter("gr", (t - 0.55) * 1.1 if t >= 0.55 else -1.0)
+	post.set_shader_parameter("gk", bk * clampf(1.0 - (t - 0.55) / 0.8, 0.0, 1.0))
 
 
 var post_spd = 0.0
@@ -965,8 +965,7 @@ func _ship_node(idx: int) -> Node3D:
 
 
 var shield_mat: ShaderMaterial
-const GB_R = 12.0
-const GB_T = 0.9   # Dauer des Ansaugens bis zum Zusammenschnappen
+const GB_R = 9.0
 
 
 func _shield_for(root: Node3D) -> Node3D:
@@ -1688,20 +1687,7 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 	amount = maxi(3, int(amount * q))
 	live_bursts += 1
 	get_tree().create_timer(life + 0.6).timeout.connect(func(): live_bursts = maxi(0, live_bursts - 1))
-	# gleiche Einstellungen = fertigen Partikel-Knoten aus dem Vorrat nehmen (spart Rechenzeit beim Knall)
-	var key = "%d|%d|%.2f|%.2f|%.2f|%.0f|%s|%.2f|%.2f|%.2f|%d|%d|%s|%s|%.2f" % [mesh.get_instance_id(), amount, life, vmin, vmax, spread, str(grav), damp, smin, smax,
-		ramp.get_instance_id() if ramp != null else 0, scurve.get_instance_id() if scurve != null else 0, str(align), str(spin), rad]
-	var pl: Array = bpool.get(key, [])
-	while not pl.is_empty():
-		var p0 = pl.pop_back()
-		if is_instance_valid(p0):
-			p0.position = pos
-			p0.visible = true
-			p0.restart()
-			get_tree().create_timer(life + 0.6).timeout.connect(_burst_done.bind(p0, key))
-			return
 	var p = GPUParticles3D.new()
-	p.set_meta("pool", true)
 	var m = ParticleProcessMaterial.new()
 	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
 	m.emission_sphere_radius = rad
@@ -1736,23 +1722,7 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 	p.position = pos
 	add_child(p)
 	p.emitting = true
-	get_tree().create_timer(life + 0.6).timeout.connect(_burst_done.bind(p, key))
-
-
-var bpool = {}
-
-
-func _burst_done(p, key: String) -> void:
-	if not is_instance_valid(p):
-		return
-	p.emitting = false
-	p.visible = false
-	if not bpool.has(key):
-		bpool[key] = []
-	if bpool[key].size() < 6:
-		bpool[key].append(p)
-	else:
-		p.queue_free()
+	get_tree().create_timer(life + 0.6).timeout.connect(p.queue_free)
 
 
 # Feuerball aus vielen wabernden Flammen: grell weiß-gelb → orange → dunkelrot, steigt etwas auf
@@ -1800,16 +1770,16 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	var p = GPUParticles3D.new()
 	var m = ParticleProcessMaterial.new()
 	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE_SURFACE
-	m.emission_sphere_radius = 6.5
-	m.radial_accel_min = -40.0
-	m.radial_accel_max = -26.0
+	m.emission_sphere_radius = 4.5
+	m.radial_accel_min = -45.0
+	m.radial_accel_max = -30.0
 	m.gravity = Vector3.ZERO
 	m.particle_flag_align_y = true
 	m.color_ramp = _ramp([[0.0, Color(0.6, 0.4, 2.5, 0)], [0.3, Color(1.5, 1.0, 4.0, 1)], [1.0, Color(3, 2.5, 5, 1)]])
 	p.process_material = m
 	p.draw_pass_1 = fxr.spark
-	p.amount = 60
-	p.lifetime = GB_T
+	p.amount = 50
+	p.lifetime = 0.55
 	p.one_shot = true
 	p.explosiveness = 0.85
 	p.position = pos
@@ -1820,7 +1790,7 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	get_tree().create_timer(1.2).timeout.connect(p.queue_free)
 	var lt = OmniLight3D.new()
 	lt.light_color = Color(0.65, 0.5, 1.0)
-	lt.omni_range = 16.0
+	lt.omni_range = 12.0
 	lt.light_energy = 0.0
 	lt.position = pos
 	add_child(lt)
@@ -1835,7 +1805,7 @@ func _gb_damage(e: Dictionary) -> void:
 		var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
 		var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
 		if kk > 0.0:
-			_dmg(o, (0.6 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0))
+			_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0))
 			o.slow = minf(o.slow, 0.4)
 
 
@@ -1855,21 +1825,21 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 	var cr: MeshInstance3D = e.core
 	var rg: MeshInstance3D = e.ring
 	# Sog: Gegner in der Nähe werden zur Mitte des Lochs gezogen und abgebremst (der Schütze nicht)
-	if t < GB_T + 0.07 and e.own != -2:
+	if t < 0.62 and e.own != -2:
 		for o in ships:
 			if o.out or o.idx == e.own or _prot(o):
 				continue
 			var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
 			var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
 			if kk > 0.0:
-				o.lat += (e.lat - o.lat) * minf(1.0, dt * 7.0 * kk)
-				o.slow = minf(o.slow, 1.0 - 0.85 * kk)
-				o.vpsi *= 1.0 - minf(1.0, dt * 8.0 * kk)
-	if t < GB_T:
-		var u = t / GB_T
-		cr.scale = Vector3.ONE * (0.1 + 1.9 * pow(u, 1.5))
-		rg.scale = Vector3.ONE * (4.4 - 2.0 * u)
-		e.l.light_energy = 7.0 * u
+				o.lat += (e.lat - o.lat) * minf(1.0, dt * 5.0 * kk)
+				o.slow = minf(o.slow, 1.0 - 0.75 * kk)
+				o.vpsi *= 1.0 - minf(1.0, dt * 6.0 * kk)
+	if t < 0.55:
+		var u = t / 0.55
+		cr.scale = Vector3.ONE * (0.1 + 0.9 * pow(u, 1.5))
+		rg.scale = Vector3.ONE * (2.6 - 1.4 * u)
+		e.l.light_energy = 6.0 * u
 	elif not e.snap:
 		e.snap = true
 		if e.own != -2:
@@ -1891,17 +1861,16 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		e.sw = ring
 		e.swm = rm
 		e.l.light_energy = 9.0
-		_snd("gsnap", 5.0, 1.0, e.pos)
 		var d = (e.pos - cam.global_position).length()
 		var near = clampf(1.0 - d / 40.0, 0.0, 1.0)
-		shake = maxf(shake, 2.0 * near)
-		_flash(Color(0.75, 0.6, 1.0), 0.25 * near)
+		shake = maxf(shake, 1.6 * near)
+		_flash(Color(0.75, 0.6, 1.0), 0.22 * near)
 	else:
-		var u = clampf((t - GB_T) / 0.8, 0.0, 1.0)
+		var u = clampf((t - 0.55) / 0.7, 0.0, 1.0)
 		rg.visible = false
 		e.l.light_energy = 9.0 * pow(1.0 - u, 2.0)
 		var f = e.f
-		var sc = 0.6 + 13.0 * pow(u, 0.5)
+		var sc = 0.6 + 9.0 * pow(u, 0.5)
 		e.sw.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
 		e.swm.set_shader_parameter("u", u)
 		if u >= 1.0:
@@ -1928,13 +1897,13 @@ func _explode(z: float, lat: float, big := false) -> void:
 	# Feuerball: grell weiß-gelb → orange → dunkelrot
 	_fire_ball(pos, k)
 	# Rauch: steigt langsam auf, wird größer
-	var smr = _ramp([[0.0, Color(0.16, 0.14, 0.13, 0)], [0.05, Color(0.14, 0.12, 0.11, 0.6)], [0.35, Color(0.1, 0.1, 0.11, 0.42)], [1.0, Color(0.08, 0.08, 0.09, 0)]], false)
+	var smr = _ramp([[0.0, Color(0.16, 0.14, 0.13, 0)], [0.04, Color(0.14, 0.12, 0.11, 0.9)], [0.35, Color(0.1, 0.1, 0.11, 0.7)], [1.0, Color(0.08, 0.08, 0.09, 0)]], false)
 	var smc = _curve([[0.0, 0.35], [0.25, 1.0], [1.0, 1.7]])
-	_burst(pos + f.uu * 0.5, fxr.smoke, int(8 * k), 6.0, 0.6, 2.0 * k, 55.0, Vector3(0, 0.4, 0), 1.6, 1.2 * k, 2.3 * k, smr, smc, false, false, 0.35 * k)
+	_burst(pos + f.uu * 0.5, fxr.smoke, int(10 * k), 8.0, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
 	# zweite, dichtere Wolke dicht über der Fahrbahn, hängt noch länger
-	get_tree().create_timer(0.25).timeout.connect(func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(5 * k), 7.0, 0.3, 1.1 * k, 60.0, Vector3(0, 0.2, 0), 1.2, 1.4 * k, 2.5 * k, smr, smc, false, false, 0.45 * k))
+	get_tree().create_timer(0.25).timeout.connect(func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(6 * k), 10.0, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
 	# Funkenregen
-	_burst(pos, fxr.spark, int(32 * k), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
+	_burst(pos, fxr.spark, int(45 * k), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
 		_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.2)
 	# Trümmer: Stücke der Fahrbahn fliegen weg
 	_burst(pos - f.uu * 0.2, fxr.debris, int(12 * k), 2.0, 5.0 * k, 12.0 * k, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.6, null, null, false, true, 0.3)
@@ -2844,9 +2813,7 @@ func _warm_step(delta: float) -> void:
 		return
 	var g2: Dictionary = ships[0]
 	for n in get_children():
-		if n.has_meta("pool"):
-			n.visible = false
-		elif not warm_before.has(n) and n != warm_cover and not tun_l.has(n):
+		if not warm_before.has(n) and n != warm_cover and not tun_l.has(n):
 			n.queue_free()
 	for e in zaps:
 		e.mi.queue_free()
@@ -3239,7 +3206,7 @@ func _shot() -> void:
 				_replay_start()
 				for k in range(int(p[3].substr(3))):
 					_rp_next()
-			if shot_n == ({"gb3": 59, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				if p.size() > 3 and p[3] == "long":
 					print(_perf_text())
