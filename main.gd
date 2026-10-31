@@ -1189,21 +1189,48 @@ func _hud() -> void:
 	el.text = "ENERGY"
 	el.position = Vector2(36, 156)
 	el.modulate = Color(1, 1, 1, 0.7)
-	hud.fire = mk.call(26, HORIZONTAL_ALIGNMENT_CENTER)
+	# Waffenknopf: runder Knopf, geladen = orange mit drehendem, pulsierendem Ring
+	var ring = Control.new()
+	ring.anchor_left = 0.5
+	ring.anchor_right = 0.5
+	ring.anchor_top = 1.0
+	ring.anchor_bottom = 1.0
+	ring.offset_left = -125
+	ring.offset_right = 125
+	ring.offset_top = -330
+	ring.offset_bottom = -80
+	ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cl.add_child(ring)
+	ring.draw.connect(func():
+		if not hud.get("armed", false):
+			return
+		var t = Time.get_ticks_msec() / 1000.0
+		var c = ring.size * 0.5
+		var pu = 0.5 + 0.5 * sin(t * 5.0)
+		var oc = Color(1.0, 0.55, 0.15)
+		# pulsierender Außenring
+		ring.draw_arc(c, 112.0 + 9.0 * pu, 0.0, TAU, 64, Color(oc.r, oc.g, oc.b, 0.55 * (1.0 - pu) + 0.15), 3.0, true)
+		# drei drehende Bogenstücke
+		for k in range(3):
+			var a0 = t * 2.2 + k * TAU / 3.0
+			ring.draw_arc(c, 104.0, a0, a0 + 1.2, 24, Color(oc.r, oc.g, oc.b, 0.95), 6.0, true))
+	hud.ring = ring
+	hud.fire = mk.call(30, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.fire.anchor_left = 0.5
 	hud.fire.anchor_right = 0.5
 	hud.fire.anchor_top = 1.0
 	hud.fire.anchor_bottom = 1.0
-	hud.fire.offset_left = -110
-	hud.fire.offset_right = 110
-	hud.fire.offset_top = -250
-	hud.fire.offset_bottom = -90
+	hud.fire.offset_left = -95
+	hud.fire.offset_right = 95
+	hud.fire.offset_top = -300
+	hud.fire.offset_bottom = -110
 	hud.fire.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hud.fire.add_theme_font_size_override("font_size", 30)
 	var fsb = StyleBoxFlat.new()
-	fsb.bg_color = Color(1, 1, 1, 0.07)
-	fsb.border_color = Color(1, 1, 1, 0.3)
+	fsb.bg_color = Color(1, 1, 1, 0.05)
+	fsb.border_color = Color(1, 1, 1, 0.25)
 	fsb.set_border_width_all(3)
-	fsb.set_corner_radius_all(80)
+	fsb.set_corner_radius_all(95)
 	hud.fire.add_theme_stylebox_override("normal", fsb)
 	hud.fire_sb = fsb
 	hud.res = mk.call(34, HORIZONTAL_ALIGNMENT_CENTER)
@@ -1250,18 +1277,35 @@ func _hud() -> void:
 	rb.pressed.connect(_replay_end)
 	cl.add_child(rb)
 	hud.rpx = rb
+	# Lenk-Pedale: schlichte, abgerundete Konturen links und rechts unten, leuchten beim Drücken
+	hud.ped = []
 	for sd in [-1, 1]:
-		var b = mk.call(70, HORIZONTAL_ALIGNMENT_CENTER)
-		b.text = "‹" if sd < 0 else "›"
-		b.modulate = Color(1, 1, 1, 0.45)
-		b.anchor_top = 1.0
-		b.anchor_bottom = 1.0
-		b.anchor_left = 0.0 if sd < 0 else 1.0
-		b.anchor_right = b.anchor_left
-		b.offset_left = 30 if sd < 0 else -150
-		b.offset_right = 150 if sd < 0 else -30
-		b.offset_top = -230
-		b.offset_bottom = -110
+		var pnl = Panel.new()
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = Color(1, 1, 1, 0.0)
+		sb.border_color = Color(1, 1, 1, 0.3)
+		sb.set_border_width_all(3)
+		sb.set_corner_radius_all(26)
+		pnl.add_theme_stylebox_override("panel", sb)
+		pnl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pnl.anchor_top = 1.0
+		pnl.anchor_bottom = 1.0
+		pnl.anchor_left = 0.0 if sd < 0 else 1.0
+		pnl.anchor_right = pnl.anchor_left
+		pnl.offset_left = 44 if sd < 0 else -144
+		pnl.offset_right = 144 if sd < 0 else -44
+		pnl.offset_top = -300
+		pnl.offset_bottom = -110
+		cl.add_child(pnl)
+		# drei feine Querrillen wie auf einem Pedal
+		for k in range(3):
+			var ln = ColorRect.new()
+			ln.color = Color(1, 1, 1, 0.22)
+			ln.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			ln.position = Vector2(30, 66 + k * 28)
+			ln.size = Vector2(40, 3)
+			pnl.add_child(ln)
+		hud.ped.append([pnl, sb])
 
 
 # ---------------------------------------------------------------- Menü: Gleiterwahl, Start, Einstellungen (Tempo, Grafik)
@@ -2310,8 +2354,17 @@ func _weapons(dt: float, racing: bool) -> void:
 		if g.wpn != "" and racing:
 			_fire()
 	hud.fire.text = WN.get(g.wpn, "empty")
-	hud.fire.modulate = Color(1, 1, 1, 1.0 if g.wpn != "" else 0.45)
-	hud.fire_sb.border_color = Color(1.0, 0.6, 0.25, 0.9) if g.wpn != "" else Color(1, 1, 1, 0.3)
+	var armed = g.wpn != ""
+	hud.armed = armed
+	hud.fire.modulate = Color(1, 1, 1, 1.0 if armed else 0.4)
+	hud.fire_sb.border_color = Color(1.0, 0.6, 0.25, 1.0) if armed else Color(1, 1, 1, 0.25)
+	hud.fire_sb.bg_color = Color(1.0, 0.45, 0.1, 0.22 + 0.08 * sin(Time.get_ticks_msec() / 200.0)) if armed else Color(1, 1, 1, 0.05)
+	hud.ring.queue_redraw()
+	for k in range(2):
+		var on = steer_btn == (-1 if k == 0 else 1) and state == "race"
+		var sb: StyleBoxFlat = hud.ped[k][1]
+		sb.bg_color = Color(1, 1, 1, 0.22 if on else 0.0)
+		sb.border_color = Color(1, 1, 1, 0.75 if on else 0.3)
 	var vp = get_viewport().get_visible_rect().size
 	var r = (hud.fire as Control).get_global_rect()
 	fire_rect = r.grow(20) if r.size.x > 0 else Rect2(vp.x * 0.5 - 130, vp.y - 270, 260, 200)
@@ -3475,6 +3528,8 @@ func _shot() -> void:
 				elif p[3].begins_with("gb"):
 					_gbomb(ships[0].z + 9.0, 0.0)
 					ships[0].boost = 1.5
+				elif p[3] == "armed":
+					ships[0].wpn = "lenk"
 				elif p[3].begins_with("kill"):
 					for i in range(1, 4):
 						ships[i].en = 0.05
@@ -3488,7 +3543,7 @@ func _shot() -> void:
 				_replay_start()
 				for k in range(int(p[3].substr(3))):
 					_rp_next()
-			if shot_n == ({"kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				if p.size() > 3 and p[3] == "long":
 					print(_perf_text())
