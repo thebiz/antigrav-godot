@@ -1404,6 +1404,43 @@ func _hud() -> void:
 	sv.pressed.connect(_rp_save)
 	cl.add_child(sv)
 	hud.rpsave = sv
+	# Replay als Video (MP4) in die Galerie
+	var vb = _btn("SAVE VIDEO", true)
+	vb.add_theme_font_size_override("font_size", 24)
+	vb.anchor_left = 1.0
+	vb.anchor_right = 1.0
+	vb.offset_left = -300
+	vb.offset_right = -30
+	vb.offset_top = 215
+	vb.offset_bottom = 295
+	vb.visible = false
+	vb.pressed.connect(_vx_start)
+	cl.add_child(vb)
+	hud.vxb = vb
+	# Hinweis während des Erstellens / Fertig-Dialog mit Teilen
+	var vd = VBoxContainer.new()
+	vd.anchor_left = 0.08
+	vd.anchor_right = 0.92
+	vd.anchor_top = 0.3
+	vd.anchor_bottom = 0.3
+	vd.add_theme_constant_override("separation", 18)
+	vd.visible = false
+	cl.add_child(vd)
+	hud.vxd = vd
+	var vl = _lbl("", 34)
+	vl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vd.add_child(vl)
+	hud.vxl = vl
+	var vs = _btn("SHARE", true)
+	vs.pressed.connect(func():
+		if vx.has("p") and vx.get("uri", "") != "":
+			vx.p.share(vx.uri))
+	vd.add_child(vs)
+	hud.vxs = vs
+	var vo = _btn("OK")
+	vo.pressed.connect(_vx_close)
+	vd.add_child(vo)
+	hud.vxo = vo
 
 
 # ---------------------------------------------------------------- Menü: Gleiterwahl, Start, Einstellungen (Tempo, Grafik)
@@ -2920,6 +2957,7 @@ func _replay_start() -> void:
 	hud.rpx.visible = true
 	hud.camrow.visible = true
 	hud.rpsave.visible = rpf.is_empty()
+	hud.vxb.visible = true
 	hud.rpsave.text = "SAVE REPLAY"
 	hud.rpsave.disabled = false
 	_rp_cam_style()
@@ -2942,6 +2980,11 @@ func _replay_start() -> void:
 func _replay_end() -> void:
 	if state != "replay":
 		return
+	if vx.get("on", false):
+		_vx_finish()
+		return
+	if not vx.is_empty():
+		return
 	for k in ["shots", "mines", "walls"]:
 		for n in rp.get(k, []):
 			n.queue_free()
@@ -2957,6 +3000,7 @@ func _replay_end() -> void:
 	hud.rpx.visible = false
 	hud.camrow.visible = false
 	hud.rpsave.visible = false
+	hud.vxb.visible = false
 	mats.road.set_shader_parameter("qs", 0.0)
 	hud.fire.visible = true
 	hud.en_bg.visible = true
@@ -3086,6 +3130,102 @@ func _rp_save() -> void:
 	fa.close()
 	hud.rpsave.text = "SAVED ✓"
 	hud.rpsave.disabled = true
+
+
+# ---------------------------------------------------------------- Video-Export: Replay einmal Bild für Bild abspielen, jedes Bild an den
+# Android-Baustein „VideoExport“ geben (H.264, MP4), danach liegt das Video in der Galerie (Filme/AntiGrav)
+const VX_W = 720
+const VX_H = 1600
+const VX_FPS = 30.0
+var vx = {}
+
+
+func _vx_start() -> void:
+	if not Engine.has_singleton("VideoExport"):
+		hud.vxl.text = "Video export is not available on this device."
+		hud.vxs.visible = false
+		hud.vxo.visible = true
+		hud.vxd.visible = true
+		vx = {"err": true}
+		return
+	vx = {"p": Engine.get_singleton("VideoExport"), "n": 0}
+	hud.vxl.text = "CREATING VIDEO …\nThe replay now plays once from the start.\nPlease wait."
+	hud.vxs.visible = false
+	hud.vxo.visible = false
+	hud.vxd.visible = true
+	hud.camrow.visible = false
+	hud.rpsave.visible = false
+	hud.vxb.visible = false
+	hud.rpx.visible = false
+	get_tree().create_timer(1.8, true, false, true).timeout.connect(_vx_begin)
+
+
+func _vx_begin() -> void:
+	if not vx.has("p"):
+		return
+	if not vx.p.begin(VX_W, VX_H, int(VX_FPS), 9000000):
+		hud.vxl.text = "Video could not be started.\n" + str(vx.p.error())
+		hud.vxo.visible = true
+		return
+	# Replay von vorn, ohne Anzeige, ohne Ton
+	var fix = rp.get("fix", -1)
+	for k in ["shots", "mines", "walls"]:
+		for n in rp.get(k, []):
+			n.queue_free()
+	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": maxi(0, fix), "ct": 0.0, "sp": null, "sk": 1.0, "fix": fix}
+	hud.vxd.visible = false
+	hud.layer.visible = false
+	ui.fps.visible = false
+	AudioServer.set_bus_mute(0, true)
+	vx.on = true
+	vx.last = Time.get_ticks_usec()
+	RenderingServer.frame_post_draw.connect(_vx_capture)
+
+
+func _vx_capture() -> void:
+	if not vx.get("on", false):
+		return
+	var img = get_viewport().get_texture().get_image()
+	if img == null:
+		return
+	img.convert(Image.FORMAT_RGBA8)
+	img.resize(VX_W, VX_H, Image.INTERPOLATE_BILINEAR)
+	vx.p.addFrame(img.get_data())
+	vx.n += 1
+	# Partikel und Zeitgeber laufen mit der echten Zeit: so anpassen, dass pro Bild genau 1/30 s vergeht
+	var now = Time.get_ticks_usec()
+	var real = maxf(0.001, (now - vx.last) / 1000000.0)
+	vx.last = now
+	Engine.time_scale = clampf((1.0 / VX_FPS) / real, 0.02, 4.0)
+
+
+func _vx_finish() -> void:
+	vx.on = false
+	if RenderingServer.frame_post_draw.is_connected(_vx_capture):
+		RenderingServer.frame_post_draw.disconnect(_vx_capture)
+	Engine.time_scale = 1.0
+	AudioServer.set_bus_mute(0, false)
+	ui.fps.visible = true
+	hud.layer.visible = true
+	var uri = str(vx.p.finish())
+	vx.uri = uri
+	if uri != "":
+		hud.vxl.text = "VIDEO SAVED ✓\nGallery › Movies › AntiGrav\n(%d s)" % int(round(vx.n / VX_FPS))
+		hud.vxs.visible = true
+	else:
+		hud.vxl.text = "Saving the video failed.\n" + str(vx.p.error())
+		hud.vxs.visible = false
+	hud.vxo.visible = true
+	hud.vxd.visible = true
+
+
+func _vx_close() -> void:
+	hud.vxd.visible = false
+	var was_err = vx.get("err", false)
+	vx = {}
+	if was_err:
+		return
+	_replay_end()
 
 
 func _rp_next() -> void:
@@ -3623,7 +3763,11 @@ func _process(delta: float) -> void:
 			_shot()
 			return
 	if state == "replay":
-		_replay(dt)
+		if vx.get("on", false):
+			dt = 1.0 / VX_FPS
+			_replay(dt)
+		elif vx.is_empty():
+			_replay(dt)
 		if state == "replay":
 			var lr = int(floor((g.z - 20.0) / T.LAP))
 			for i in range(3):

@@ -35,15 +35,34 @@ jobs:
           sed -i "s/^version\/code=.*/version\/code=${{ github.run_number }}/" export_presets.cfg
           sed -i "s/^version\/name=.*/version\/name=\"1.${{ github.run_number }}\"/" export_presets.cfg
 
+      - name: Android-Bauvorlage und Video-Baustein
+        shell: bash
+        run: |
+          mkdir -p build
+          exec > >(tee build/template.log) 2>&1
+          rm -rf android && mkdir -p android/build
+          ls ~/.local/share/godot/export_templates/4.3.stable/
+          unzip -q ~/.local/share/godot/export_templates/4.3.stable/android_source.zip -d android/build
+          echo "4.3.stable" > android/.build_version
+          touch android/build/.gdignore
+          ls android/build
+          grep -n "srcDirs\|java.srcDir" android/build/build.gradle || true
+          mkdir -p android/build/src/com/antigrav
+          cp android_src/com/antigrav/VideoExport.java android/build/src/com/antigrav/
+          sed -i 's#</application>#    <meta-data android:name="org.godotengine.plugin.v2.VideoExport" android:value="com.antigrav.VideoExport"/>\n    </application>#' android/build/AndroidManifest.xml
+          grep -n "VideoExport" android/build/AndroidManifest.xml
+
       - name: APK bauen
         # signiert mit dem öffentlichen Standard-Testschlüssel der Bauumgebung (kein Geheimnis; bleibt gleich, solange das Image gleich bleibt)
         env:
+          ANDROID_HOME: /usr/lib/android-sdk
+          ANDROID_SDK_ROOT: /usr/lib/android-sdk
           GODOT_ANDROID_KEYSTORE_RELEASE_PATH: /root/debug.keystore
           GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
           GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
         run: |
-          mkdir -p build
-          godot --headless --verbose --path . --export-release "Android" build/AntiGrav3D-${{ github.run_number }}.apk 2>&1 | tail -80
+          godot --headless --verbose --path . --export-release "Android" build/AntiGrav3D-${{ github.run_number }}.apk > build/export.log 2>&1 || true
+          tail -150 build/export.log
           test -f build/AntiGrav3D-${{ github.run_number }}.apk
 
       - name: Als Release veröffentlichen
@@ -53,3 +72,14 @@ jobs:
           name: AntiGrav 3D ${{ github.run_number }}
           files: build/AntiGrav3D-${{ github.run_number }}.apk
           make_latest: true
+
+      - name: Protokoll bei Fehler hochladen
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-log-${{ github.run_number }}
+          name: CI log ${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          files: |
+            build/*.log
