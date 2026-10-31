@@ -2957,7 +2957,7 @@ func _replay_start() -> void:
 	hud.rpx.visible = true
 	hud.camrow.visible = true
 	hud.rpsave.visible = rpf.is_empty()
-	hud.vxb.visible = true
+	hud.vxb.visible = false   # Video-Export vorerst aus (zu langsam); Baustein bleibt für später im Code
 	hud.rpsave.text = "SAVE REPLAY"
 	hud.rpsave.disabled = false
 	_rp_cam_style()
