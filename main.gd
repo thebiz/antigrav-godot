@@ -17,6 +17,7 @@ const START = 0.55
 const SHAPE = 2.3
 const YAW_P = 1.4
 const YAW_AI = 1.5
+const INTRO_T = 3.2
 const BASE_DEF = 12.0  # Grundtempo (Einheiten/s) bei Tempo 100 %
 const NAMES = ["You", "Vega", "Kato", "Mira"]
 
@@ -26,7 +27,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0}
+var cfg = {"ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -208,7 +209,7 @@ func _post() -> void:
 	post = _shader_mat("""
 shader_type canvas_item;
 // Geschwindigkeit (Zoom-Unschärfe, Farbversatz, Speed-Linien), Gravitationsbombe (Sog, schwarzer Kern, Einstein-Ring, Rückstoß-Welle), Phasen-Glitch
-uniform sampler2D scr:hint_screen_texture,filter_linear_mipmap;
+uniform sampler2D scr:hint_screen_texture,filter_linear;
 uniform float spd=0.;
 uniform vec2 gc=vec2(.5);
 uniform float gs=0.;
@@ -219,13 +220,19 @@ uniform float asp=.46;
 uniform float shp=.6;
 uniform float grn=.035;
 uniform vec4 hz0=vec4(0.);uniform vec4 hz1=vec4(0.);uniform vec4 hz2=vec4(0.);uniform vec4 hz3=vec4(0.);
+float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+	return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),f.x),f.y);}
+// Hitzeflimmern: weiche, wabernde Wolken aus Rauschen, ziehen vom Triebwerk weg
 vec2 haze(vec2 uv,vec4 h){
 	if(h.w<=0.)return vec2(0.);
-	vec2 q=uv-h.xy;q.x*=asp;q.y-=h.z*.35;   // Fahne zieht nach unten (zur Kamera hin)
-	float m=smoothstep(1.,0.,length(q*vec2(1.,.75))/h.z)*h.w;
-	return vec2(sin(uv.y*170.-TIME*34.+sin(uv.x*95.+TIME*7.)*2.),cos(uv.x*140.+TIME*27.+uv.y*60.))*.003*m;
+	vec2 q=uv-h.xy;q.x*=asp;q.y-=h.z*.4;
+	float m=smoothstep(1.,.1,length(q*vec2(1.,.7))/h.z)*h.w;
+	if(m<=.001)return vec2(0.);
+	vec2 p=q/h.z*3.2+vec2(0.,-TIME*2.6);
+	vec2 o=vec2(vn(p)+.5*vn(p*2.1+5.2),vn(p+vec2(9.7,3.1))+.5*vn(p*2.1+vec2(1.3,7.7)))-.75;
+	return o*.0075*m;
 }
-float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 void fragment(){
 	vec2 uv=SCREEN_UV;
 	uv+=haze(uv,hz0)+haze(uv,hz1)+haze(uv,hz2)+haze(uv,hz3);
@@ -241,9 +248,12 @@ void fragment(){
 	vec2 cd=uv-vec2(.5,.47);float e=smoothstep(.12,.75,length(cd*vec2(asp,1.)));
 	float ca=.004*spd*e+.006*gl+.01*abs(gs);
 	vec3 col=vec3(0.);
-	for(int i=0;i<8;i++){float f=1.-float(i)*.011*spd*e;vec2 q=vec2(.5,.47)+cd*f;
+	vec3 c0=texture(scr,uv).rgb;
+	// nur wo wirklich verwischt wird, mehrfach lesen (spart auf dem Handy viel)
+	if(spd*e<.02&&ca<.0004){col=c0;}
+	else{for(int i=0;i<6;i++){float f=1.-float(i)*.0147*spd*e;vec2 q=vec2(.5,.47)+cd*f;
 		col+=vec3(texture(scr,q-cd*ca).r,texture(scr,q).g,texture(scr,q+cd*ca).b);}
-	col/=8.;
+	col/=6.;}
 	// schwarzer Kern und leuchtender Ring der Bombe
 	float gp=max(gs,0.);
 	col*=1.-smoothstep(.06*gp+.01,.0,r)*gp;
@@ -255,8 +265,8 @@ void fragment(){
 	col+=vec3(.75,.88,1.)*sl*spd*e*.45;
 	// knackig: Kanten schärfen, feines Filmkorn
 	vec2 px=SCREEN_PIXEL_SIZE;
-	vec3 bl=(texture(scr,uv+vec2(px.x,0.)).rgb+texture(scr,uv-vec2(px.x,0.)).rgb+texture(scr,uv+vec2(0.,px.y)).rgb+texture(scr,uv-vec2(0.,px.y)).rgb)*.25;
-	col+=(texture(scr,uv).rgb-bl)*shp;
+	vec3 bl=(texture(scr,uv+px*vec2(1.,.5)).rgb+texture(scr,uv-px*vec2(1.,.5)).rgb)*.5;
+	col+=(c0-bl)*shp;
 	col=max(col,vec3(0.));
 	col+=(h21(floor(uv/px)+fract(TIME*7.3)*91.)-.5)*grn*(.5+.5*(1.-clamp(dot(col,vec3(.33)),0.,1.)));
 	// Vignette bei Tempo
@@ -356,7 +366,7 @@ func _apply_cfg() -> void:
 	wenv.ssao_enabled = q >= 2
 	moon.shadow_enabled = q >= 1
 	get_viewport().msaa_3d = Viewport.MSAA_4X if q >= 2 else (Viewport.MSAA_2X if q == 1 else Viewport.MSAA_DISABLED)
-	get_viewport().scaling_3d_scale = [0.7, 0.85, 1.0][q]
+	get_viewport().scaling_3d_scale = [0.7, 0.85, 1.0][q] * float(cfg.res)
 	wenv.glow_intensity = 1.6 * float(cfg.glow) * (0.7 if _noir() else 1.0)
 	wenv.adjustment_contrast = 1.18 if _noir() else 1.05
 	wenv.glow_strength = 0.6 + 0.6 * float(cfg.glow)
@@ -1017,6 +1027,8 @@ func _spawn_ships() -> void:
 			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0,
 			"en": 1.0, "out": false, "wpn": "", "wpK": -1, "shield": 0.0, "auto": 0.0, "turbo": 0.0, "slowT": 0.0, "enL": 0, "idx": i}
 		s.sk0 = s.sk
+		s.lane = s.lat
+		s.tl = s.lat
 		ships.append(s)
 
 
@@ -1093,7 +1105,7 @@ func _hud() -> void:
 	bx.offset_left = -230
 	bx.offset_right = 230
 	bx.offset_top = 0
-	bx.offset_bottom = 260
+	bx.offset_bottom = 360
 	bx.add_theme_constant_override("separation", 22)
 	bx.visible = false
 	cl.add_child(bx)
@@ -1103,6 +1115,13 @@ func _hud() -> void:
 	var b2 = _btn("RACE AGAIN")
 	b2.pressed.connect(func(): get_tree().reload_current_scene())
 	bx.add_child(b2)
+	var b3 = _btn("COPY PERFORMANCE DATA")
+	b3.add_theme_font_size_override("font_size", 26)
+	b3.custom_minimum_size = Vector2(0, 80)
+	b3.pressed.connect(func():
+		DisplayServer.clipboard_set(_perf_text())
+		b3.text = "COPIED ✓")
+	bx.add_child(b3)
 	hud.resb = bx
 	var rb = _btn("EXIT REPLAY")
 	rb.anchor_left = 0.5
@@ -1225,19 +1244,19 @@ func _menu() -> void:
 	box.add_child(ui.credit)
 	# Einstellungen
 	var sp = VBoxContainer.new()
-	sp.add_theme_constant_override("separation", 22)
+	sp.add_theme_constant_override("separation", 14)
 	sp.anchor_left = 0.06
 	sp.anchor_right = 0.94
 	sp.anchor_top = 1.0
 	sp.anchor_bottom = 1.0
-	sp.offset_top = -1500
+	sp.offset_top = -1530
 	sp.offset_bottom = -70
 	sp.visible = false
 	root.add_child(sp)
 	ui.setp = sp
 	sp.add_child(_lbl("SETTINGS", 40))
 	ui.sl = {}
-	for it in [["speed", 0.5, 4.0], ["ai", 0.7, 1.4], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0]]:
+	for it in [["speed", 0.5, 4.0], ["ai", 0.7, 1.4], ["res", 0.5, 1.0], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0]]:
 		var k: String = it[0]
 		var lb = _lbl("", 30)
 		sp.add_child(lb)
@@ -1317,6 +1336,7 @@ func _refresh_ui() -> void:
 	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
 	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
+	ui.sl.res.text = "Resolution  %d %%" % int(round(float(cfg.res) * 100.0))
 	for q in range(2):
 		ui.look[q].button_pressed = int(cfg.look) == q
 	ui.sl.glow.text = "Glow  %d %%" % int(round(float(cfg.glow) * 100.0))
@@ -1662,6 +1682,7 @@ func _fire_ball(pos: Vector3, k: float) -> void:
 
 # Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
 func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
+	_pev("hole")
 	_rev(["gb", z, lat])
 	_fx_res()
 	var f = T.frame(z)
@@ -1811,6 +1832,7 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 
 
 func _explode(z: float, lat: float, big := false) -> void:
+	_pev("boom" if not big else "BOOM")
 	_rev(["boom", z, lat, big])
 	_fx_res()
 	var k = 2.2 if big else 1.5
@@ -2307,6 +2329,7 @@ void fragment(){
 
 
 func _wall_node() -> MeshInstance3D:
+	_pev("wall")
 	var q = QuadMesh.new()
 	q.size = Vector2(T.TW * 2.0, 1.4)
 	var mi = MeshInstance3D.new()
@@ -2342,6 +2365,7 @@ var zap_mat: StandardMaterial3D
 
 
 func _zap_ship(o: Dictionary) -> void:
+	_pev("zap")
 	_rev(["zap", o.idx])
 	if zap_mat == null:
 		zap_mat = StandardMaterial3D.new()
@@ -2675,8 +2699,100 @@ func _rp_cam(dt: float) -> bool:
 	return true
 
 
+# ---------------------------------------------------------------- Leistungsmessung: Bildzeiten im Rennen, Ruckler mit Umständen
+var pf = {"n": 0, "sum": 0.0, "hist": [0, 0, 0, 0, 0], "sec": [], "acc": 0.0, "an": 0, "aw": 0.0, "sp": [], "ev": {}}
+
+
+func _pev(k: String) -> void:
+	pf.ev[k] = race_t
+
+
+func _perf_ctx() -> String:
+	var g: Dictionary = ships[0]
+	var gb = 0
+	var ex = 0
+	for e in fxs:
+		if e.get("gb", false):
+			gb += 1
+		else:
+			ex += 1
+	var rec_ev2 = []
+	for k in pf.ev:
+		var a = race_t - float(pf.ev[k])
+		if a < 2.5:
+			rec_ev2.append("%s %.1fs" % [k, a])
+	var c = "z%d fx%d hole%d part%d shot%d mine%d wall%d zap%d" % [int(T.lz(g.z)), ex, gb, live_bursts, shots.size(), mines.size(), walls.size(), zaps.size()]
+	if quake != null:
+		c += " quake"
+	if tun_k > 0.5:
+		c += " tunnel"
+	if g.boost > 0.5:
+		c += " boost"
+	if g.shield > 0.0:
+		c += " shield"
+	if g.orbs > 0.0:
+		c += " orbs"
+	c += " dc%d" % int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+	c += " tri%dk" % int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0)
+	if not rec_ev2.is_empty():
+		c += " | " + ", ".join(rec_ev2)
+	return c
+
+
+func _perf(delta: float) -> void:
+	if state != "race":
+		return
+	var ms = delta * 1000.0
+	pf.n += 1
+	pf.sum += ms
+	var b = 0 if ms < 18.0 else (1 if ms < 25.0 else (2 if ms < 34.0 else (3 if ms < 50.0 else 4)))
+	pf.hist[b] += 1
+	pf.acc += delta
+	pf.an += 1
+	pf.aw = maxf(pf.aw, ms)
+	if pf.acc >= 1.0:
+		pf.sec.append("%5.1f  %3d fps  worst %3d ms  %s" % [race_t, int(round(pf.an / pf.acc)), int(pf.aw), _perf_ctx()])
+		pf.acc = 0.0
+		pf.an = 0
+		pf.aw = 0.0
+	if ms > maxf(45.0, 2.0 * pf.sum / pf.n):
+		pf.sp.append([ms, "%5.1f  %3d ms  %s" % [race_t, int(ms), _perf_ctx()]])
+		if pf.sp.size() > 40:
+			pf.sp.sort_custom(func(a, c): return a[0] > c[0])
+			pf.sp.resize(30)
+
+
+func _perf_text() -> String:
+	var vp = get_viewport()
+	var sz = vp.get_visible_rect().size
+	var ws = DisplayServer.window_get_size()
+	var t = "AntiGrav 3D performance\n"
+	t += "Device: %s · %s\n" % [OS.get_model_name(), RenderingServer.get_video_adapter_name()]
+	t += "Screen %dx%d (ui %dx%d) · 3D scale %.2f · gfx %s · res %d %% · look %s · speed %d %%\n" % [ws.x, ws.y, sz.x, sz.y, vp.scaling_3d_scale,
+		["Low", "Medium", "High"][int(cfg.gfx)], int(float(cfg.res) * 100), "Noir" if _noir() else "Color", int(float(cfg.speed) * 100)]
+	if pf.n > 0:
+		var h: Array = pf.hist
+		t += "Frames %d · avg %.1f ms (%.0f fps)\n" % [pf.n, pf.sum / pf.n, 1000.0 / (pf.sum / pf.n)]
+		t += "Frame times: <18ms %d · 18-25 %d · 25-34 %d · 34-50 %d · >50 %d\n" % [h[0], h[1], h[2], h[3], h[4]]
+	t += "\nWorst hitches (time, ms, situation):\n"
+	var sp: Array = pf.sp.duplicate()
+	sp.sort_custom(func(a, c): return a[0] > c[0])
+	for i in range(mini(20, sp.size())):
+		t += sp[i][1] + "\n"
+	t += "\nPer second (time, fps, worst frame, situation):\n"
+	for l in pf.sec:
+		t += l + "\n"
+	return t
+
+
 # ---------------------------------------------------------------- Fahrphysik (wie HTML-Version: Nase lenken, Flugrichtung folgt mit begrenzter Haftung)
 func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> void:
+	if state == "intro" or state == "count" or state == "menu":
+		s.u = 0.0
+		s.psi = 0.0
+		s.vpsi = 0.0
+		s.roll = 0.0
+		return
 	var z: float = s.z
 	s.u += (inp - s.u) * (1.0 - exp(-dt / (0.03 if is_p else 0.08)))
 	var turn: float = T.kap(z) * s.spd
@@ -2773,6 +2889,7 @@ func _process(delta: float) -> void:
 	var dt = minf(delta, 0.05)
 	t_state += dt
 	ui.fps.text = "%d fps" % Engine.get_frames_per_second()
+	_perf(delta)
 	var g: Dictionary = ships[0]
 	if state == "menu":
 		menu_t += dt
@@ -2801,7 +2918,7 @@ func _process(delta: float) -> void:
 			_shot()
 			return
 	var racing = state == "race"
-	if state == "intro" and t_state > 1.2:
+	if state == "intro" and t_state > INTRO_T:
 		state = "count"
 		t_state = 0.0
 	elif state == "count":
@@ -2918,7 +3035,8 @@ func _shot() -> void:
 			shot_n += 1
 			if shot_n == 2 and p.size() > 2:
 				_start()
-				state = "race"
+				if p[2] != "intro":
+					state = "race"
 			if shot_n == 3 and p.size() > 1 and float(p[1]) > 0.0:
 				ships[0].z = float(p[1])
 				for i in range(1, 4):
@@ -2937,8 +3055,10 @@ func _shot() -> void:
 				_replay_start()
 				for k in range(int(p[3].substr(3))):
 					_rp_next()
-			if shot_n == ({"long": 1500, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
+				if p.size() > 3 and p[3] == "long":
+					print(_perf_text())
 				get_tree().quit()
 
 
@@ -3033,8 +3153,24 @@ func _camera(dt: float) -> void:
 	var ro: Vector3 = S0 - fc * (2.6 + cam_d) + uc * (0.95 - 0.15 * cam_d) - f.uu * g.h * 0.5
 	var ta: Vector3 = S0 + fc * 7.0 + uc * 0.35
 	if state == "intro":
-		var u = clampf(t_state / 1.2, 0.0, 1.0)
-		ro = ro.lerp(S0 + fc * 4.0 + uc * 2.5 + f.rr * 2.0, 1.0 - u)
+		var u = clampf(t_state / INTRO_T, 0.0, 1.0)
+		var Y = Vector3.UP
+		var K = [S0 + f.fw * 6.5 + Y * 3.4 + f.rr * 1.4, S0 + f.fw * 2.6 + Y * 1.1 + f.rr * 1.5, S0 + f.fw * 0.3 + Y * 0.45 + f.rr * 1.25,
+			S0 - f.fw * 1.8 + Y * 0.7 + f.rr * 0.8, ro]
+		var e = u * u * (3.0 - 2.0 * u)
+		var n = K.size() - 1
+		var x = minf(n - 1e-4, e * n)
+		var i = int(floor(x))
+		var t = x - i
+		var p0: Vector3 = K[maxi(0, i - 1)]
+		var p1: Vector3 = K[i]
+		var p2: Vector3 = K[i + 1]
+		var p3: Vector3 = K[mini(n, i + 2)]
+		ro = 0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t * t * t)
+		var w = clampf((u - 0.62) / 0.38, 0.0, 1.0)
+		var ww = w * w * (3.0 - 2.0 * w)
+		ta = (S0 + f.fw * 0.25).lerp(ta, ww)
+		uc = Y.lerp(uc, ww).normalized()
 	shake = maxf(0.0, shake - dt * 1.8)
 	if flash_rect != null and flash_rect.color.a > 0.0:
 		flash_rect.color.a = maxf(0.0, flash_rect.color.a - dt * 2.2)
