@@ -79,6 +79,7 @@ func _ready() -> void:
 	cam.far = 400.0
 	add_child(cam)
 	_hud()
+	_kc_overlay()
 	_menu()
 	_sounds()
 	_apply_cfg()
@@ -1039,6 +1040,87 @@ func _spawn_ships() -> void:
 
 
 # ---------------------------------------------------------------- Anzeige: Platz, Runde, Zeit, Lenkknöpfe
+# Kill-Cam-Bild wie ein Überwachungsmonitor: REC-Punkt, Sucherwinkel, Zeitstempel, feine Bildzeilen
+func _kc_overlay() -> void:
+	var cl = CanvasLayer.new()
+	cl.layer = 6
+	cl.visible = false
+	add_child(cl)
+	kco.layer = cl
+	var sl = ColorRect.new()
+	sl.set_anchors_preset(Control.PRESET_FULL_RECT)
+	sl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sl.material = _shader_mat("""
+shader_type canvas_item;
+void fragment(){
+	vec2 uv=SCREEN_UV;
+	float line=step(.5,fract(FRAGCOORD.y*.25))*.10;
+	float vig=smoothstep(.45,.95,length((uv-.5)*vec2(.8,1.)));
+	float roll=smoothstep(.0,.02,abs(fract(uv.y-TIME*.12)-.5))*.0+exp(-pow((fract(uv.y-TIME*.12)-.5)*40.,2.))*.05;
+	COLOR=vec4(vec3(roll),line+vig*.55);
+}""")
+	cl.add_child(sl)
+	var c = Color(1, 1, 1, 0.85)
+	for corner in range(4):
+		for k in range(2):
+			var r = ColorRect.new()
+			r.color = c
+			r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			var right = corner % 2 == 1
+			var bottom = corner >= 2
+			r.anchor_left = 1.0 if right else 0.0
+			r.anchor_right = r.anchor_left
+			r.anchor_top = 1.0 if bottom else 0.0
+			r.anchor_bottom = r.anchor_top
+			var w = 90.0 if k == 0 else 6.0
+			var h = 6.0 if k == 0 else 90.0
+			var x0 = -40.0 - w if right else 40.0
+			var y0 = -150.0 - h if bottom else 150.0
+			r.offset_left = x0
+			r.offset_right = x0 + w
+			r.offset_top = y0
+			r.offset_bottom = y0 + h
+			cl.add_child(r)
+	var dot = ColorRect.new()
+	dot.color = Color(1, 0.12, 0.1)
+	dot.position = Vector2(62, 182)
+	dot.size = Vector2(22, 22)
+	cl.add_child(dot)
+	kco.dot = dot
+	var t1 = _lbl("REC   KILL CAM", 30)
+	t1.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	t1.position = Vector2(98, 172)
+	cl.add_child(t1)
+	kco.title = t1
+	var t2 = _lbl("", 26)
+	t2.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	t2.anchor_left = 1.0
+	t2.anchor_right = 1.0
+	t2.offset_left = -400
+	t2.offset_right = -64
+	t2.offset_top = 176
+	cl.add_child(t2)
+	kco.who = t2
+	var t3 = _lbl("", 26)
+	t3.anchor_right = 1.0
+	t3.anchor_top = 1.0
+	t3.anchor_bottom = 1.0
+	t3.offset_top = -205
+	t3.modulate = Color(1, 1, 1, 0.85)
+	cl.add_child(t3)
+	kco.ts = t3
+	var t4 = _lbl("tap to skip", 22)
+	t4.anchor_right = 1.0
+	t4.anchor_top = 1.0
+	t4.anchor_bottom = 1.0
+	t4.offset_top = -120
+	t4.modulate = Color(1, 1, 1, 0.45)
+	cl.add_child(t4)
+
+
+var kco = {}
+
+
 func _hud() -> void:
 	var cl = CanvasLayer.new()
 	add_child(cl)
@@ -1084,26 +1166,6 @@ func _hud() -> void:
 	hud.mid.anchor_right = 1.0
 	hud.mid.anchor_top = 0.3
 	hud.mid.anchor_bottom = 0.3
-	# Kill-Cam: schwarze Kinobalken oben und unten
-	hud.kcb = []
-	for top in [true, false]:
-		var bar = ColorRect.new()
-		bar.color = Color(0, 0, 0, 1)
-		bar.anchor_right = 1.0
-		bar.anchor_top = 0.0 if top else 0.9
-		bar.anchor_bottom = 0.1 if top else 1.0
-		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		bar.visible = false
-		cl.add_child(bar)
-		hud.kcb.append(bar)
-	var kl = mk.call(26, HORIZONTAL_ALIGNMENT_CENTER)
-	kl.text = "KILL CAM"
-	kl.anchor_right = 1.0
-	kl.anchor_top = 0.93
-	kl.anchor_bottom = 0.93
-	kl.modulate = Color(1, 0.75, 0.3, 0.9)
-	kl.visible = false
-	hud.kcb.append(kl)
 	hud.msg = mk.call(32, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.big = mk.call(72, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.big.anchor_right = 1.0
@@ -1448,6 +1510,9 @@ func _start() -> void:
 func _input(ev: InputEvent) -> void:
 	if ev is InputEventScreenTouch:
 		if ev.pressed:
+			if state == "kill":
+				_kc_end()
+				return
 			if state == "race" and fire_rect.has_point(ev.position):
 				fire_req = true
 				return
@@ -1827,7 +1892,7 @@ func _gb_damage(e: Dictionary) -> void:
 		var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
 		var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
 		if kk > 0.0:
-			_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0), e.own)
+			_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0), e.own, "rocket")
 			o.slow = minf(o.slow, 0.4)
 
 
@@ -1961,10 +2026,14 @@ func _prot(o: Dictionary) -> bool:
 	return o.shield > 0.0 or o.orbs > 0.0 or (o.idx == 0 and o.auto > 0.0)
 
 
-func _dmg(o: Dictionary, a: float, src := -1) -> void:
+func _dmg(o: Dictionary, a: float, src := -1, kind := "") -> void:
 	if o.out or state != "race" or _prot(o):
 		return
+	var before: float = o.en
 	o.en = maxf(0.0, o.en - a)
+	# wer austeilt, heilt sich: abgezogene Energie wird dir gutgeschrieben
+	if src == 0 and o.idx != 0:
+		ships[0].en = minf(1.0, ships[0].en + (before - o.en))
 	var nm = NAMES[o.idx]
 	if o.en <= 0.0:
 		o.out = true
@@ -1972,8 +2041,8 @@ func _dmg(o: Dictionary, a: float, src := -1) -> void:
 		(o.node as Node3D).visible = false
 		if (o.node as Node3D).has_meta("eng"):
 			((o.node as Node3D).get_meta("eng") as AudioStreamPlayer3D).stop()
-		if o.idx != 0 and src == 0 and state == "race":
-			_killcam_hit(o)
+		if o.idx != 0 and src == 0 and state == "race" and kc_pending.is_empty() and kc.is_empty():
+			kc_pending = {"idx": o.idx, "t0": rec_clk, "kind": kind}
 		_big("ELIMINATED" if o.idx == 0 else "CONTENDER\nELIMINATED", Color(1, 0.3, 0.25) if o.idx == 0 else Color(1, 0.82, 0.25))
 		if o.idx != 0:
 			_msg(nm.to_upper(), Color(1, 0.85, 0.5))
@@ -2141,7 +2210,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 					o.slow = minf(o.slow, 0.55)
 					o.lat += away * 0.35
 					o.vpsi += away * 0.15
-				_dmg(o, 0.15, 0)
+				_dmg(o, 0.15, 0, "orbs")
 				_burst(mi.global_position, fxr.spark, 50, 0.6, 5.0, 11.0, 180.0, Vector3(0, -6, 0), 0.6, 0.6, 1.2,
 					_ramp([[0.0, Color(6, 6, 8, 1)], [1.0, Color(1, 0.5, 0.2, 0)]]), null, true, false, 0.1)
 				_snd("zap", 2.0, 1.4, op)
@@ -2279,11 +2348,6 @@ func _weapons(dt: float, racing: bool) -> void:
 				sh.lat += (sh.tg.lat - sh.lat) * minf(1.0, dt * 5.0)
 		else:
 			sh.lat += sh.dl * spd * dt
-		if sh.own == 0 and kc.is_empty() and racing:
-			for o in ships:
-				if o.idx != 0 and not o.out and not _prot(o) and o.en <= 0.31 and o.z - sh.z > 0.0 and o.z - sh.z < 7.0 and absf(o.lat - sh.lat) < 0.9:
-					_killcam(o, sh)
-					break
 		var hit = null
 		for o in ships:
 			if o.out or o.idx == sh.own or (sh.pl and o.idx != 0):
@@ -2296,12 +2360,21 @@ func _weapons(dt: float, racing: bool) -> void:
 			if not _prot(hit):
 				hit.slow = 0.35
 				hit.vpsi += randf_range(-0.25, 0.25)
-			_dmg(hit, 0.3 if sh.pl else 0.35, sh.own)
+			_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket")
 			_gbomb(sh.z, sh.lat, sh.own, hit.idx)
 			dead = true
 		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0:
 			_gbomb(sh.z, clampf(sh.lat, -T.TW, T.TW), sh.own)
 			dead = true
+		else:
+			# Annäherungszünder: fliegt die Rakete dicht an einem Gegner vorbei, geht sie sofort hoch
+			for o in ships:
+				if o.out or o.idx == sh.own or sh.pl:
+					continue
+				if absf(sh.z - o.z) < 0.8 + spd * dt * 1.5 and absf(sh.lat - o.lat) < 1.6:
+					_gbomb(sh.z, sh.lat, sh.own)
+					dead = true
+					break
 		if dead:
 			sh.n.queue_free()
 			shots.remove_at(i)
@@ -2318,7 +2391,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			if o.idx != m.get("own", 0) and not o.out and absf(o.z - m.z) < 0.5 + o.spd * dt * 1.3 and absf(o.lat - m.lat) < 0.38:
 				if not _prot(o):
 					o.slow = 0.35
-				_dmg(o, 0.2, m.get("own", 0))
+				_dmg(o, 0.2, m.get("own", 0), "mine")
 				boom = true
 		if boom or m.t > 40.0:
 			if boom:
@@ -2334,7 +2407,7 @@ func _weapons(dt: float, racing: bool) -> void:
 				w.hit.append(o.idx)
 				o.slowT = 2.5
 				w.hf = 1.0
-				_dmg(o, 0.1, 0)
+				_dmg(o, 0.1, 0, "wall")
 				_zap_ship(o)
 				_snd("zap", 2.0, 1.0, (o.node as Node3D).global_position)
 		w.hf = maxf(0.0, w.hf - dt * 2.5)
@@ -2349,7 +2422,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		for o in ships:
 			if o.idx != 0 and not o.out and not quake.hit.has(o.idx) and absf(o.z - quake.z) < 2.6:
 				quake.hit.append(o.idx)
-				_dmg(o, 0.2, 0)
+				_dmg(o, 0.2, 0, "quake")
 				if not o.out:
 					o.air = true
 					o.vy = 5.8
@@ -2867,86 +2940,153 @@ func _warm_step(delta: float) -> void:
 # ---------------------------------------------------------------- Kill-Cam: Zeitlupe, wenn du einen Gegner erledigst – erst seitlich bis zum Treffer,
 # dann zwei Perspektiven auf die Explosion
 var kc = {}
+var kc_pending = {}
 
 
-func _killcam(o: Dictionary, sh = null) -> void:
-	if not kc.is_empty() or state != "race":
+# Kill-Cam: spult ca. 2 s zurück und zeigt den Gegner in Zeitlupe bis zum Knall.
+# Kamera je nach Waffe: Rakete von vorn (man sieht sie anfliegen), Mine von hinten, sonst von der Seite.
+func _kc_check() -> void:
+	if kc_pending.is_empty() or not kc.is_empty():
 		return
-	var nd: Node3D = o.node
-	kc = {"o": o, "sh": sh, "phase": "pre" if sh != null else "post", "t": 0.0, "last": Time.get_ticks_usec(),
-		"pos": nd.global_position, "z": o.z, "side": -1.0 if o.lat > 0.0 else 1.0}
-	Engine.time_scale = 0.2
-	AudioServer.playback_speed_scale = 0.6
-	for b in hud.kcb:
-		b.visible = true
-
-
-func _killcam_hit(o: Dictionary) -> void:
-	if kc.is_empty():
-		_killcam(o)
-	elif kc.o == o and kc.phase == "pre":
-		kc.phase = "post"
-		kc.t = 0.0
-	else:
+	if state != "race" or ships[0].out:
+		kc_pending = {}
 		return
-	kc.pos = (o.node as Node3D).global_position
-	kc.z = o.z
+	if rec_clk >= kc_pending.t0 + 1.0:
+		_kc_start()
+
+
+func _kc_start() -> void:
+	var t0: float = kc_pending.t0
+	var F = rec
+	var ts = t0 - 2.0
+	var i = 0
+	while i < F.size() - 2 and F[i + 1].t <= ts:
+		i += 1
+	if F.size() < 10:
+		kc_pending = {}
+		return
+	var saved = []
+	for o in ships:
+		saved.append({"z": o.z, "lat": o.lat, "h": o.h, "psi": o.psi, "roll": o.roll, "boost": o.boost, "spd": o.spd, "shield": o.shield, "orbs": o.orbs})
+	# laufende Effekte ausblenden (sie laufen unsichtbar weiter)
+	var hidden = []
+	for n in get_children():
+		if (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D) and not tun_l.has(n) and n.visible:
+			n.visible = false
+			hidden.append(n)
+	kc = {"t0": t0, "end": t0 + 0.95, "victim": kc_pending.idx, "kind": kc_pending.kind, "saved": saved, "hidden": hidden,
+		"before": get_children(), "fxs": fxs.duplicate(), "zaps": zaps.duplicate(), "top": hud.top.text, "side": 1.0 if randf() < 0.5 else -1.0,
+		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0}
+	kc_pending = {}
+	rp = {"t": F[i].t, "i": i, "ei": i, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0}
+	state = "kill"
+	hud.layer.visible = false
+	kco.layer.visible = true
+	kco.who.text = NAMES[kc.victim].to_upper()
+	AudioServer.playback_speed_scale = 0.75
+
+
+func _kc_step(dt: float) -> void:
+	var rel = rp.t - kc.t0
+	# Zeitlupe: anfangs etwas schneller, um den Treffer herum ganz langsam
+	var rate = 0.6 if rel < -0.6 else (0.28 if rel < 0.4 else 0.5)
+	# echte Zeitlupe: auch Partikel und Funken laufen langsamer
+	Engine.time_scale = rate
+	_replay(dt)
+	if state != "kill":
+		return
+	var v: Dictionary = ships[kc.victim]
+	if rp.t <= kc.t0:
+		kc.dz = v.z
+		kc.dlat = v.lat
+	var tt = Time.get_ticks_msec() / 1000.0
+	kco.dot.visible = fmod(tt, 1.0) < 0.6
+	kco.ts.text = "%s   ×%.2f" % [_fmt(maxf(0.0, rp.t)), rate]
+	hud.top.text = kc.top
+	if rp.t >= kc.end:
+		_kc_end()
 
 
 func _kc_end() -> void:
-	kc = {}
-	Engine.time_scale = 1.0
-	AudioServer.playback_speed_scale = 1.0
-	for b in hud.kcb:
-		b.visible = false
-
-
-func _kc_update() -> void:
 	if kc.is_empty():
 		return
-	var now = Time.get_ticks_usec()
-	var rdt = minf(0.1, (now - kc.last) / 1000000.0)
-	kc.last = now
-	kc.t += rdt
-	if state != "race":
-		_kc_end()
-		return
-	if kc.phase == "pre":
-		# Rakete verfehlt oder Gegner überlebt: zurück zum Rennen
-		var gone = not shots.has(kc.sh)
-		if kc.t > 1.6 or (gone and not kc.o.out and kc.t > 0.2):
-			_kc_end()
-	elif kc.t > 2.6:
-		_kc_end()
+	# alles zurück auf den Stand des laufenden Rennens
+	for k in range(ships.size()):
+		var o: Dictionary = ships[k]
+		var sv: Dictionary = kc.saved[k]
+		for key in sv:
+			o[key] = sv[key]
+		(o.node as Node3D).visible = not o.out
+		_shield_vis(o)
+	for k in ["shots", "mines", "walls"]:
+		for n in rp.get(k, []):
+			if is_instance_valid(n):
+				n.queue_free()
+	rp = {}
+	var keep_fx = []
+	for e in fxs:
+		if kc.fxs.has(e):
+			keep_fx.append(e)
+	fxs = keep_fx
+	var keep_z = []
+	for e in zaps:
+		if kc.zaps.has(e):
+			keep_z.append(e)
+		else:
+			e.mi.queue_free()
+			e.l.queue_free()
+	zaps = keep_z
+	for n in get_children():
+		if not kc.before.has(n) and not tun_l.has(n) and (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D):
+			n.queue_free()
+	for n in kc.hidden:
+		if is_instance_valid(n):
+			n.visible = true
+	if quake == null:
+		mats.road.set_shader_parameter("qs", 0.0)
+	hud.top.text = kc.top
+	kc = {}
+	state = "race"
+	hud.layer.visible = true
+	kco.layer.visible = false
+	AudioServer.playback_speed_scale = 1.0
+	Engine.time_scale = 1.0
+	shake = 0.0
+	big_t = 0.0
 
 
 func _kc_cam() -> bool:
-	var o: Dictionary = kc.o
+	var v: Dictionary = ships[kc.victim]
+	var alive = rp.t <= kc.t0
+	var z: float = v.z if alive else kc.dz
+	var lat: float = v.lat if alive else kc.dlat
+	var f = T.frame(z)
+	var V: Vector3 = f.c + f.rr * lat + f.uu * (0.25 + (v.h if alive else 0.0))
 	var up = Vector3.UP
 	var ro: Vector3
 	var ta: Vector3
-	if kc.phase == "pre":
-		var f = T.frame(o.z)
-		var P: Vector3 = (o.node as Node3D).global_position
-		var S: Vector3 = (kc.sh.n as Node3D).global_position if shots.has(kc.sh) else P
-		ro = P + f.rr * (3.6 * kc.side) + up * 1.2 - f.fw * 2.0
-		ta = (P + S) * 0.5
-	else:
-		var f = T.frame(kc.z)
-		var e: Vector3 = kc.pos
-		if kc.t < 1.3:
-			# Perspektive 1: langsam um die Explosion herum
-			var a = 0.4 + kc.t * 0.55
-			ro = e + (f.rr * cos(a) * kc.side - f.fw * sin(a)) * 9.0 + up * 2.6
-		else:
-			# Perspektive 2: tief von vorn, Trümmer fliegen auf die Kamera zu
-			ro = e + f.fw * 11.0 + f.uu * 0.7 + f.rr * (1.8 * kc.side)
-		ta = e + up * 0.5
+	var sd: float = kc.side
+	match kc.kind:
+		"rocket":
+			# von vorn: man sieht die Rakete von hinten auf den Gegner zufliegen
+			ro = V + f.fw * 4.6 + up * 1.0 + f.rr * (1.3 * sd)
+			ta = V - f.fw * 1.5
+		"mine":
+			# von hinten: der Gegner fliegt in die Minen
+			ro = V - f.fw * 4.8 + up * 1.3 + f.rr * (0.8 * sd)
+			ta = V + f.fw * 2.5
+		_:
+			ro = V + f.rr * (3.4 * sd) + up * 1.1 - f.fw * 1.2
+			ta = V + f.fw * 0.6
+	if not alive:
+		# nach dem Knall langsam zurückziehen
+		var k = clampf((rp.t - kc.t0) / 0.9, 0.0, 1.0)
+		ro += (ro - V).normalized() * 3.0 * k + up * 0.8 * k
 	cam.global_position = ro
 	cam.look_at(ta, up)
-	cam.fov = 50.0
+	cam.fov = 48.0
 	if flash_rect != null and flash_rect.color.a > 0.0:
-		flash_rect.color.a = maxf(0.0, flash_rect.color.a - 0.08)
+		flash_rect.color.a = maxf(0.0, flash_rect.color.a - 0.05)
 	return true
 
 
@@ -3131,6 +3271,8 @@ func _notification(what: int) -> void:
 				get_tree().quit()
 		elif state == "replay":
 			_replay_end()
+		elif state == "kill":
+			_kc_end()
 		else:
 			get_tree().reload_current_scene()
 
@@ -3156,6 +3298,18 @@ func _process(delta: float) -> void:
 		_post_update(dt)
 		_shot()
 		return
+	if state == "kill":
+		_kc_step(dt)
+		if state == "kill":
+			var lk = int(floor((g.z - 20.0) / T.LAP))
+			for i in range(3):
+				laps[i].position = Vector3(0, 0, (lk - 1 + i) * T.LAP)
+			_tunnel(dt)
+			_pose_all(dt)
+			_camera(dt)
+			_post_update(dt)
+			_shot()
+			return
 	if state == "replay":
 		_replay(dt)
 		if state == "replay":
@@ -3250,13 +3404,12 @@ func _process(delta: float) -> void:
 		if ships[i].z > g.z and not ships[i].out:
 			place += 1
 	_weapons(dt, racing)
-	_kc_update()
 	if racing and g.out:
 		state = "done"
 		t_state = 0.0
 		hud.res.text = "ELIMINATED"
 		hud.resb.visible = true
-	elif racing and kc.is_empty() and ships.slice(1).all(func(x): return x.out):
+	elif racing and kc_pending.is_empty() and ships.slice(1).all(func(x): return x.out):
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
@@ -3288,6 +3441,7 @@ func _process(delta: float) -> void:
 	hud.plbox.scale = Vector2.ONE * (1.0 + 0.18 * pl_flash)
 	hud.plbox.pivot_offset = hud.plbox.size
 	_record(dt)
+	_kc_check()
 	# Rundenkopien mitwandern lassen
 	var l0 = int(floor((g.z - 20.0) / T.LAP))
 	for i in range(3):
@@ -3334,7 +3488,7 @@ func _shot() -> void:
 				_replay_start()
 				for k in range(int(p[3].substr(3))):
 					_rp_next()
-			if shot_n == ({"kill1": 46, "kill2": 52, "kill3": 64, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				if p.size() > 3 and p[3] == "long":
 					print(_perf_text())
@@ -3402,7 +3556,7 @@ func _pose_all(dt: float) -> void:
 		var bob = 0.012 * sin(tt * 2.7 + s.ai)
 		var pos: Vector3 = f.c + f.rr * s.lat + f.uu * (0.16 + s.h + bob)
 		var dir: Vector3 = (f.fw * cos(s.psi) + f.rr * sin(s.psi)).normalized()
-		if state != "replay":
+		if state != "replay" and state != "kill":
 			s.roll += (s.u * 0.32 - s.roll) * (1.0 - exp(-dt / 0.15))
 		var up: Vector3 = f.uu.rotated(dir, s.roll)
 		var x = up.cross(dir).normalized()
@@ -3422,7 +3576,7 @@ func _pose_all(dt: float) -> void:
 func _camera(dt: float) -> void:
 	if state == "replay" and _rp_cam(dt):
 		return
-	if not kc.is_empty() and _kc_cam():
+	if state == "kill" and _kc_cam():
 		return
 	var g: Dictionary = ships[0]
 	var f = T.frame(g.z)
