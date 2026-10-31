@@ -26,12 +26,16 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"ship": 0, "speed": 1.0, "gfx": 2}
+var cfg = {"ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9}
+var neon_mats = []  # [Material, Grundhelligkeit]
+var snd = {}
+var loops = {}
 var base_spd = 12.0
 var wenv: Environment
 var moon: DirectionalLight3D
 var ui = {}
 var menu_t = 0.0
+var last_c = 99
 var t_state = 0.0
 var race_t = 0.0
 var steer_btn = 0
@@ -55,7 +59,99 @@ func _ready() -> void:
 	add_child(cam)
 	_hud()
 	_menu()
+	_sounds()
 	_apply_cfg()
+
+
+# ---------------------------------------------------------------- Klänge aus dem alten Spiel (Dateien in sfx/)
+func _sounds() -> void:
+	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
+			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav"]:
+		snd[n.get_basename()] = load("res://sfx/" + n)
+	for k in ["engine", "idle", "field"]:
+		var p = AudioStreamPlayer.new()
+		p.stream = _looped(snd[k])
+		p.volume_db = -80.0
+		add_child(p)
+		p.play()
+		loops[k] = p
+	_ship_sounds()
+
+
+func _looped(st: AudioStream) -> AudioStream:
+	if st is AudioStreamWAV:
+		var w = (st as AudioStreamWAV).duplicate()
+		w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		w.loop_begin = 0
+		w.loop_end = int(w.get_length() * w.mix_rate)
+		return w
+	if st is AudioStreamOggVorbis:
+		var o = (st as AudioStreamOggVorbis).duplicate()
+		o.loop = true
+		return o
+	return st
+
+
+# Gegner: eigenes Triebwerk im Raum (lauter, wenn nah; mit Kopfhörern von hinten/vorn/seitlich)
+func _ship_sounds() -> void:
+	if not snd.has("engine"):
+		return
+	for i in range(1, ships.size()):
+		var nd: Node3D = ships[i].node
+		if nd.has_meta("eng"):
+			continue
+		var p = AudioStreamPlayer3D.new()
+		p.stream = _looped(snd.engine)
+		p.unit_size = 2.5
+		p.max_distance = 45.0
+		p.volume_db = -4.0
+		nd.add_child(p)
+		p.play()
+		nd.set_meta("eng", p)
+
+
+func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
+	if not snd.has(k):
+		return
+	var p
+	if at == null:
+		p = AudioStreamPlayer.new()
+	else:
+		p = AudioStreamPlayer3D.new()
+		p.unit_size = 4.0
+		p.max_distance = 70.0
+		p.position = at
+	p.stream = snd[k]
+	p.volume_db = db
+	p.pitch_scale = pitch
+	add_child(p)
+	p.play()
+	p.finished.connect(p.queue_free)
+
+
+func _sound_update(dt: float) -> void:
+	if loops.is_empty():
+		return
+	var g: Dictionary = ships[0]
+	var sp = g.spd / maxf(1.0, base_spd)
+	var on = state == "race" or state == "done"
+	loops.engine.pitch_scale = clampf(0.7 + 0.6 * sp + 0.35 * g.boost, 0.3, 3.0)
+	loops.engine.volume_db = linear_to_db(0.02 + (0.5 + 0.35 * sp + 0.35 * g.boost if on else 0.12))
+	loops.idle.pitch_scale = clampf(0.75 + 0.45 * sp + 0.25 * g.boost, 0.3, 3.0)
+	loops.idle.volume_db = linear_to_db(0.32 if state != "menu" else 0.2)
+	var scr = on and absf(g.lat) >= T.TW - 0.31 and not g.air and g.spd > 1.0
+	var tv = 0.7 if scr else 0.0
+	scr_v += (tv - scr_v) * (1.0 - exp(-dt / (0.02 if scr else 0.08)))
+	loops.field.volume_db = linear_to_db(maxf(0.0005, scr_v))
+	for i in range(1, ships.size()):
+		var o: Dictionary = ships[i]
+		var nd: Node3D = o.node
+		if nd.has_meta("eng"):
+			var p: AudioStreamPlayer3D = nd.get_meta("eng")
+			p.pitch_scale = clampf(0.7 + 0.6 * o.spd / maxf(1.0, base_spd) + 0.35 * o.boost, 0.3, 3.0)
+
+
+var scr_v = 0.0
 
 
 # ---------------------------------------------------------------- Einstellungen (im Handy gespeichert)
@@ -83,6 +179,13 @@ func _apply_cfg() -> void:
 	moon.shadow_enabled = q >= 1
 	get_viewport().msaa_3d = Viewport.MSAA_4X if q >= 2 else (Viewport.MSAA_2X if q == 1 else Viewport.MSAA_DISABLED)
 	get_viewport().scaling_3d_scale = [0.7, 0.85, 1.0][q]
+	wenv.glow_intensity = 1.6 * float(cfg.glow)
+	wenv.glow_strength = 0.6 + 0.6 * float(cfg.glow)
+	for nm in neon_mats:
+		nm[0].emission_energy_multiplier = nm[1] * float(cfg.neon)
+	for b in lights_nodes:
+		b.light_energy = 2.2 * float(cfg.neon)
+	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.001, float(cfg.vol))))
 
 
 # ---------------------------------------------------------------- Umgebung: Himmel, Licht, Glühen, Spiegelungen, Nebel
@@ -124,8 +227,8 @@ void sky(){
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_exposure = 1.0
 	env.glow_enabled = true
-	env.glow_intensity = 0.9
-	env.glow_strength = 1.1
+	env.glow_intensity = 0.8
+	env.glow_strength = 0.9
 	env.glow_bloom = 0.08
 	env.glow_hdr_threshold = 1.0
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
@@ -177,6 +280,7 @@ func _neon(c: Color, e: float = 5.0) -> StandardMaterial3D:
 	m.emission = c
 	m.emission_energy_multiplier = e
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	neon_mats.append([m, e])
 	return m
 
 
@@ -444,12 +548,14 @@ void fragment(){vec2 q=floor(vec2(UV.x*12.,UV.y*2.));ALBEDO=vec3(mod(q.x+q.y,2.)
 			om.omni_attenuation = 1.6
 			om.position = T.world(l[0], 0.0, 1.1)
 			n.add_child(om)
+			lights_nodes.append(om)
 		add_child(n)
 		laps.append(n)
 
 
 var mats = {}
 var lights = []
+var lights_nodes = []
 
 
 # Boost-Felder und Startlinie: UV aus der Lage im Streifen (x längs, y quer)
@@ -732,30 +838,34 @@ func _menu() -> void:
 	sp.anchor_right = 0.94
 	sp.anchor_top = 1.0
 	sp.anchor_bottom = 1.0
-	sp.offset_top = -760
+	sp.offset_top = -1180
 	sp.offset_bottom = -70
 	sp.visible = false
 	root.add_child(sp)
 	ui.setp = sp
-	sp.add_child(_lbl("SETTINGS", 44))
-	ui.spd = _lbl("", 32)
-	sp.add_child(ui.spd)
-	var hs = HSlider.new()
-	hs.min_value = 0.5
-	hs.max_value = 2.5
-	hs.step = 0.05
-	hs.value = float(cfg.speed)
-	hs.custom_minimum_size = Vector2(0, 80)
-	hs.add_theme_icon_override("grabber", _dot(40))
-	hs.add_theme_icon_override("grabber_highlight", _dot(46))
-	var track_sb = StyleBoxFlat.new()
-	track_sb.bg_color = Color(1, 1, 1, 0.25)
-	track_sb.content_margin_top = 6
-	track_sb.content_margin_bottom = 6
-	track_sb.set_corner_radius_all(6)
-	hs.add_theme_stylebox_override("slider", track_sb)
-	hs.value_changed.connect(func(v): cfg.speed = v; _refresh_ui(); _apply_cfg(); _save_cfg())
-	sp.add_child(hs)
+	sp.add_child(_lbl("SETTINGS", 40))
+	ui.sl = {}
+	for it in [["speed", 0.5, 4.0], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0]]:
+		var k: String = it[0]
+		var lb = _lbl("", 30)
+		sp.add_child(lb)
+		var hs = HSlider.new()
+		hs.min_value = it[1]
+		hs.max_value = it[2]
+		hs.step = 0.05
+		hs.value = float(cfg[k])
+		hs.custom_minimum_size = Vector2(0, 64)
+		hs.add_theme_icon_override("grabber", _dot(40))
+		hs.add_theme_icon_override("grabber_highlight", _dot(46))
+		var track_sb = StyleBoxFlat.new()
+		track_sb.bg_color = Color(1, 1, 1, 0.25)
+		track_sb.content_margin_top = 6
+		track_sb.content_margin_bottom = 6
+		track_sb.set_corner_radius_all(6)
+		hs.add_theme_stylebox_override("slider", track_sb)
+		hs.value_changed.connect(func(v): cfg[k] = v; _refresh_ui(); _apply_cfg(); _save_cfg())
+		sp.add_child(hs)
+		ui.sl[k] = lb
 	sp.add_child(_lbl("Graphics", 32))
 	var gr = HBoxContainer.new()
 	gr.add_theme_constant_override("separation", 12)
@@ -797,7 +907,10 @@ func _dot(r: int) -> ImageTexture:
 func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
 	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · private use only"
-	ui.spd.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
+	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
+	ui.sl.glow.text = "Glow  %d %%" % int(round(float(cfg.glow) * 100.0))
+	ui.sl.neon.text = "Neon lights  %d %%" % int(round(float(cfg.neon) * 100.0))
+	ui.sl.vol.text = "Volume  %d %%" % int(round(float(cfg.vol) * 100.0))
 	for q in range(3):
 		ui.gfx[q].button_pressed = int(cfg.gfx) == q
 		var on = int(cfg.gfx) == q
@@ -813,6 +926,7 @@ func _pick_ship(d: int) -> void:
 		s.node.queue_free()
 	ships.clear()
 	_spawn_ships()
+	_ship_sounds()
 	_refresh_ui()
 
 
@@ -875,6 +989,8 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.vy -= 4.0 * dt
 		s.h += s.vy * dt
 		if s.h <= 0.0 and not T.gap(s.z):
+			if is_p and s.vy < -1.2:
+				_snd("land")
 			s.h = 0.0
 			s.air = false
 			s.vy = 0.0
@@ -888,12 +1004,16 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		if race_t - s.hitT > 0.45 and racing:
 			s.hitT = race_t
 			s.slow = minf(s.slow, 0.65)
+			if is_p:
+				_snd("zap", -2.0, randf_range(0.9, 1.1))
 	# Boost-Feld
 	var k = int(floor(s.z / 35.0))
 	var fz = s.z / 35.0 - k
 	if fz < 0.08 and not s.air and absf(s.lat - T.bpx(k)) < 0.36 and k != s.padK and racing:
 		s.padK = k
 		s.boost = 1.0
+		if is_p:
+			_snd("boost", -3.0)
 
 
 func _ai_inp(o: Dictionary, t: float) -> float:
@@ -935,6 +1055,7 @@ func _process(delta: float) -> void:
 		cam.global_position = S0 + f.fw * cos(a) * 3.4 + f.rr * sin(a) * 3.4 + Vector3.UP * (0.9 + 0.25 * sin(a * 1.7))
 		cam.look_at(S0 + Vector3.UP * 0.1, Vector3.UP)
 		cam.fov = 52.0
+		_sound_update(dt)
 		_shot()
 		return
 	var racing = state == "race"
@@ -943,6 +1064,11 @@ func _process(delta: float) -> void:
 		t_state = 0.0
 	elif state == "count":
 		var c = 3 - int(floor(t_state))
+		if c != last_c:
+			if last_c == 99:
+				_snd("count")
+				_snd("start")
+			last_c = c
 		hud.mid.text = str(c) if c > 0 else "GO"
 		if c <= 0:
 			state = "race"
@@ -982,6 +1108,12 @@ func _process(delta: float) -> void:
 			elif dz > 18.0:
 				st = o.sk0 * (1.0 - minf(0.12, (dz - 18.0) * 0.004))
 		o.sk += (st - o.sk) * (1.0 - exp(-dt / 1.8))
+		# Vorbeiflug-Zischen
+		var pd = o.get("pdz", dz)
+		if racing and signf(pd) != signf(dz) and absf(o.lat - g.lat) < 2.4 and race_t - o.get("psT", -9.0) > 1.5:
+			o.psT = race_t
+			_snd("pass", -2.0, 1.0, (o.node as Node3D).global_position)
+		o.pdz = dz
 		# Rempeln
 		if absf(dz) < 1.4 and absf(o.lat - g.lat) < 0.4 and racing and not g.air and not o.air:
 			var pu = signf(g.lat - o.lat) if g.lat != o.lat else 1.0
@@ -1000,6 +1132,7 @@ func _process(delta: float) -> void:
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
+		_snd("win")
 		hud.res.text = "%s  ·  %s\n\nTap to race again" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
 	hud.top.text = "%d/4     Lap %d/%d     %s" % [place, lap, T.LAPS, _fmt(race_t)]
@@ -1009,6 +1142,7 @@ func _process(delta: float) -> void:
 		laps[i].position = Vector3(0, 0, (l0 - 1 + i) * T.LAP)
 	_pose_all(dt)
 	_camera(dt)
+	_sound_update(dt)
 	_shot()
 
 
