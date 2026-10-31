@@ -548,6 +548,11 @@ shader_type spatial;
 // Fahrbahn wie bei Wipeout: dunkelgraues, gebürstetes Metall in Platten, feine Fugen, Randmarkierung; glatt, leicht glänzend
 float h11(float x){return fract(sin(x*91.7)*4371.3);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
+// Bebenwelle: Kamm bei qz, davor ein kleiner Anlauf, dahinter ein Tal und Nachschwingen
+uniform float qz=-1000.;uniform float qs=0.;
+varying float wz;varying float qh;
+float quake(float z){float d=z-qz;return qs*(1.6*exp(-pow(d/2.6,2.))-.5*exp(-pow((d+6.)/2.6,2.))+.22*exp(-pow((d+12.)/2.4,2.)));}
+void vertex(){wz=(MODEL_MATRIX*vec4(VERTEX,1.)).z;qh=quake(wz);VERTEX+=NORMAL*qh;}
 void fragment(){
 	float x=(UV.x-.5)*4.8,z=UV.y/.08;
 	vec2 pl=vec2(x/1.2,z/2.4),f=fract(pl);
@@ -561,6 +566,8 @@ void fragment(){
 	base=mix(base,mix(vec3(.75,.62,.08),vec3(.05),hz),edge);
 	base*=1.-seam*.7;
 	ALBEDO=base;METALLIC=.8;ROUGHNESS=.38+.1*br+seam*.3+edge*.2;SPECULAR=.45;
+	float cr=max(qh,0.)/max(qs,.01);   // glühender Kamm, aufgerissene Fugen
+	EMISSION=(vec3(1.,.42,.08)*pow(cr,1.5)*6.+vec3(1.,.25,.05)*seam*cr*14.)*step(.01,qs);
 }""")
 	mats["wall"] = _metal(Color(0.07, 0.075, 0.09), 0.22)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
@@ -1169,6 +1176,20 @@ var msg_t = 0.0
 
 
 var fxr = {}
+var flash_rect: ColorRect
+
+
+func _flash(c: Color, a: float) -> void:
+	if flash_rect == null:
+		var cl = CanvasLayer.new()
+		cl.layer = 4
+		add_child(cl)
+		flash_rect = ColorRect.new()
+		flash_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+		flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cl.add_child(flash_rect)
+	flash_rect.color = Color(c.r, c.g, c.b, maxf(flash_rect.color.a, a))
+
 var shake = 0.0
 
 
@@ -1199,7 +1220,34 @@ func _fx_res() -> void:
 		return m
 	var q = QuadMesh.new()
 	q.size = Vector2(1, 1)
-	q.material = mk.call(true)
+	var fn = FastNoiseLite.new()
+	fn.frequency = 0.06
+	fn.fractal_octaves = 4
+	var ft = NoiseTexture2D.new()
+	ft.noise = fn
+	ft.seamless = true
+	ft.width = 128
+	ft.height = 128
+	var fm = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+uniform sampler2D nz:repeat_enable;
+varying float seed;
+void vertex(){
+	float s=length(MODEL_MATRIX[0].xyz);
+	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(INV_VIEW_MATRIX[0]*s,INV_VIEW_MATRIX[1]*s,INV_VIEW_MATRIX[2]*s,MODEL_MATRIX[3]);
+	seed=fract(MODEL_MATRIX[3].x*3.17+MODEL_MATRIX[3].z*1.73);
+}
+void fragment(){
+	vec2 q=UV-.5;float d=length(q)*2.;
+	float n=texture(nz,UV*.7+vec2(seed,seed*1.3)+vec2(0.,TIME*.35)).r;
+	float n2=texture(nz,UV*1.6-vec2(seed*.7,TIME*.6)).r;
+	float m=smoothstep(1.,.25,d+(n-.5)*.9+(n2-.5)*.35);
+	float core=smoothstep(.55,0.,d+(n-.5)*.5);
+	ALBEDO=COLOR.rgb*(m*.9+core*1.4)*COLOR.a;
+}""")
+	fm.set_shader_parameter("nz", ft)
+	q.material = fm
 	fxr.fire = q
 	var q2 = QuadMesh.new()
 	q2.size = Vector2(1, 1)
@@ -1296,24 +1344,33 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 	get_tree().create_timer(life + 0.6).timeout.connect(p.queue_free)
 
 
+# Feuerball aus vielen wabernden Flammen: grell weiß-gelb → orange → dunkelrot, steigt etwas auf
+func _fire_ball(pos: Vector3, k: float) -> void:
+	_burst(pos, fxr.fire, int(55 * k), 1.1, 2.0 * k, 6.0 * k, 180.0, Vector3(0, 1.6, 0), 4.0, 1.4 * k, 2.6 * k,
+		_ramp([[0.0, Color(12, 10, 7, 1)], [0.1, Color(9, 4.5, 1.2, 1)], [0.35, Color(4, 1.1, 0.15, 0.85)], [0.7, Color(1.0, 0.2, 0.04, 0.45)], [1.0, Color(0.1, 0.02, 0.01, 0)]]),
+		_curve([[0.0, 0.5], [0.2, 1.4], [1.0, 2.2]]), false, false, 0.5 * k)
+
+
 func _explode(z: float, lat: float, big := false) -> void:
 	_fx_res()
-	var k = 1.7 if big else 1.0
+	var k = 2.2 if big else 1.5
 	var f = T.frame(z)
 	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.35
+	# Nachexplosionen: zwei, drei kleinere Feuerbälle rundherum, kurz versetzt
+	for j in range(3 if big else 2):
+		var off = f.rr * randf_range(-1.2, 1.2) + f.uu * randf_range(0.2, 1.4) + f.fw * randf_range(-1.0, 1.5)
+		get_tree().create_timer(0.08 + j * 0.11).timeout.connect(func(): _fire_ball(pos + off, k * 0.6))
 	# Feuerball: grell weiß-gelb → orange → dunkelrot
-	_burst(pos, fxr.fire, int(34 * k), 0.85, 1.2 * k, 4.0 * k, 180.0, Vector3(0, 0.8, 0), 3.5, 0.9 * k, 1.8 * k,
-		_ramp([[0.0, Color(8, 6.5, 4, 1)], [0.15, Color(6, 2.6, 0.6, 0.95)], [0.45, Color(2.2, 0.5, 0.08, 0.6)], [1.0, Color(0.2, 0.04, 0.02, 0)]]),
-		_curve([[0.0, 0.4], [0.25, 1.3], [1.0, 1.8]]), false, false, 0.35 * k)
+	_fire_ball(pos, k)
 	# Rauch: steigt langsam auf, wird größer
-	_burst(pos + f.uu * 0.3, fxr.smoke, int(16 * k), 2.4, 0.6, 2.2 * k, 70.0, Vector3(0, 0.9, 0), 1.2, 1.2 * k, 2.2 * k,
+	_burst(pos + f.uu * 0.6, fxr.smoke, int(26 * k), 3.0, 0.6, 2.2 * k, 70.0, Vector3(0, 0.9, 0), 1.2, 1.2 * k, 2.2 * k,
 		_ramp([[0.0, Color(0.1, 0.08, 0.08, 0)], [0.12, Color(0.12, 0.1, 0.1, 0.65)], [1.0, Color(0.05, 0.05, 0.06, 0)]], false),
 		_curve([[0.0, 0.5], [1.0, 3.0]]), false, false, 0.4 * k)
 	# Funkenregen
-	_burst(pos, fxr.spark, int(70 * k), 1.1, 6.0 * k, 15.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
+	_burst(pos, fxr.spark, int(110 * k), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
 		_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.2)
 	# Trümmer: Stücke der Fahrbahn fliegen weg
-	_burst(pos - f.uu * 0.2, fxr.debris, int(20 * k), 1.8, 4.0 * k, 10.0 * k, 55.0, Vector3(0, -15, 0), 0.2, 0.5, 1.5, null, null, false, true, 0.3)
+	_burst(pos - f.uu * 0.2, fxr.debris, int(30 * k), 2.0, 5.0 * k, 12.0 * k, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.6, null, null, false, true, 0.3)
 	# Druckwelle auf der Fahrbahn
 	var ring = MeshInstance3D.new()
 	ring.mesh = fxr.ring
@@ -1326,14 +1383,17 @@ func _explode(z: float, lat: float, big := false) -> void:
 	var lt = OmniLight3D.new()
 	lt.light_color = Color(1.0, 0.65, 0.3)
 	lt.omni_range = 14.0 * k
-	lt.light_energy = 16.0
+	lt.light_energy = 28.0
 	lt.position = pos + f.uu * 0.6
 	add_child(lt)
 	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": 0.0, "big": big, "f": f, "lat": lat})
-	_snd("boom", 2.0 if big else 0.0, randf_range(0.85, 1.05), pos)
+	_snd("boom", 4.0 if big else 2.0, randf_range(0.85, 1.0), pos)
+	_snd("boom", 2.0, 0.55, pos)   # tiefer Wumms darunter
 	# Kamera rüttelt, je näher, desto stärker
 	var d = (pos - cam.global_position).length()
-	shake = maxf(shake, (1.4 if big else 0.9) * clampf(1.0 - d / 30.0, 0.0, 1.0))
+	var near = clampf(1.0 - d / 35.0, 0.0, 1.0)
+	shake = maxf(shake, (2.0 if big else 1.3) * near)
+	_flash(Color(1.0, 0.7, 0.4), (0.55 if big else 0.35) * near)
 
 
 # Schaden: Schild schützt; leer = ausgeschieden; Meldung oben
@@ -1404,11 +1464,48 @@ func _fire() -> void:
 			g.boost = 2.0
 			_snd("boost")
 		"beben":
-			var bx = BoxMesh.new()
-			bx.size = Vector3(T.TW * 2.2, 0.5, 0.6)
-			var mi = _glow_node(bx, Color(1.0, 0.45, 0.1), 5.0, 0.7)
-			quake = {"z": g.z + 3.0, "age": 0.0, "hit": [], "n": mi}
-			_snd("boom")
+			_fx_res()
+			var crest = Node3D.new()
+			add_child(crest)
+			# Funken und Brocken spritzen vom Kamm, so lange die Welle rollt
+			for kind in [0, 1]:
+				var p = GPUParticles3D.new()
+				var m = ParticleProcessMaterial.new()
+				m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+				m.emission_box_extents = Vector3(T.TW, 0.1, 0.4)
+				m.direction = Vector3(0, 1, -0.4)
+				m.spread = 35.0
+				m.initial_velocity_min = 4.0 if kind == 0 else 3.0
+				m.initial_velocity_max = 10.0 if kind == 0 else 7.0
+				m.gravity = Vector3(0, -14, 0)
+				if kind == 0:
+					m.particle_flag_align_y = true
+					m.color_ramp = _ramp([[0.0, Color(9, 5, 2, 1)], [1.0, Color(2, 0.4, 0.05, 0)]])
+				else:
+					m.angular_velocity_min = -600.0
+					m.angular_velocity_max = 600.0
+					m.particle_flag_rotate_y = true
+					m.scale_min = 0.7
+					m.scale_max = 2.2
+				p.process_material = m
+				p.draw_pass_1 = fxr.spark if kind == 0 else fxr.debris
+				p.amount = 160 if kind == 0 else 60
+				p.lifetime = 0.9
+				p.local_coords = false
+				p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				p.visibility_aabb = AABB(Vector3(-20, -10, -20), Vector3(40, 30, 40))
+				crest.add_child(p)
+			var lt = OmniLight3D.new()
+			lt.light_color = Color(1.0, 0.45, 0.12)
+			lt.omni_range = 10.0
+			lt.light_energy = 8.0
+			lt.position = Vector3(0, 1.0, 0)
+			crest.add_child(lt)
+			quake = {"z": g.z + 3.0, "age": 0.0, "hit": [], "n": crest, "l": lt}
+			_snd("boom", 3.0, 0.6)
+			_snd("boom", 0.0, 0.8)
+			shake = maxf(shake, 1.5)
+			_flash(Color(1.0, 0.5, 0.15), 0.45)
 		"wand":
 			var bx = BoxMesh.new()
 			bx.size = Vector3(T.TW * 2.0, 1.4, 0.06)
@@ -1548,20 +1645,26 @@ func _weapons(dt: float, racing: bool) -> void:
 					o.h = maxf(o.h, 0.6)
 					o.slow = 0.25
 		var f = T.frame(quake.z)
-		quake.n.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * 0.25)
+		var qs = 1.3 * clampf(quake.age / 0.25, 0.0, 1.0) * clampf((6.0 - quake.age) / 1.0, 0.0, 1.0) * clampf((90.0 - (quake.z - g.z)) / 15.0, 0.0, 1.0)
+		quake.n.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * (qs * 1.6))
+		quake.l.light_energy = 8.0 * qs
+		mats.road.set_shader_parameter("qz", quake.z)
+		mats.road.set_shader_parameter("qs", qs)
+		shake = maxf(shake, 0.35 * clampf(1.0 - (quake.z - g.z) / 40.0, 0.0, 1.0))
 		if quake.z - g.z > 90.0 or quake.age > 6.0:
 			quake.n.queue_free()
 			quake = null
+			mats.road.set_shader_parameter("qs", 0.0)
 	# Explosionen: Druckwelle wächst, Licht verlischt
 	for i in range(fxs.size() - 1, -1, -1):
 		var e = fxs[i]
 		e.t += dt
 		var u = clampf(e.t / (0.7 if e.big else 0.5), 0.0, 1.0)
-		var sc = (0.4 + (5.0 if e.big else 3.2) * pow(u, 0.5))
+		var sc = (0.6 + (8.0 if e.big else 5.5) * pow(u, 0.5))
 		var f = e.f
 		e.ring.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
 		e.rm.set_shader_parameter("u", u)
-		e.l.light_energy = 16.0 * pow(1.0 - u, 2.0)
+		e.l.light_energy = 28.0 * pow(1.0 - u, 2.0)
 		if u >= 1.0:
 			e.ring.queue_free()
 			e.l.queue_free()
@@ -1797,7 +1900,7 @@ func _shot() -> void:
 				else:
 					ships[0].wpn = p[3]
 					fire_req = true
-			if shot_n == (42 if p.size() > 3 and p[3] == "boom" else 90):
+			if shot_n == ({"boom": 42, "beben": 47}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				get_tree().quit()
 
@@ -1846,6 +1949,8 @@ func _camera(dt: float) -> void:
 		var u = clampf(t_state / 1.2, 0.0, 1.0)
 		ro = ro.lerp(S0 + fc * 4.0 + uc * 2.5 + f.rr * 2.0, 1.0 - u)
 	shake = maxf(0.0, shake - dt * 1.8)
+	if flash_rect != null and flash_rect.color.a > 0.0:
+		flash_rect.color.a = maxf(0.0, flash_rect.color.a - dt * 2.2)
 	if shake > 0.0:
 		var tt2 = Time.get_ticks_msec() / 1000.0
 		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * 0.09
