@@ -152,7 +152,7 @@ void fragment(){
 
 
 func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
-	if not snd.has(k):
+	if warm or not snd.has(k):
 		return
 	var p
 	if at == null:
@@ -1462,6 +1462,8 @@ var flash_rect: ColorRect
 
 
 func _flash(c: Color, a: float) -> void:
+	if warm:
+		return
 	if flash_rect == null:
 		var cl = CanvasLayer.new()
 		cl.layer = 4
@@ -1634,7 +1636,7 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 		return
 	amount = maxi(3, int(amount * q))
 	live_bursts += 1
-	get_tree().create_timer(life + 0.6).timeout.connect(func(): live_bursts -= 1)
+	get_tree().create_timer(life + 0.6).timeout.connect(func(): live_bursts = maxi(0, live_bursts - 1))
 	var p = GPUParticles3D.new()
 	var m = ParticleProcessMaterial.new()
 	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
@@ -2699,6 +2701,78 @@ func _rp_cam(dt: float) -> bool:
 	return true
 
 
+# ---------------------------------------------------------------- Vorwärmen: jeden Effekt einmal hinter einem schwarzen Bild zeigen,
+# damit das Handy die Grafik-Programme schon beim Start übersetzt und nicht mitten im Rennen (das war der große Ruckler)
+var warm = false
+var warm_t = 0.0
+var warm_before = []
+var warm_cover: CanvasLayer
+
+
+func _warm_step(delta: float) -> void:
+	if warm_cover == null:
+		warm_cover = CanvasLayer.new()
+		warm_cover.layer = 20
+		var r = ColorRect.new()
+		r.color = Color(0, 0, 0, 1)
+		r.set_anchors_preset(Control.PRESET_FULL_RECT)
+		warm_cover.add_child(r)
+		var l = _lbl("LOADING", 34)
+		l.set_anchors_preset(Control.PRESET_FULL_RECT)
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		l.modulate = Color(1, 1, 1, 0.5)
+		warm_cover.add_child(l)
+		add_child(warm_cover)
+		return
+	warm_t += delta
+	if warm_before.is_empty():
+		warm_before = get_children()
+		warm = true
+		var g: Dictionary = ships[0]
+		var o: Dictionary = ships[1]
+		var zf = g.z + 1.5
+		_explode(zf, g.lat, true)
+		_explode(zf, g.lat + 0.6, false)
+		_gbomb(zf, g.lat - 0.6, -2)
+		var w = _wall_node()
+		_wall_pose(w, zf, 1.0, 1.0)
+		_zap_ship(g)
+		g.shield = 1.0
+		_shield_vis(g)
+		g.orbs = 1.0
+		_orbs_update(0.0, false)
+		_drop_mines(g)
+		_add_shot(g, false, false)
+		warm = false
+		return
+	# ein paar Bilder lang aktualisieren, damit alles wirklich gezeichnet wird
+	_fx_update(delta)
+	if warm_t < 0.7:
+		return
+	var g2: Dictionary = ships[0]
+	for n in get_children():
+		if not warm_before.has(n) and n != warm_cover and not tun_l.has(n):
+			n.queue_free()
+	for e in zaps:
+		e.mi.queue_free()
+		e.l.queue_free()
+	zaps.clear()
+	fxs.clear()
+	shots.clear()
+	mines.clear()
+	g2.shield = 0.0
+	_shield_vis(g2)
+	g2.orbs = 0.0
+	_orbs_update(0.0, false)
+	orb_n.clear()
+	shake = 0.0
+	big_t = 0.0
+	pf.ev = {}
+	live_bursts = 0
+	warm_cover.queue_free()
+	warm_t = -1.0
+
+
 # ---------------------------------------------------------------- Leistungsmessung: Bildzeiten im Rennen, Ruckler mit Umständen
 var pf = {"n": 0, "sum": 0.0, "hist": [0, 0, 0, 0, 0], "sec": [], "acc": 0.0, "an": 0, "aw": 0.0, "sp": [], "ev": {}}
 
@@ -2891,6 +2965,8 @@ func _process(delta: float) -> void:
 	ui.fps.text = "%d fps" % Engine.get_frames_per_second()
 	_perf(delta)
 	var g: Dictionary = ships[0]
+	if warm_t >= 0.0:
+		_warm_step(delta)
 	if state == "menu":
 		menu_t += dt
 		_pose_all(dt)
@@ -3084,7 +3160,7 @@ func _tunnel(dt: float) -> void:
 	wenv.background_energy_multiplier = lerpf(1.0, 0.05, tun_k)
 	moon.light_energy = lerpf(0.45, 0.0, tun_k)
 	if tun_l.is_empty():
-		for i in range(4):
+		for i in range(2 if int(cfg.gfx) == 0 else 4):
 			var l = OmniLight3D.new()
 			l.omni_range = 6.0
 			l.omni_attenuation = 1.4
