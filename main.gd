@@ -1184,21 +1184,21 @@ func _hud() -> void:
 	var pb = HBoxContainer.new()
 	pb.anchor_left = 1.0
 	pb.anchor_right = 1.0
-	pb.offset_left = -330
+	pb.offset_left = -380
 	pb.offset_right = -34
-	pb.offset_top = 118
-	pb.offset_bottom = 238
+	pb.offset_top = 100
+	pb.offset_bottom = 250
 	pb.alignment = BoxContainer.ALIGNMENT_END
 	pb.add_theme_constant_override("separation", 6)
 	cl.add_child(pb)
 	hud.pl = Label.new()
-	hud.pl.add_theme_font_size_override("font_size", 96)
+	hud.pl.add_theme_font_size_override("font_size", 124)
 	hud.pl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	hud.pl.add_theme_constant_override("outline_size", 12)
 	hud.pl.size_flags_vertical = Control.SIZE_SHRINK_END
 	pb.add_child(hud.pl)
 	hud.pln = Label.new()
-	hud.pln.add_theme_font_size_override("font_size", 40)
+	hud.pln.add_theme_font_size_override("font_size", 52)
 	hud.pln.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	hud.pln.add_theme_constant_override("outline_size", 8)
 	hud.pln.modulate = Color(1, 1, 1, 0.7)
@@ -1229,7 +1229,7 @@ func _hud() -> void:
 	hud.big.add_theme_constant_override("outline_size", 10)
 	hud.big.pivot_offset = Vector2(360, 80)
 	hud.msg.anchor_right = 1.0
-	hud.msg.offset_top = 190
+	hud.msg.offset_top = 280
 	hud.en_bg = ColorRect.new()
 	hud.en_bg.color = Color(1, 1, 1, 0.15)
 	hud.en_bg.position = Vector2(36, 140)
@@ -1239,6 +1239,25 @@ func _hud() -> void:
 	hud.en.color = Color(0.36, 1.0, 0.6)
 	hud.en.size = Vector2(200, 12)
 	hud.en_bg.add_child(hud.en)
+	# Fortschritt über die ganze Strecke: drei Abschnitte (= drei Runden), füllt sich live
+	var pg = Control.new()
+	pg.position = Vector2(36, 112)
+	pg.size = Vector2(200, 10)
+	cl.add_child(pg)
+	hud.pg = pg
+	hud.pgf = []
+	for k in range(T.LAPS):
+		var w = (200.0 - 2 * 6.0) / T.LAPS
+		var bg = ColorRect.new()
+		bg.color = Color(1, 1, 1, 0.15)
+		bg.position = Vector2(k * (w + 6.0), 0)
+		bg.size = Vector2(w, 10)
+		pg.add_child(bg)
+		var fl = ColorRect.new()
+		fl.color = Color(0.85, 0.92, 1.0)
+		fl.size = Vector2(0, 10)
+		bg.add_child(fl)
+		hud.pgf.append([fl, w])
 	var el = mk.call(16, HORIZONTAL_ALIGNMENT_LEFT)
 	el.text = "ENERGY"
 	el.position = Vector2(36, 156)
@@ -2778,6 +2797,7 @@ func _replay_start() -> void:
 	hud.rpx.visible = true
 	hud.fire.visible = false
 	hud.en_bg.visible = false
+	hud.pg.visible = false
 	hud.plbox.visible = false
 	for x in walls:
 		x.n.queue_free()
@@ -2805,6 +2825,7 @@ func _replay_end() -> void:
 	mats.road.set_shader_parameter("qs", 0.0)
 	hud.fire.visible = true
 	hud.en_bg.visible = true
+	hud.pg.visible = true
 	hud.plbox.visible = true
 	hud.top.text = rec[rec.size() - 1].pl
 	for o in ships:
@@ -3531,7 +3552,11 @@ func _process(delta: float) -> void:
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
 	if state != "done" or t_state < 0.1:
-		hud.top.text = "Lap %d/%d     %s" % [lap, T.LAPS, _fmt(race_t)]
+		hud.top.text = _fmt(race_t)
+		var prog = clampf((g.z - T.ZST) / (T.LAPS * T.LAP), 0.0, 1.0) * T.LAPS
+		for k in range(T.LAPS):
+			var fl: ColorRect = hud.pgf[k][0]
+			fl.size.x = hud.pgf[k][1] * clampf(prog - k, 0.0, 1.0)
 		var alive = 1
 		for i in range(1, ships.size()):
 			if not ships[i].out:
