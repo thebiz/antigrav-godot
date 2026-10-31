@@ -25,6 +25,11 @@ jobs:
       - name: Dateien importieren
         run: godot --headless --path . --import || godot --headless --path . --editor --quit || true
 
+      - name: Startprüfung (Skriptfehler = kein Build)
+        run: |
+          godot --headless --path . --quit-after 30 > /tmp/run.log 2>&1 || true
+          if grep -E "Parse Error|Failed to load script|SCRIPT ERROR" /tmp/run.log; then exit 1; fi
+
       - name: Versionsnummer
         run: |
           sed -i "s/^version\/code=.*/version\/code=${{ github.run_number }}/" export_presets.cfg
