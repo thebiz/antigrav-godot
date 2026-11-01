@@ -393,26 +393,34 @@ var gl_v = 0.0
 const FX_PATH = "user://fx.json"
 # je Bereich: [Schlüssel, Anzeige, min, max, Standard]  (Farbregler heißen "hue…": -0.5…0.5 = einmal ums Farbrad)
 const FXS = {
-	"boom": [["size", "Size", 0.4, 2.5, 1.0], ["fire", "Fire", 0.0, 3.0, 1.0], ["after", "Extra fireballs", 0.0, 4.0, 1.0], ["smoke", "Smoke", 0.0, 3.0, 1.0],
-		["slife", "Smoke duration", 0.2, 2.0, 1.0], ["sparks", "Sparks", 0.0, 3.0, 1.0], ["debris", "Debris", 0.0, 3.0, 1.0], ["ring", "Shock ring", 0.0, 3.0, 1.0],
-		["light", "Light flash", 0.0, 3.0, 1.0], ["flash", "Screen flash", 0.0, 3.0, 1.0], ["shake", "Camera shake", 0.0, 3.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
-	"mine": [["size", "Size", 0.4, 3.0, 1.0], ["glow", "Glow", 0.0, 3.0, 1.0], ["blink", "Blink speed", 0.2, 3.0, 1.0], ["life", "Lifetime", 3.0, 60.0, 25.0],
-		["boom", "Explosion size", 0.3, 2.5, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
-	"quake": [["height", "Wave height", 0.2, 2.5, 1.0], ["speed", "Speed", 0.3, 2.5, 1.0], ["dur", "Range", 0.2, 2.0, 1.0], ["glow", "Glow", 0.0, 3.0, 1.0],
-		["sparks", "Sparks & debris", 0.0, 3.0, 1.0], ["shake", "Camera shake", 0.0, 3.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
-	"gb": [["size", "Pull radius", 0.4, 2.5, 1.0], ["time", "Duration", 0.4, 3.0, 1.0], ["core", "Core size", 0.3, 2.5, 1.0], ["sparks", "Sparks", 0.0, 3.0, 1.0],
-		["wave", "Shock ring", 0.0, 3.0, 1.0], ["light", "Light", 0.0, 3.0, 1.0], ["lens", "Space warp", 0.0, 3.0, 1.0], ["shake", "Camera shake", 0.0, 3.0, 1.0],
+	"boom": [["size", "Size", 0.2, 6.0, 1.0], ["fire", "Fire", 0.0, 8.0, 1.0], ["after", "Extra fireballs", 0.0, 8.0, 1.0], ["smoke", "Smoke", 0.0, 8.0, 1.0],
+		["slife", "Smoke duration", 0.1, 6.0, 1.0], ["sparks", "Sparks", 0.0, 8.0, 1.0], ["debris", "Metal shards", 0.0, 8.0, 1.0], ["dglow", "Shard glow", 0.0, 8.0, 1.0],
+		["ring", "Shock ring", 0.0, 8.0, 1.0], ["light", "Light flash", 0.0, 8.0, 1.0], ["flash", "Screen flash", 0.0, 6.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
-	"rak": [["size", "Size", 0.4, 3.0, 1.0], ["speed", "Speed", 0.3, 2.5, 1.0], ["light", "Light", 0.0, 3.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
-	"wall": [["height", "Height", 0.4, 3.0, 1.0], ["dur", "Duration", 0.3, 3.0, 1.0], ["bolts", "Lightning", 0.0, 3.0, 1.0], ["glow", "Glow", 0.0, 3.0, 1.0],
+	"mine": [["size", "Size", 0.2, 8.0, 1.0], ["glow", "Glow", 0.0, 10.0, 1.0], ["blink", "Blink speed", 0.1, 8.0, 1.0], ["life", "Lifetime", 3.0, 120.0, 25.0],
+		["boom", "Explosion size", 0.2, 6.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
+	"quake": [["height", "Wave height", 0.1, 6.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["dur", "Range", 0.1, 5.0, 1.0], ["glow", "Glow", 0.0, 8.0, 1.0],
+		["sparks", "Sparks & shards", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
+	"gb": [["size", "Pull radius", 0.2, 6.0, 1.0], ["time", "Duration", 0.2, 8.0, 1.0], ["core", "Core size", 0.2, 6.0, 1.0], ["sparks", "Sparks", 0.0, 8.0, 1.0],
+		["wave", "Shock ring", 0.0, 8.0, 1.0], ["light", "Light", 0.0, 8.0, 1.0], ["lens", "Space warp", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
-	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 2.5, 1.0], ["bh", "Height", 0.5, 2.5, 1.0], ["bw", "Width", 0.3, 2.5, 1.0],
-		["bd", "Distance", 0.3, 2.5, 1.0], ["win", "Lit windows", 0.0, 2.0, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 3.0, 1.0],
-		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 2.5, 1.0], ["stars", "Stars", 0.0, 3.0, 1.0], ["skyl", "Skyline", 0.0, 2.0, 1.0],
-		["fog", "Fog density", 0.0, 4.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 2.0, 1.0], ["beams", "Light pillars", 0.0, 3.0, 1.0],
-		["lamps", "Track lights", 0.0, 3.0, 1.0]],
+	"rak": [["size", "Size", 0.2, 8.0, 1.0], ["glow", "Glow halo", 0.0, 10.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["light", "Light", 0.0, 10.0, 1.0],
+		["hue", "Color", -0.5, 0.5, 0.0]],
+	"wall": [["height", "Height", 0.2, 8.0, 1.0], ["dur", "Duration", 0.2, 8.0, 1.0], ["bolts", "Lightning", 0.0, 8.0, 1.0], ["glow", "Glow", 0.0, 8.0, 1.0],
+		["hue", "Color", -0.5, 0.5, 0.0]],
+	"shield": [["size", "Size", 0.5, 4.0, 1.0], ["glow", "Glow", 0.0, 10.0, 1.0], ["edge", "Edge sharpness", 0.2, 6.0, 1.0], ["flicker", "Flicker", 0.0, 8.0, 1.0],
+		["hue", "Color", -0.5, 0.5, 0.0]],
+	"orbs": [["size", "Size", 0.2, 6.0, 1.0], ["radius", "Orbit radius", 0.3, 5.0, 1.0], ["speed", "Orbit speed", 0.1, 6.0, 1.0], ["trail", "Trail length", 0.0, 6.0, 1.0],
+		["glow", "Glow", 0.0, 10.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
+	"haze": [["str", "Distortion", 0.0, 10.0, 1.0], ["size", "Size", 0.2, 6.0, 1.0], ["len", "Length", 0.2, 6.0, 1.0], ["speed", "Speed", 0.0, 8.0, 1.0],
+		["boost", "Extra with boost", 0.0, 8.0, 1.0]],
+	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
+		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
+		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
+		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
+		["lamps", "Track lights", 0.0, 10.0, 1.0]],
 }
-const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["env", "World"]]
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Haze"], ["env", "World"]]
 var fx = {}
 
 
@@ -1137,6 +1145,7 @@ func _ship_node(idx: int) -> Node3D:
 	# Hitzeflimmern: zwei kleine Flächen direkt hinter der Düse, im Raum verankert.
 	# Sie verzerren nur, was dahinter liegt; steht das Schiff davor (Blick von vorn), bleibt es scharf.
 	var hz = []
+	var hzn = []
 	for k in range(2):
 		var q = QuadMesh.new()
 		q.size = Vector2.ONE
@@ -1150,7 +1159,9 @@ func _ship_node(idx: int) -> Node3D:
 		hm.scale = Vector3.ONE * (0.75 if k == 0 else 1.1)
 		root.add_child(hm)
 		hz.append(mat)
+		hzn.append(hm)
 	root.set_meta("haze", hz)
+	root.set_meta("hazen", hzn)
 	root.set_meta("light", lt)
 	add_child(root)
 	return root
@@ -1160,7 +1171,7 @@ const HAZE_CODE = """
 shader_type spatial;
 render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled,fog_disabled;
 uniform sampler2D scr:hint_screen_texture,filter_linear;
-uniform float k=.6;
+uniform float k=.6;uniform float hs=1.;uniform float hv=1.;
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
 	return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),f.x),f.y);}
@@ -1171,9 +1182,9 @@ void vertex(){
 void fragment(){
 	vec2 q=UV-.5;
 	float m=smoothstep(.5,.12,length(q))*k;
-	vec2 p=UV*3.2+vec2(0.,TIME*2.8);
+	vec2 p=UV*3.2+vec2(0.,TIME*2.8*hv);
 	vec2 o=vec2(vn(p)+.5*vn(p*2.1+5.2),vn(p+vec2(9.7,3.1))+.5*vn(p*2.1+vec2(1.3,7.7)))-.75;
-	ALBEDO=texture(scr,SCREEN_UV+o*.016*m).rgb;
+	ALBEDO=texture(scr,SCREEN_UV+o*.016*m*hs).rgb;
 	ALPHA=smoothstep(0.,.25,m);
 }"""
 var shield_mat: ShaderMaterial
@@ -1186,11 +1197,12 @@ func _shield_for(root: Node3D) -> Node3D:
 shader_type spatial;
 // Schutzschild: durchsichtige blaue Hülle, Ränder leuchten, ruhiges Schimmern
 render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+uniform vec3 sc=vec3(.12,.45,1.);uniform float sg=1.;uniform float sf=1.;uniform float se=1.;
 void fragment(){
-	float fr=pow(1.-abs(dot(NORMAL,VIEW)),2.6);
-	float sh=.85+.15*sin(TIME*3.+VERTEX.y*6.);
-	float scan=smoothstep(.96,1.,fract(UV.y*1.-TIME*.4))*.35;
-	ALBEDO=vec3(.12,.45,1.)*(.012+fr*1.1*sh+scan*.15);
+	float fr=pow(1.-abs(dot(NORMAL,VIEW)),2.6*se);
+	float sh=1.-.15*sf+.15*sf*sin(TIME*3.*max(sf,.3)+VERTEX.y*6.);
+	float scan=smoothstep(.96,1.,fract(UV.y*1.-TIME*.4))*.35*min(sf,2.);
+	ALBEDO=sc*(.012+fr*1.1*sh+scan*.15)*sg;
 }""")
 	var bb: AABB = root.get_meta("bb")
 	var sp = SphereMesh.new()
@@ -1203,6 +1215,7 @@ void fragment(){
 	c.material_override = shield_mat
 	c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	c.scale = bb.size * 0.5 * Vector3(1.22, 1.6, 1.12) + Vector3.ONE * 0.12
+	c.set_meta("bs", c.scale)
 	c.position = bb.get_center()
 	root.add_child(c)
 	root.set_meta("shield", c)
@@ -1216,6 +1229,13 @@ func _shield_vis(o: Dictionary) -> void:
 		shn = _shield_for(nd)
 	if shn != null:
 		shn.visible = o.shield > 0.0 and (o.shield > 1.2 or fmod(o.shield, 0.25) < 0.15)
+		if shn.visible:
+			var X: Dictionary = fx.shield
+			shn.scale = (shn.get_meta("bs") as Vector3) * float(X.size)
+			shield_mat.set_shader_parameter("sc", _v3(_hs(Color(0.12, 0.45, 1.0), float(X.hue))))
+			shield_mat.set_shader_parameter("sg", float(X.glow))
+			shield_mat.set_shader_parameter("sf", float(X.flicker))
+			shield_mat.set_shader_parameter("se", float(X.edge))
 
 
 func _rel_xf(top: Node3D, n: Node) -> Transform3D:
@@ -2298,17 +2318,40 @@ void fragment(){
 	sm.vertex_color_use_as_albedo = true
 	sp.material = sm
 	fxr.spark = sp
-	var bx = BoxMesh.new()
-	bx.size = Vector3(0.14, 0.05, 0.12)
-	var bm = StandardMaterial3D.new()
-	bm.albedo_color = Color(0.13, 0.13, 0.15)
-	bm.metallic = 0.8
-	bm.roughness = 0.4
-	bm.emission_enabled = true
-	bm.emission = Color(1.0, 0.4, 0.1)
-	bm.emission_energy_multiplier = 0.6
-	bx.material = bm
-	fxr.debris = bx
+	# Metallsplitter: dünne, unregelmäßige Scherbe; glüht weiß-orange und kühlt beim Fliegen ab (Farbe kommt vom Partikel)
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rim = [Vector3(0.0, 0.0, 0.13), Vector3(-0.035, 0.004, 0.02), Vector3(-0.05, -0.003, -0.07), Vector3(0.01, 0.0, -0.06), Vector3(0.045, 0.006, 0.01)]
+	var top = Vector3(-0.004, 0.018, 0.0)
+	var bot = Vector3(0.003, -0.014, 0.004)
+	for i in range(rim.size()):
+		var a0: Vector3 = rim[i]
+		var a1: Vector3 = rim[(i + 1) % rim.size()]
+		st.add_vertex(top)
+		st.add_vertex(a1)
+		st.add_vertex(a0)
+		st.add_vertex(bot)
+		st.add_vertex(a0)
+		st.add_vertex(a1)
+	st.generate_normals()
+	var shard = st.commit()
+	shard.surface_set_material(0, _shader_mat("""
+shader_type spatial;
+render_mode cull_disabled;
+void fragment(){ALBEDO=vec3(.09,.09,.1);METALLIC=.9;ROUGHNESS=.3;EMISSION=COLOR.rgb;}"""))
+	fxr.debris = shard
+	var hg = GradientTexture2D.new()
+	hg.fill = GradientTexture2D.FILL_RADIAL
+	hg.fill_from = Vector2(0.5, 0.5)
+	hg.fill_to = Vector2(1.0, 0.5)
+	var hgr = Gradient.new()
+	hgr.set_color(0, Color(1, 1, 1, 1))
+	hgr.set_color(1, Color(1, 1, 1, 0))
+	hgr.add_point(0.25, Color(1, 1, 1, 0.55))
+	hg.gradient = hgr
+	hg.width = 64
+	hg.height = 64
+	fxr.halo = hg
 	var ring = QuadMesh.new()
 	ring.size = Vector2(2, 2)
 	ring.orientation = PlaneMesh.FACE_Y
@@ -2379,7 +2422,7 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 		q *= 0.5
 	if live_bursts > 22 and not fx_rebuild:
 		return
-	amount = maxi(3, int(amount * q))
+	amount = clampi(int(amount * q), 3, 900)
 	live_bursts += 1
 	get_tree().create_timer(life + 0.6).timeout.connect(func(): live_bursts = maxi(0, live_bursts - 1))
 	var p = GPUParticles3D.new()
@@ -2425,6 +2468,11 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 
 
 # Feuerball aus vielen wabernden Flammen: grell weiß-gelb → orange → dunkelrot, steigt etwas auf
+# Farbverlauf der Splitter: glühend → rot → dunkles Metall
+func _deb_ramp(gl: float, hu := 0.0) -> GradientTexture1D:
+	return _ramp(_rh([[0.0, Color(7, 3.5, 1.2, 1) * gl], [0.3, Color(3, 0.8, 0.12, 1) * gl], [0.7, Color(0.5, 0.08, 0.01, 1) * gl], [1.0, Color(0, 0, 0, 1)]], hu))
+
+
 func _fire_ball(pos: Vector3, k: float, am := 1.0, hu := 0.0) -> void:
 	if am < 0.01:
 		return
@@ -2565,7 +2613,7 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		if sp > 0.01:
 			_burst(e.pos, fxr.spark, int(60 * sp), 1.0, 10.0 * sqrt(gz), 22.0 * sqrt(gz), 180.0, Vector3(0, -6, 0), 0.8, 0.8, 1.6,
 				_ramp(_rh([[0.0, Color(5, 4, 9, 1)], [0.6, Color(1.6, 1.0, 4.0, 1)], [1.0, Color(0.4, 0.2, 1.0, 0)]], hu)), null, true, false, 0.3)
-			_burst(e.pos - f.uu * 0.4, fxr.debris, int(12 * sp), 1.8, 5.0, 12.0, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.4, null, null, false, true, 0.3)
+			_burst(e.pos - f.uu * 0.4, fxr.debris, int(12 * sp), 1.8, 5.0, 12.0, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.4, _deb_ramp(float(fx.boom.dglow), hu), null, false, true, 0.3)
 		fx_age = old_age
 		var ring = MeshInstance3D.new()
 		ring.mesh = fxr.ring
@@ -2632,7 +2680,7 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 			_ramp(_rh([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]], hu)), null, true, false, 0.2)
 	# Trümmer: Stücke der Fahrbahn fliegen weg
 	if float(X.debris) > 0.01:
-		_burst(pos - f.uu * 0.2, fxr.debris, int(12 * k * float(X.debris)), 2.0, 5.0 * k, 12.0 * k, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.6, null, null, false, true, 0.3)
+		_burst(pos - f.uu * 0.2, fxr.debris, int(12 * k * float(X.debris)), 2.0, 5.0 * k, 12.0 * k, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.6, _deb_ramp(float(X.dglow), hu), null, false, true, 0.3)
 	# Druckwelle auf der Fahrbahn
 	var ring = null
 	var rm = null
@@ -2705,6 +2753,25 @@ func _add_shot(from: Dictionary, at_player := false, homing := false) -> void:
 	cap.radius = 0.06 * float(X.size)
 	cap.height = 0.5 * float(X.size)
 	var mi = _glow_node(cap, _hs(Color(1.0, 0.6, 0.2), float(X.hue)), 8.0)
+	_fx_res()
+	if float(X.glow) > 0.01:
+		var hq = QuadMesh.new()
+		hq.size = Vector2.ONE * 1.1 * float(X.size) * (0.7 + 0.3 * sqrt(float(X.glow)))
+		var hm = StandardMaterial3D.new()
+		hm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		hm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		hm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		hm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		hm.disable_receive_shadows = true
+		hm.albedo_texture = fxr.halo
+		var hc = _hs(Color(1.0, 0.5, 0.15), float(X.hue)) * 0.9 * float(X.glow)
+		hm.albedo_color = Color(hc.r, hc.g, hc.b, 1.0)
+		hq.material = hm
+		var hn = MeshInstance3D.new()
+		hn.mesh = hq
+		hn.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.add_child(hn)
 	var lt = OmniLight3D.new()
 	lt.light_color = _hs(Color(1.0, 0.55, 0.2), float(X.hue))
 	lt.omni_range = 4.0 * sqrt(float(X.size))
@@ -2823,6 +2890,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 			l.omni_range = 3.0
 			l.light_energy = 1.5
 			mi.add_child(l)
+			mi.set_meta("l", l)
 			# Schweif: kleiner werdende Kugeln auf der Bahn dahinter
 			var tr = []
 			for k in range(6):
@@ -2843,17 +2911,39 @@ func _orbs_update(dt: float, live: bool) -> void:
 	var bb: AABB = nd.get_meta("bb")
 	var ctr: Vector3 = nd.global_transform * (bb.get_center() + Vector3(0, 0.05, 0))
 	var bx = nd.global_transform.basis
+	var X: Dictionary = fx.orbs
+	var oc = _hs(Color(1.0, 0.5, 0.12) if _noir() else Color(0.35, 0.85, 1.0), float(X.hue))
+	var orad = float(X.radius)
+	var osz = float(X.size)
+	var ogl = float(X.glow)
+	var otr = float(X.trail)
 	for j in range(orb_n.size()):
 		var mi: MeshInstance3D = orb_n[j]
 		mi.visible = on
-		var a = tt * 5.5 + j * PI
+		var a = tt * 5.5 * float(X.speed) + j * PI
 		var opos = func(aa: float) -> Vector3:
-			return ctr + (bx.x.normalized() * cos(aa) * 1.0 + bx.z.normalized() * sin(aa) * 1.15) + bx.y.normalized() * (0.08 * sin(aa * 2.0))
+			return ctr + (bx.x.normalized() * cos(aa) * 1.0 * orad + bx.z.normalized() * sin(aa) * 1.15 * orad) + bx.y.normalized() * (0.08 * sin(aa * 2.0))
 		mi.global_position = opos.call(a)
+		if on:
+			# Regler wirken sofort
+			mi.scale = Vector3.ONE * osz
+			var om: StandardMaterial3D = mi.material_override
+			om.albedo_color = Color(oc.r * 4.0, oc.g * 4.0, oc.b * 4.0)
+			om.emission = om.albedo_color
+			om.emission_energy_multiplier = 3.0 * ogl
+			var ol: OmniLight3D = mi.get_meta("l")
+			ol.light_color = oc
+			ol.light_energy = 1.5 * ogl
 		var tr: Array = mi.get_meta("tr")
 		for k in range(tr.size()):
-			tr[k].visible = on
-			tr[k].global_position = opos.call(a - (k + 1) * 0.075)
+			tr[k].visible = on and otr > 0.01
+			tr[k].global_position = opos.call(a - (k + 1) * 0.075 * otr)
+			if on:
+				tr[k].scale = Vector3.ONE * osz
+				var tm: StandardMaterial3D = tr[k].material_override
+				tm.albedo_color = Color(oc.r * 1.5, oc.g * 1.5, oc.b * 1.5, tm.albedo_color.a)
+				tm.emission = Color(oc.r * 1.5, oc.g * 1.5, oc.b * 1.5)
+				tm.emission_energy_multiplier = 2.5 * ogl
 		if not on or not live or state != "race":
 			continue
 		for o in ships:
@@ -2919,6 +3009,7 @@ func _fire() -> void:
 					m.particle_flag_rotate_y = true
 					m.scale_min = 0.7
 					m.scale_max = 2.2
+					m.color_ramp = _deb_ramp(float(fx.boom.dglow), float(fx.quake.hue))
 				p.process_material = m
 				p.draw_pass_1 = fxr.spark if kind == 0 else fxr.debris
 				p.amount = maxi(1, int((160 if kind == 0 else 60) * float(fx.quake.sparks)))
@@ -3209,6 +3300,12 @@ func _wall_pose(mi: MeshInstance3D, z: float, age: float, hf: float) -> void:
 	var f = T.frame(z)
 	var X: Dictionary = fx.wall
 	mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * (0.72 * float(X.height)))
+	(mi.mesh as QuadMesh).size = Vector2(T.TW * 2.0, 1.4 * float(X.height))
+	var wm: ShaderMaterial = mi.material_override
+	wm.set_shader_parameter("wc", _v3(_hs(Color(1.0, 0.5, 0.1), float(X.hue))))
+	wm.set_shader_parameter("bk", float(X.bolts))
+	wm.set_shader_parameter("gk", float(X.glow))
+	(mi.get_meta("l") as OmniLight3D).light_color = _hs(Color(1.0, 0.55, 0.15), float(X.hue))
 	var a = clampf(minf(age / 0.3, (5.3 * float(X.dur) - age) / 0.4), 0.0, 1.0)
 	var m: ShaderMaterial = mi.material_override
 	m.set_shader_parameter("a", a)
@@ -4519,7 +4616,7 @@ func _lab_open() -> void:
 		(ships[i].node as Node3D).visible = false
 	for i in range(3):
 		laps[i].position = Vector3(0, 0, (i - 1) * T.LAP)
-	lab = {"tab": "boom", "auto": false, "at": 0.0, "yaw": 0.35, "pit": 0.22, "dist": 12.0, "tch": {}, "sv": -1.0, "view": 0}
+	lab = {"rep": {}, "fine": 1.0, "tab": "boom", "auto": false, "at": 0.0, "yaw": 0.35, "pit": 0.22, "dist": 12.0, "tch": {}, "sv": -1.0, "view": 0}
 	var cl = CanvasLayer.new()
 	cl.layer = 6
 	add_child(cl)
@@ -4533,7 +4630,8 @@ func _lab_open() -> void:
 	tl.offset_top = 50
 	tl.add_theme_color_override("font_color", Color(0.75, 0.95, 1.0))
 	root.add_child(tl)
-	var hint = _lbl("drag = rotate  ·  pinch = zoom", 20)
+	var hint = _lbl("drag = rotate  ·  pinch = zoom\nfine tuning: hold a knob, slide finger up/down", 19)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	hint.offset_top = 104
 	hint.modulate = Color(1, 1, 1, 0.5)
@@ -4554,15 +4652,15 @@ func _lab_open() -> void:
 	vb.add_theme_constant_override("separation", 12)
 	root.add_child(vb)
 	var grid = GridContainer.new()
-	grid.columns = 4
+	grid.columns = 5
 	grid.add_theme_constant_override("h_separation", 8)
 	grid.add_theme_constant_override("v_separation", 8)
 	vb.add_child(grid)
 	lab.tabs = {}
 	for t in FXT:
 		var b = _btn(t[1])
-		b.add_theme_font_size_override("font_size", 26)
-		b.custom_minimum_size = Vector2(0, 70)
+		b.add_theme_font_size_override("font_size", 23)
+		b.custom_minimum_size = Vector2(0, 66)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var key: String = t[0]
 		b.pressed.connect(func(): _lab_tab(key))
@@ -4617,11 +4715,18 @@ func _lab_open() -> void:
 		gb.content_margin_left = 16
 		gb.content_margin_right = 16
 		vsb.add_theme_stylebox_override(sk, gb)
+	# Abstand rechts, damit kein Reglerknopf unter der Scrollleiste verschwindet
+	var mc = MarginContainer.new()
+	mc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mc.add_theme_constant_override("margin_right", 30)
+	sc.add_child(mc)
+	lab.lstc = mc
 	var lst = VBoxContainer.new()
 	lst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lst.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lst.add_theme_constant_override("separation", 2)
-	sc.add_child(lst)
+	mc.add_child(lst)
 	lab.lst = lst
 	lab.sc = sc
 	var row2 = HBoxContainer.new()
@@ -4685,6 +4790,7 @@ func _lab_style() -> void:
 	for sk in ["normal", "pressed", "hover", "focus"]:
 		lab.ab.add_theme_stylebox_override(sk, sa)
 	lab.fire.disabled = lab.tab == "env"
+	lab.fire.text = "BOOST" if lab.tab == "haze" else "FIRE"
 	lab.fire.modulate.a = 0.35 if lab.tab == "env" else 1.0
 
 
@@ -4696,13 +4802,17 @@ func _lab_val(it: Array, v: float) -> String:
 		return "%d s" % int(round(v))
 	if k == "city":
 		return "On" if v > 0.5 else "Off"
-	return "%d %%" % int(round(v * 100.0))
+	return "%d %%" % int(round(v * 100.0)) if v >= 0.995 or v == 0.0 else "%.1f %%" % (v * 100.0)
 
 
 func _lab_tab(t: String) -> void:
+	var ship_t = ["shield", "orbs", "haze"]
+	if lab.has("tab") and (lab.tab in ship_t) != (t in ship_t):
+		lab.dist = 5.5 if t in ship_t else 12.0
 	lab.tab = t
 	lab.sls = []
 	lab.grab = {}
+	lab.rep = {}
 	for c in lab.lst.get_children():
 		c.queue_free()
 	for it in FXS[t]:
@@ -4715,7 +4825,9 @@ func _lab_tab(t: String) -> void:
 		var hs = HSlider.new()
 		hs.min_value = it[2]
 		hs.max_value = it[3]
-		hs.step = 1.0 if key == "city" else (1.0 if key == "life" else 0.01)
+		hs.step = 1.0 if key == "city" else (1.0 if key == "life" else 0.001)
+		hs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		hs.value = float(fx[t][key])
 		hs.custom_minimum_size = Vector2(0, 60)
 		hs.add_theme_icon_override("grabber", _dot(40))
@@ -4730,7 +4842,7 @@ func _lab_tab(t: String) -> void:
 		lab.sls.append(hs)
 		var upd = func(v: float):
 			fx[t][key] = v
-			lb.text = "%s   %s" % [it[1], _lab_val(it, v)]
+			lb.text = "%s   %s" % [it[1], _lab_val(it, v)] + ("   · fine ×%d" % int(round(1.0 / lab.fine)) if lab.fine < 0.75 else "")
 			lab.sv = 0.6
 			if t == "env":
 				if key in ["city", "dens", "bh", "bw", "bd"]:
@@ -4738,7 +4850,34 @@ func _lab_tab(t: String) -> void:
 				_env_apply()
 		hs.value_changed.connect(upd)
 		lb.text = "%s   %s" % [it[1], _lab_val(it, hs.value)]
-		lab.lst.add_child(hs)
+		# − Regler +  (kleine Schritte; gedrückt halten wiederholt)
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var stp = 1.0 if key in ["city", "life"] else (0.005 if key.begins_with("hue") else 0.05)
+		for sd in [-1, 1]:
+			var pb = _btn("−" if sd < 0 else "+")
+			pb.custom_minimum_size = Vector2(68, 60)
+			pb.add_theme_font_size_override("font_size", 34)
+			var pst = _style(Color(1, 1, 1, 0.08), Color(1, 1, 1, 0.22))
+			pst.content_margin_top = 0
+			pst.content_margin_bottom = 0
+			pst.set_corner_radius_all(14)
+			for sk in ["normal", "hover", "focus"]:
+				pb.add_theme_stylebox_override(sk, pst)
+			var dd = sd * stp
+			# erst beim Loslassen zählen (wer über den Knopf scrollt, verstellt nichts); gedrückt halten = wiederholen
+			pb.button_down.connect(func(): lab.rep = {"hs": hs, "d": dd, "t": 0.45, "n": 0})
+			pb.button_up.connect(func():
+				if not lab.rep.is_empty() and lab.rep.n == 0:
+					hs.value = hs.value + dd
+				lab.rep = {})
+			if sd < 0:
+				row.add_child(pb)
+				row.add_child(hs)
+			else:
+				row.add_child(pb)
+		lab.lst.add_child(row)
 	lab.sc.scroll_vertical = 0
 	_lab_style()
 
@@ -4779,6 +4918,15 @@ func _lab_fire() -> void:
 		"wall":
 			g.wpn = "wand"
 			_fire()
+		"shield":
+			g.wpn = "schild"
+			_fire()
+		"orbs":
+			g.wpn = "orbs"
+			_fire()
+		"haze":
+			g.boost = 2.5
+			_snd("boost")
 
 
 # Mittelpunkt des Reglerknopfs (x, Bildschirm)
@@ -4801,15 +4949,16 @@ func _lab_list(ev: InputEvent) -> bool:
 				var r: Rect2 = hs.get_global_rect().grow_individual(0, 14, 0, 14)
 				var kx = _knob_x(hs)
 				if r.has_point(ev.position) and absf(ev.position.x - kx) < 48.0:
-					lab.grab[ev.index] = {"hs": hs, "off": kx - ev.position.x}
+					lab.grab[ev.index] = {"hs": hs, "v": hs.value, "cy": hs.get_global_rect().get_center().y}
 					hs.add_theme_icon_override("grabber", _dot(52))
 					return true
-			lab.grab[ev.index] = {"scroll": true, "sy": float(lab.sc.scroll_vertical)}
+			lab.grab[ev.index] = {"scroll": true, "sy": float(lab.sc.scroll_vertical), "mv": 0.0}
 			return true
 		elif lab.grab.has(ev.index):
 			var gd = lab.grab[ev.index]
 			if gd.has("hs") and is_instance_valid(gd.hs):
 				gd.hs.add_theme_icon_override("grabber", _dot(40))
+				lab.fine = 1.0
 			lab.grab.erase(ev.index)
 			return true
 	elif ev is InputEventScreenDrag and lab.grab.has(ev.index):
@@ -4818,11 +4967,17 @@ func _lab_list(ev: InputEvent) -> bool:
 			var hs: HSlider = gd.hs
 			if is_instance_valid(hs):
 				var r = hs.get_global_rect()
-				var u = clampf((ev.position.x + gd.off - r.position.x - 20.0) / maxf(1.0, r.size.x - 40.0), 0.0, 1.0)
-				hs.value = hs.min_value + u * (hs.max_value - hs.min_value)
+				var off = maxf(0.0, absf(ev.position.y - gd.cy) - 45.0)
+				var sens = 1.0 / (1.0 + off / 45.0)
+				gd.v = clampf(gd.v + ev.relative.x / maxf(1.0, r.size.x - 40.0) * (hs.max_value - hs.min_value) * sens, hs.min_value, hs.max_value)
+				hs.value = gd.v
+				lab.fine = sens
 		else:
+			gd.mv += absf(ev.relative.y)
+			if gd.mv > 10.0:
+				lab.rep = {}   # beim Scrollen über einen ±-Knopf nicht weiterzählen
 			gd.sy -= ev.relative.y
-			gd.sy = clampf(gd.sy, 0.0, maxf(0.0, lab.lst.size.y - sr.size.y))
+			gd.sy = clampf(gd.sy, 0.0, maxf(0.0, lab.lstc.size.y - sr.size.y))
 			lab.sc.scroll_vertical = int(gd.sy)
 		return true
 	return false
@@ -4863,7 +5018,18 @@ func _lab_step(dt: float) -> void:
 		lab.at -= dt
 		if lab.at <= 0.0:
 			_lab_fire()
-			lab.at = {"quake": 4.0, "wall": 5.3 * float(fx.wall.dur) + 0.4, "mine": 3.2}.get(lab.tab, 3.0)
+			lab.at = {"quake": 4.0, "wall": 5.3 * float(fx.wall.dur) + 0.4, "mine": 3.2, "shield": 6.3, "orbs": 10.3, "haze": 3.0}.get(lab.tab, 3.0)
+	var g: Dictionary = ships[0]
+	g.shield = maxf(0.0, g.shield - dt)
+	g.boost = maxf(0.0, g.boost - dt * 0.9)
+	# ±-Knopf gedrückt halten: wiederholen
+	if not lab.rep.is_empty():
+		lab.rep.t -= dt
+		if lab.rep.t <= 0.0:
+			lab.rep.t = 0.07
+			lab.rep.n += 1
+			if is_instance_valid(lab.rep.hs):
+				lab.rep.hs.value = lab.rep.hs.value + lab.rep.d
 	if lab.sv > 0.0:
 		lab.sv -= dt
 		if lab.sv <= 0.0:
@@ -4872,8 +5038,9 @@ func _lab_step(dt: float) -> void:
 	_tunnel(dt)
 	_pose_all(dt)
 	# Kamera kreist um die Teststelle (unten ist das Regelfeld, darum Blickpunkt etwas tiefer)
-	var f = T.frame(LZ + 7.0)
-	var tg: Vector3 = f.c + f.uu * 0.8
+	lab.tz = lerpf(lab.get("tz", LZ + 7.0), LZ + (0.3 if lab.tab in ["shield", "orbs", "haze"] else 7.0), 1.0 - exp(-dt / 0.3))
+	var f = T.frame(lab.tz)
+	var tg: Vector3 = f.c + f.uu * (0.4 if lab.tab in ["shield", "orbs", "haze"] else 0.8)
 	var cp = cos(lab.pit)
 	var off: Vector3 = (-f.fw * cos(lab.yaw) + f.rr * sin(lab.yaw)) * cp + Vector3.UP * sin(lab.pit)
 	var ro: Vector3 = tg + off * lab.dist
@@ -4911,7 +5078,7 @@ func _shot() -> void:
 						lab.dist = float(p[6])
 				if shot_n == 80 and p[3] != "env":
 					_lab_fire()
-				var at = 60 + {"boom": 25, "mine": 75, "quake": 32, "gb": 38, "rak": 55, "wall": 50, "env": 30}.get(p[3], 40)
+				var at = 60 + {"boom": 26, "mine": 75, "quake": 32, "gb": 38, "rak": 26, "wall": 50, "env": 30}.get(p[3], 40)
 				if shot_n == at:
 					get_viewport().get_texture().get_image().save_png(p[0])
 					get_tree().quit()
@@ -5055,8 +5222,17 @@ func _pose_all(dt: float) -> void:
 			j.visible = s.boost > 0.25
 		var lt: OmniLight3D = nd.get_meta("light")
 		lt.light_energy = (1.4 + 3.0 * s.boost) * (1.0 + 1.2 * tun_k)
+		var HX: Dictionary = fx.haze
 		for hm in nd.get_meta("haze"):
-			hm.set_shader_parameter("k", 0.55 + 0.9 * minf(1.0, s.boost))
+			hm.set_shader_parameter("k", 0.55 + 0.9 * float(HX.boost) * minf(1.0, s.boost))
+			hm.set_shader_parameter("hs", float(HX.str))
+			hm.set_shader_parameter("hv", float(HX.speed))
+		var hzn: Array = nd.get_meta("hazen")
+		for k in range(hzn.size()):
+			var hn: MeshInstance3D = hzn[k]
+			hn.scale = Vector3.ONE * (0.75 if k == 0 else 1.1) * float(HX.size)
+			hn.position.z = -0.75 - (0.28 if k == 0 else 0.85) * float(HX.len)
+			hn.visible = float(HX.str) > 0.01
 		lt.omni_range = 4.0 + 4.0 * tun_k
 		lt.light_color = Color(0.6, 0.4, 1.0).lerp(Color(0.3, 0.8, 1.0), clampf(s.boost, 0.0, 1.0))
 
