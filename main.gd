@@ -1071,6 +1071,23 @@ void fragment(){
 var city_mat: ShaderMaterial
 
 
+# Kommt in den nächsten Metern eine Kurve? (für den Autopiloten)
+var kmax = -1.0
+
+
+func _curvy(z: float) -> bool:
+	if kmax < 0.0:
+		kmax = 0.0
+		var zz = 20.0
+		while zz < 720.0:
+			kmax = maxf(kmax, absf(T.kap(zz)))
+			zz += 2.0
+	for d in [0.0, 6.0, 12.0]:
+		if absf(T.kap(z + d)) > 0.45 * kmax:
+			return true
+	return false
+
+
 # Lichtsäule über einem Waffenfeld: Lichtkegel plus zwei Lichtringe, die sich in der Mitte treffen und federnd abstoßen
 var pring_m = []
 var pill_mesh: CylinderMesh
@@ -1530,6 +1547,18 @@ func _hud() -> void:
 	ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cl.add_child(ring)
 	ring.draw.connect(func():
+		# Autopilot: Restzeit als Bogen um den Knopf (leert sich im Uhrzeigersinn); wartet er auf eine Gerade, pulsiert er
+		var ga: Dictionary = ships[0]
+		if ga.auto > 0.0 and state == "race":
+			var cc = ring.size * 0.5
+			var fr = clampf(ga.auto / 5.0, 0.0, 1.0)
+			var ac = Color(0.4, 0.95, 1.0)
+			ring.draw_arc(cc, 118.0, 0.0, TAU, 64, Color(ac.r, ac.g, ac.b, 0.15), 8.0, true)
+			if ga.get("ahold", false):
+				var pz = 0.5 + 0.5 * sin(Time.get_ticks_msec() / 1000.0 * 8.0)
+				ring.draw_arc(cc, 118.0, 0.0, TAU, 64, Color(ac.r, ac.g, ac.b, 0.3 + 0.5 * pz), 8.0, true)
+			else:
+				ring.draw_arc(cc, 118.0, -PI / 2.0, -PI / 2.0 + TAU * fr, 64, Color(ac.r, ac.g, ac.b, 0.95), 8.0, true)
 		if not hud.get("armed", false):
 			return
 		var t = Time.get_ticks_msec() / 1000.0
@@ -3091,6 +3120,7 @@ func _fire() -> void:
 			_snd("wallon")
 		"auto":
 			g.auto = 5.0
+			g.ahold = false
 			_snd("shield")
 
 
@@ -3113,9 +3143,11 @@ func _weapons(dt: float, racing: bool) -> void:
 		if g.wpn != "" and racing:
 			_fire()
 	hud.fire.text = WN.get(g.wpn, "empty")
+	if g.auto > 0.0 and g.wpn == "":
+		hud.fire.text = "AUTO …" if g.get("ahold", false) else "AUTO %.1f" % g.auto
 	var armed = g.wpn != ""
 	hud.armed = armed
-	hud.fire.modulate = Color(1, 1, 1, 1.0 if armed else 0.4)
+	hud.fire.modulate = Color(1, 1, 1, 1.0 if armed or g.auto > 0.0 else 0.4)
 	var wc: Color = WC.get(g.wpn, Color(1, 1, 1))
 	hud.wc = wc
 	hud.fire_sb.border_color = Color(wc.r, wc.g, wc.b, 1.0) if armed else Color(1, 1, 1, 0.25)
@@ -4543,6 +4575,10 @@ func _process(delta: float) -> void:
 	if g.auto > 0.0:
 		steer = 0.0
 		g.auto -= dt
+		# Autopilot geht nur auf gerader Strecke aus: in Kurven oder im Sprung hält er noch
+		g.ahold = g.auto <= 0.05 and (g.air or _curvy(g.z))
+		if g.ahold:
+			g.auto = 0.05
 	if g.turbo > 0.0:
 		g.turbo -= dt
 		g.boost = maxf(g.boost, 1.5)
@@ -5134,6 +5170,12 @@ func _lab_step(dt: float) -> void:
 		var tt0 = Time.get_ticks_msec() / 1000.0
 		for _k in range(nn):
 			_phys(g, _ai_inp(g, tt0, dt / nn), true, dt / nn, true)
+		# Tunnel überspringen: im Tunnel sähe man von außen nichts
+		var zl = T.lz(g.z)
+		for tu in T.TUN:
+			if zl > tu[0] - 18.0 and zl < tu[1] + 3.0:
+				g.z += tu[1] + 4.0 - zl
+				lab.tz = g.z + 0.3
 		var l0 = int(floor((g.z - 20.0) / T.LAP))
 		for i in range(3):
 			laps[i].position = Vector3(0, 0, (l0 - 1 + i) * T.LAP)
