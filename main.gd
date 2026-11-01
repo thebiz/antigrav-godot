@@ -278,6 +278,7 @@ uniform float gs=0.;
 uniform float gr=-1.;
 uniform float gk=0.;
 uniform float gz=1.;
+uniform float gd=1.;uniform float grw=1.;uniform float grb=1.;uniform vec3 grc=vec3(.75,.55,1.);
 uniform float gl=0.;
 uniform float asp=.46;
 uniform float shp=.6;
@@ -319,8 +320,8 @@ void fragment(){
 	col/=6.;}
 	// schwarzer Kern und leuchtender Ring der Bombe
 	float gp=max(gs,0.);
-	col*=1.-smoothstep(.06*gp+.01,.0,r)*gp;
-	col+=vec3(.75,.55,1.)*exp(-pow((r-.075*gp)*55.,2.))*gp*1.6;
+	col*=1.-smoothstep(.06*gp+.01,.0,r)*gp*gd;
+	col+=grc*exp(-pow((r-.075*gp)*55./grw,2.))*gp*1.6*grb;
 	if(gr>=0.)col+=vec3(.6,.45,1.)*exp(-pow((r-gr)*30.,2.))*gk*.8;
 	// Speed-Linien: helle Streifen fliegen von der Mitte nach außen
 	float an=atan(cd.y,cd.x*asp);float lane=floor(an*70.);float hl=h21(vec2(lane,3.));
@@ -379,6 +380,10 @@ func _post_update(dt: float) -> void:
 		gs = -1.2
 	bk *= best.get("lens", 1.0)
 	post.set_shader_parameter("gz", best.get("ps", 1.0))
+	post.set_shader_parameter("gd", best.get("dark", 1.0))
+	post.set_shader_parameter("grw", best.get("rimw", 1.0))
+	post.set_shader_parameter("grb", best.get("rimb", 1.0))
+	post.set_shader_parameter("grc", _v3(_hs(Color(0.75, 0.55, 1.0), best.get("rimh", 0.0))))
 	post.set_shader_parameter("gs", gs * bk)
 	post.set_shader_parameter("gr", (t - 0.55) * 1.1 if t >= 0.55 else -1.0)
 	post.set_shader_parameter("gk", bk * clampf(1.0 - (t - 0.55) / 0.8, 0.0, 1.0))
@@ -404,9 +409,13 @@ const FXS = {
 		["boom", "Explosion size", 0.2, 6.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
 	"quake": [["height", "Wave height", 0.1, 6.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["dur", "Range", 0.1, 5.0, 1.0], ["glow", "Glow", 0.0, 8.0, 1.0],
 		["sparks", "Sparks & shards", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
-	"gb": [["scale", "Size (all)", 0.1, 4.0, 1.0], ["size", "Pull radius", 0.2, 6.0, 1.0], ["time", "Duration", 0.2, 8.0, 1.0], ["core", "Core size", 0.2, 6.0, 1.0], ["sparks", "Sparks", 0.0, 8.0, 1.0],
-		["wave", "Shock ring", 0.0, 8.0, 1.0], ["light", "Light", 0.0, 8.0, 1.0], ["lens", "Space warp", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0],
-		["hue", "Color", -0.5, 0.5, 0.0]],
+	"gb": [["scale", "Size (all)", 0.1, 4.0, 1.0], ["size", "Pull radius", 0.2, 6.0, 1.0], ["time", "Duration", 0.2, 8.0, 1.0],
+		["core", "Core size", 0.2, 6.0, 1.0], ["dark", "Core blackness", 0.0, 1.0, 1.0],
+		["rimw", "Rim width", 0.2, 6.0, 1.0], ["rimb", "Rim brightness", 0.0, 8.0, 1.0], ["rimh", "Rim color", -0.5, 0.5, 0.0],
+		["wave", "Shock sphere", 0.0, 8.0, 1.0], ["wthick", "Sphere thickness", 0.1, 6.0, 1.0], ["wspeed", "Sphere speed", 0.2, 6.0, 1.0], ["wsize", "Sphere size", 0.2, 6.0, 1.0],
+		["whue", "Sphere color", -0.5, 0.5, 0.0], ["gring", "Ground ring", 0.0, 8.0, 1.0],
+		["sparks", "Sparks", 0.0, 8.0, 1.0], ["light", "Light", 0.0, 8.0, 1.0], ["lens", "Space warp", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0],
+		["hue", "Color (all)", -0.5, 0.5, 0.0]],
 	"rak": [["size", "Size", 0.2, 8.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["light", "Light", 0.0, 10.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
 	"wall": [["height", "Height", 0.2, 8.0, 1.0], ["dur", "Duration", 0.2, 8.0, 1.0], ["bolts", "Lightning", 0.0, 8.0, 1.0], ["glow", "Glow", 0.0, 8.0, 1.0],
@@ -2594,8 +2603,10 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	sm.height = 2.0
 	core.mesh = sm
 	var cm = StandardMaterial3D.new()
-	cm.albedo_color = Color(0, 0, 0)
+	cm.albedo_color = Color(0, 0, 0, float(X.dark))
 	cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	if float(X.dark) < 0.99:
+		cm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	core.material_override = cm
 	core.position = pos
 	core.scale = Vector3.ONE * 0.05
@@ -2604,13 +2615,13 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	var ring = MeshInstance3D.new()
 	var tm = TorusMesh.new()
 	tm.inner_radius = 0.9
-	tm.outer_radius = 1.12
+	tm.outer_radius = 0.9 + 0.22 * float(X.rimw)
 	tm.rings = 48
 	ring.mesh = tm
 	var rmt = StandardMaterial3D.new()
 	rmt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	rmt.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	rmt.albedo_color = _hs(Color(1.6, 1.2, 3.0), hu)
+	rmt.albedo_color = _hs(Color(1.6, 1.2, 3.0) * float(X.rimb), hu + float(X.rimh))
 	ring.material_override = rmt
 	ring.position = pos
 	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -2647,7 +2658,8 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	lt.position = pos
 	add_child(lt)
 	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": fx_age, "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit,
-		"sz": gz, "ps": gsc, "ts": float(X.time), "cs": float(X.core) * sqrt(float(X.size)) * gsc, "sp": float(X.sparks), "wv": float(X.wave), "lk": float(X.light), "lens": float(X.lens), "sh": float(X.shake), "hu": hu})
+		"sz": gz, "ps": gsc, "ts": float(X.time), "wt": float(X.wthick), "ws": float(X.wspeed), "wz": float(X.wsize), "whu": hu + float(X.whue), "gr": float(X.gring),
+		"rimw": float(X.rimw), "rimb": float(X.rimb), "rimh": hu + float(X.rimh), "dark": float(X.dark), "cs": float(X.core) * sqrt(float(X.size)) * gsc, "sp": float(X.sparks), "wv": float(X.wave), "lk": float(X.light), "lens": float(X.lens), "sh": float(X.shake), "hu": hu})
 	_snd("gbomb", 3.0, 1.0, pos)
 
 
@@ -2715,13 +2727,46 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		var ring = MeshInstance3D.new()
 		ring.mesh = fxr.ring
 		var rm = _shader_mat(fxr.ring_code)
-		rm.set_shader_parameter("rc", _v3(_hs(Color(0.7, 0.5, 1.0), hu)))
-		rm.set_shader_parameter("rk", e.get("wv", 1.0))
+		rm.set_shader_parameter("rc", _v3(_hs(Color(0.7, 0.5, 1.0), e.get("whu", hu))))
+		rm.set_shader_parameter("rk", e.get("gr", 1.0))
 		ring.material_override = rm
 		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ring.visible = e.get("gr", 1.0) > 0.01
 		add_child(ring)
 		e.sw = ring
 		e.swm = rm
+		# Druckwelle als Kugel: dehnt sich in alle Richtungen aus, leuchtet am Rand (Fresnel), wird dabei dünner
+		if fxr.get("wsph") == null:
+			var sm2 = SphereMesh.new()
+			sm2.radius = 1.0
+			sm2.height = 2.0
+			sm2.radial_segments = 32
+			sm2.rings = 16
+			fxr.wsph = sm2
+		var sph = MeshInstance3D.new()
+		sph.mesh = fxr.wsph
+		var smt = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform vec3 wc=vec3(.7,.5,1.);uniform float u=0.;uniform float th=1.;uniform float br=1.;
+void fragment(){
+	float fr=1.-abs(dot(NORMAL,VIEW));
+	float shell=pow(fr,mix(7.,1.3,clamp(th*.35,0.,1.)));
+	float f=(1.-u);
+	ALBEDO=wc*(shell*2.4+.05*th)*br*f*f;
+}""")
+		smt.set_shader_parameter("wc", _v3(_hs(Color(0.7, 0.5, 1.0), e.get("whu", hu))))
+		smt.set_shader_parameter("th", e.get("wt", 1.0))
+		smt.set_shader_parameter("br", e.get("wv", 1.0))
+		sph.material_override = smt
+		sph.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		sph.extra_cull_margin = 20.0
+		sph.visible = e.get("wv", 1.0) > 0.01
+		sph.position = e.pos
+		sph.scale = Vector3.ONE * 0.3
+		add_child(sph)
+		e.sph = sph
+		e.sphm = smt
 		e.l.light_energy = 9.0 * e.get("lk", 1.0)
 		var d = (e.pos - cam.global_position).length()
 		var near = clampf(1.0 - d / 40.0, 0.0, 1.0)
@@ -2729,15 +2774,20 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		_flash(_hs(Color(0.75, 0.6, 1.0), hu), 0.22 * near * minf(1.0, e.get("lk", 1.0)))
 	else:
 		var u = clampf((t - 0.55) / 0.7, 0.0, 1.0)
+		var uw = clampf((t - 0.55) * e.get("ws", 1.0) / 0.9, 0.0, 1.0)
 		rg.visible = false
 		e.l.light_energy = 9.0 * pow(1.0 - u, 2.0) * e.get("lk", 1.0)
 		var f = e.f
 		var sc = (0.6 + 9.0 * pow(u, 0.5)) * gz
 		e.sw.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
 		e.swm.set_shader_parameter("u", u)
-		if u >= 1.0:
-			for k in ["core", "ring", "l", "sw"]:
-				e[k].queue_free()
+		if e.has("sph"):
+			e.sph.scale = Vector3.ONE * (0.4 + 6.5 * pow(uw, 0.6)) * gz * e.get("wz", 1.0)
+			e.sphm.set_shader_parameter("u", uw)
+		if u >= 1.0 and uw >= 1.0:
+			for k in ["core", "ring", "l", "sw", "sph"]:
+				if e.has(k):
+					e[k].queue_free()
 			return true
 	# Ring zeigt immer zur Kamera
 	rg.look_at(cam.global_position, Vector3.UP)
@@ -4681,6 +4731,7 @@ func _process(delta: float) -> void:
 
 # ---------------------------------------------------------------- FX Lab: Teststrecke für alle Effekte, mit Reglern
 const LZ = 40.0
+const VOICE_LAB_URL = "https://claude.ai/artifact/E8ePfMb2RbvnrVhn1Q1HeD"
 var lab = {}
 
 
@@ -4831,12 +4882,19 @@ func _lab_open() -> void:
 	row2.add_child(br)
 	var bc = _btn("Copy settings")
 	bc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bc.size_flags_stretch_ratio = 1.5
+	bc.size_flags_stretch_ratio = 1.4
 	bc.custom_minimum_size = Vector2(0, 84)
-	bc.add_theme_font_size_override("font_size", 28)
+	bc.add_theme_font_size_override("font_size", 22)
 	bc.pressed.connect(_lab_copy)
 	row2.add_child(bc)
 	lab.cb = bc
+	var bvl = _btn("Voice Lab")
+	bvl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bvl.size_flags_stretch_ratio = 1.3
+	bvl.custom_minimum_size = Vector2(0, 84)
+	bvl.add_theme_font_size_override("font_size", 22)
+	bvl.pressed.connect(func(): OS.shell_open(VOICE_LAB_URL))
+	row2.add_child(bvl)
 	var bb = _btn("Done", true)
 	bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bb.custom_minimum_size = Vector2(0, 84)
@@ -5229,7 +5287,7 @@ func _shot() -> void:
 						lab.dist = float(p[6])
 				if shot_n == 80 and p[3] != "env":
 					_lab_fire()
-				var at = 60 + {"boom": 26, "mine": 75, "quake": 32, "gb": 38, "rak": 26, "wall": 50, "env": 30, "pillar": 70, "ship": 140}.get(p[3], 40)
+				var at = 60 + {"boom": 26, "mine": 75, "quake": 32, "gb": 36, "rak": 26, "wall": 50, "env": 30, "pillar": 70, "ship": 140}.get(p[3], 40)
 				if shot_n == at:
 					get_viewport().get_texture().get_image().save_png(p[0])
 					get_tree().quit()
