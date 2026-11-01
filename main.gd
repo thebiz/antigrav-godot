@@ -137,7 +137,7 @@ func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
-			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav"]:
+			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	for k in ["engine", "idle", "field"]:
 		var p = AudioStreamPlayer.new()
@@ -2812,6 +2812,18 @@ func _weapons(dt: float, racing: bool) -> void:
 			bar.visible = state == "race" and o.z - g.z > 1.5 and o.z - g.z < 40.0
 	hud.en.size.x = 200.0 * g.en
 	hud.en.color = Color(0.36, 1.0, 0.6) if g.en > 0.5 else (Color(1.0, 0.85, 0.25) if g.en > 0.25 else Color(1.0, 0.35, 0.3))
+	# Warnung bei wenig Energie: Ansage beim Unterschreiten von 25 %, Balken blinkt rot
+	if g.en <= 0.25 and not g.out and state == "race":
+		if not en_low:
+			en_low = true
+			_snd("vo_enlow", 3.0)
+		var bl = fmod(Time.get_ticks_msec() / 1000.0, 0.5) < 0.25
+		hud.en.color = Color(1.0, 0.2, 0.15) if bl else Color(0.5, 0.08, 0.06)
+		hud.en_bg.color = Color(1, 0.2, 0.15, 0.35 if bl else 0.15)
+	else:
+		if g.en > 0.35:
+			en_low = false
+		hud.en_bg.color = Color(1, 1, 1, 0.15)
 	# Neue Runde: 25 % Energie zurück
 	for o in ships:
 		var ln = int(floor((o.z - T.ZST) / T.LAP))
@@ -3816,6 +3828,7 @@ func _kc_cam() -> bool:
 
 # Minen-Warnung: „düt, düt, düt“, je näher die gegnerischen Minen vor dir liegen, desto schneller und höher
 var mine_bt = 0.0
+var en_low = false
 
 
 func _mine_warn(dt: float, racing: bool) -> void:
