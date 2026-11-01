@@ -163,6 +163,9 @@ func _sounds() -> void:
 
 func _looped(st: AudioStream) -> AudioStream:
 	if st is AudioStreamWAV:
+		# Schleife kommt schon aus dem Import (sicherer als zur Laufzeit gesetzte Schleifenpunkte)
+		if (st as AudioStreamWAV).loop_mode != AudioStreamWAV.LOOP_DISABLED:
+			return st
 		var w = (st as AudioStreamWAV).duplicate()
 		w.loop_mode = AudioStreamWAV.LOOP_FORWARD
 		w.loop_begin = 0
