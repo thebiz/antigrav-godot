@@ -2770,7 +2770,8 @@ func _gb_damage(e: Dictionary) -> void:
 		var kk = clampf(1.0 - dd / (GB_R * e.get("sz", 1.0)), 0.0, 1.0)
 		if kk > 0.0:
 			_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0), e.own, "rocket")
-			o.slow = minf(o.slow, 0.4)
+			if not _prot(o):   # mit Schild: kein Abbremsen
+				o.slow = minf(o.slow, 0.4)
 
 
 func _glow_mat(c: Color, e: float) -> StandardMaterial3D:
@@ -3350,7 +3351,7 @@ func _quake_step(q, dt: float) -> Variant:
 		if o.idx != 0 and not o.out and not q.hit.has(o.idx) and absf(o.z - q.z) < 2.6:
 			q.hit.append(o.idx)
 			_dmg(o, 0.2, 0, "quake")
-			if not o.out:
+			if not o.out and not _prot(o):   # mit Schild: wird nicht hochgeworfen
 				o.air = true
 				o.vy = 5.8 * sqrt(float(QX.height))
 				o.h = maxf(o.h, 0.6)
@@ -3567,7 +3568,8 @@ func _weapons(dt: float, racing: bool) -> void:
 			if o.idx != 0 and not o.out and not w.hit.has(o.idx) and o.z >= w.z and o.z - o.spd * dt * 1.5 < w.z + 0.01:
 				w.hit.append(o.idx)
 				var ws: bool = w.get("sup", false)
-				o.slowT = 4.0 if ws else 2.5
+				if not _prot(o):   # mit Schild: fliegt einfach durch
+					o.slowT = 4.0 if ws else 2.5
 				if ws and not _prot(o):
 					o.slow = minf(o.slow, 0.35)
 				w.hf = 1.0
