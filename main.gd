@@ -404,7 +404,7 @@ const FXS = {
 	"gb": [["size", "Pull radius", 0.2, 6.0, 1.0], ["time", "Duration", 0.2, 8.0, 1.0], ["core", "Core size", 0.2, 6.0, 1.0], ["sparks", "Sparks", 0.0, 8.0, 1.0],
 		["wave", "Shock ring", 0.0, 8.0, 1.0], ["light", "Light", 0.0, 8.0, 1.0], ["lens", "Space warp", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
-	"rak": [["size", "Size", 0.2, 8.0, 1.0], ["glow", "Glow halo", 0.0, 10.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["light", "Light", 0.0, 10.0, 1.0],
+	"rak": [["size", "Size", 0.2, 8.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["light", "Light", 0.0, 10.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
 	"wall": [["height", "Height", 0.2, 8.0, 1.0], ["dur", "Duration", 0.2, 8.0, 1.0], ["bolts", "Lightning", 0.0, 8.0, 1.0], ["glow", "Glow", 0.0, 8.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
@@ -412,15 +412,19 @@ const FXS = {
 		["hue", "Color", -0.5, 0.5, 0.0]],
 	"orbs": [["size", "Size", 0.2, 6.0, 1.0], ["radius", "Orbit radius", 0.3, 5.0, 1.0], ["speed", "Orbit speed", 0.1, 6.0, 1.0], ["trail", "Trail length", 0.0, 6.0, 1.0],
 		["glow", "Glow", 0.0, 10.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
-	"haze": [["str", "Distortion", 0.0, 10.0, 1.0], ["size", "Size", 0.2, 6.0, 1.0], ["len", "Length", 0.2, 6.0, 1.0], ["speed", "Speed", 0.0, 8.0, 1.0],
-		["boost", "Extra with boost", 0.0, 8.0, 1.0]],
+	"haze": [["amp", "Shimmer", 0.0, 10.0, 1.0], ["fine", "Fineness", 0.3, 6.0, 1.0], ["speed", "Speed", 0.0, 8.0, 1.0], ["size", "Size", 0.2, 6.0, 1.0],
+		["len", "Length", 0.2, 6.0, 1.0], ["boost", "Extra with boost", 0.0, 8.0, 1.0]],
+	"pillar": [["speed", "Ring speed", 0.0, 6.0, 1.0], ["size", "Ring size", 0.3, 5.0, 1.0], ["glow", "Ring glow", 0.0, 10.0, 1.0], ["squash", "Rubber squash", 0.0, 6.0, 1.0],
+		["soft", "Soft bounce", 0.0, 2.0, 1.0], ["beam", "Pillar light", 0.0, 10.0, 1.0]],
+	"ship": [["height", "Hover height", 0.2, 8.0, 1.0], ["bob", "Hover bob", 0.0, 10.0, 1.0], ["bank", "Lean in curves", 0.0, 6.0, 1.0], ["pitch", "Nose pitch", 0.0, 8.0, 1.0],
+		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0], ["steer", "Steering lag", 0.2, 8.0, 1.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
 		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
 		["lamps", "Track lights", 0.0, 10.0, 1.0]],
 }
-const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Haze"], ["env", "World"]]
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Haze"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"]]
 var fx = {}
 
 
@@ -530,8 +534,7 @@ func _env_apply() -> void:
 		city_mat.set_shader_parameter("wl", float(E.win))
 		city_mat.set_shader_parameter("wh", float(E.hue_w))
 		city_mat.set_shader_parameter("eg", float(E.edge))
-	if beam_mat != null:
-		beam_mat.set_shader_parameter("bk", float(E.beams))
+	_pillar_apply()
 	for b in beam_n:
 		b.visible = float(E.beams) > 0.01
 	if moon != null:
@@ -988,16 +991,7 @@ void fragment(){
 				beam_mat.shader = bsh
 				beam_mat.shader.code = beam_mat.shader.code.replace("vec3 c=.5+.5*cos(6.2832*(UV.x+TIME*.3+vec3(0.,.33,.67)));", "vec3 c=vec3(1.,.36,.03);")
 		for wp in wpads:
-			var cy = CylinderMesh.new()
-			cy.top_radius = 0.3
-			cy.bottom_radius = 0.3
-			cy.height = 2.2
-			cy.cap_top = false
-			cy.cap_bottom = false
-			var bm = MeshInstance3D.new()
-			bm.mesh = cy
-			bm.material_override = beam_mat
-			bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			var bm = _pillar_node()
 			var f = T.frame(wp[0])
 			bm.transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * wp[1] + f.uu * 1.1)
 			n.add_child(bm)
@@ -1072,6 +1066,75 @@ void fragment(){
 
 
 var city_mat: ShaderMaterial
+
+
+# Lichtsäule über einem Waffenfeld: Lichtkegel plus zwei Lichtringe, die sich in der Mitte treffen und federnd abstoßen
+var pring_m = []
+var pill_mesh: CylinderMesh
+var ring_mesh: TorusMesh
+
+
+func _pillar_node() -> MeshInstance3D:
+	if pring_m.is_empty():
+		pill_mesh = CylinderMesh.new()
+		pill_mesh.top_radius = 0.3
+		pill_mesh.bottom_radius = 0.3
+		pill_mesh.height = 2.2
+		pill_mesh.cap_top = false
+		pill_mesh.cap_bottom = false
+		ring_mesh = TorusMesh.new()
+		ring_mesh.inner_radius = 0.33
+		ring_mesh.outer_radius = 0.4
+		ring_mesh.rings = 32
+		ring_mesh.ring_segments = 6
+		for wh in [1.0, -1.0]:
+			var m = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform float sp=1.;uniform float sz=1.;uniform float gl=1.;uniform float sq=1.;uniform float sf=1.;uniform float wh=1.;uniform float nr=0.;
+varying float im;
+void vertex(){
+	float u=fract(TIME*sp*.3);
+	float tri=1.-abs(1.-2.*u);                 // 0 = Rand (Boden/Spitze), 1 = Mitte (Zusammenstoß)
+	float b=mix(tri,tri*tri*(3.-2.*tri),clamp(sf*.5,0.,1.));
+	float d=min(tri,1.-tri);
+	im=exp(-d*d*160.);                         // kurz vor/nach dem Abprallen: Gummi-Stauchung
+	VERTEX.xz*=sz*(1.+.3*sq*im);
+	VERTEX.y*=max(.2,1.-.45*sq*im);
+	VERTEX.y+=wh*(-1.06+1.03*b);
+}
+void fragment(){
+	vec3 c=nr>.5?vec3(1.,.36,.03):(.5+.5*cos(6.2832*(TIME*.3+vec3(0.,.33,.67))));
+	ALBEDO=mix(vec3(1.),c,.55)*gl*(1.6+2.5*im);
+}""")
+			m.set_shader_parameter("wh", wh)
+			m.set_shader_parameter("nr", 1.0 if _noir() else 0.0)
+			pring_m.append(m)
+		_pillar_apply()
+	var bm = MeshInstance3D.new()
+	bm.mesh = pill_mesh
+	bm.material_override = beam_mat
+	bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for m in pring_m:
+		var r = MeshInstance3D.new()
+		r.mesh = ring_mesh
+		r.material_override = m
+		r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		r.extra_cull_margin = 3.0
+		bm.add_child(r)
+	return bm
+
+
+func _pillar_apply() -> void:
+	var X: Dictionary = fx.pillar
+	for m in pring_m:
+		m.set_shader_parameter("sp", float(X.speed))
+		m.set_shader_parameter("sz", float(X.size))
+		m.set_shader_parameter("gl", float(X.glow))
+		m.set_shader_parameter("sq", float(X.squash))
+		m.set_shader_parameter("sf", float(X.soft))
+	if beam_mat != null:
+		beam_mat.set_shader_parameter("bk", float(fx.env.beams) * float(X.beam))
 
 
 # Häuser verteilen: Anzahl, Höhe, Breite, Abstand zur Strecke aus dem FX Lab (gleicher Zufall, damit die Stadt gleich bleibt)
@@ -1171,7 +1234,7 @@ const HAZE_CODE = """
 shader_type spatial;
 render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled,fog_disabled;
 uniform sampler2D scr:hint_screen_texture,filter_linear;
-uniform float k=.6;uniform float hs=1.;uniform float hv=1.;
+uniform float k=.6;uniform float hs=1.;uniform float hv=1.;uniform float hf=1.;
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
 	return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),f.x),f.y);}
@@ -1181,10 +1244,11 @@ void vertex(){
 }
 void fragment(){
 	vec2 q=UV-.5;
-	float m=smoothstep(.5,.12,length(q))*k;
-	vec2 p=UV*3.2+vec2(0.,TIME*2.8*hv);
-	vec2 o=vec2(vn(p)+.5*vn(p*2.1+5.2),vn(p+vec2(9.7,3.1))+.5*vn(p*2.1+vec2(1.3,7.7)))-.75;
-	ALBEDO=texture(scr,SCREEN_UV+o*.016*m*hs).rgb;
+	float m=smoothstep(.5,.1,length(q*vec2(1.,.85)))*k;
+	// feines Flimmern: hohe Frequenz, schnell aufsteigend, kleiner Ausschlag
+	vec2 p=UV*9.*hf+vec2(0.,TIME*7.*hv);
+	vec2 o=vec2(vn(p)-.5,vn(p*1.6+vec2(4.1,TIME*2.5*hv))-.5)+.5*vec2(vn(p*2.3+vec2(9.,0.))-.5,vn(p*2.3+vec2(2.,5.))-.5);
+	ALBEDO=texture(scr,SCREEN_UV+o*.0045*m*hs).rgb;
 	ALPHA=smoothstep(0.,.25,m);
 }"""
 var shield_mat: ShaderMaterial
@@ -2753,25 +2817,6 @@ func _add_shot(from: Dictionary, at_player := false, homing := false) -> void:
 	cap.radius = 0.06 * float(X.size)
 	cap.height = 0.5 * float(X.size)
 	var mi = _glow_node(cap, _hs(Color(1.0, 0.6, 0.2), float(X.hue)), 8.0)
-	_fx_res()
-	if float(X.glow) > 0.01:
-		var hq = QuadMesh.new()
-		hq.size = Vector2.ONE * 1.1 * float(X.size) * (0.7 + 0.3 * sqrt(float(X.glow)))
-		var hm = StandardMaterial3D.new()
-		hm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		hm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		hm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-		hm.cull_mode = BaseMaterial3D.CULL_DISABLED
-		hm.disable_receive_shadows = true
-		hm.albedo_texture = fxr.halo
-		var hc = _hs(Color(1.0, 0.5, 0.15), float(X.hue)) * 0.9 * float(X.glow)
-		hm.albedo_color = Color(hc.r, hc.g, hc.b, 1.0)
-		hq.material = hm
-		var hn = MeshInstance3D.new()
-		hn.mesh = hq
-		hn.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.add_child(hn)
 	var lt = OmniLight3D.new()
 	lt.light_color = _hs(Color(1.0, 0.55, 0.2), float(X.hue))
 	lt.omni_range = 4.0 * sqrt(float(X.size))
@@ -4296,7 +4341,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.roll = 0.0
 		return
 	var z: float = s.z
-	s.u += (inp - s.u) * (1.0 - exp(-dt / (0.03 if is_p else 0.08)))
+	s.u += (inp - s.u) * (1.0 - exp(-dt / (0.03 * float(fx.ship.steer) if is_p else 0.08)))
 	var turn: float = T.kap(z) * s.spd
 	s.psi = clampf(s.psi + (s.u * (YAW_P if is_p else YAW_AI) + turn) * dt, -0.9, 0.9)
 	var grip = 0.8 if s.air else (9.5 if is_p else 7.0)
@@ -4621,6 +4666,12 @@ func _lab_open() -> void:
 	cl.layer = 6
 	add_child(cl)
 	lab.cl = cl
+	var pn = _pillar_node()
+	var pf = T.frame(LZ + 5.0)
+	pn.transform = Transform3D(Basis(pf.rr, pf.uu, pf.fw), pf.c + pf.uu * 1.1)
+	pn.visible = false
+	add_child(pn)
+	lab.pn = pn
 	var root = Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -4652,14 +4703,14 @@ func _lab_open() -> void:
 	vb.add_theme_constant_override("separation", 12)
 	root.add_child(vb)
 	var grid = GridContainer.new()
-	grid.columns = 5
+	grid.columns = 6
 	grid.add_theme_constant_override("h_separation", 8)
 	grid.add_theme_constant_override("v_separation", 8)
 	vb.add_child(grid)
 	lab.tabs = {}
 	for t in FXT:
 		var b = _btn(t[1])
-		b.add_theme_font_size_override("font_size", 23)
+		b.add_theme_font_size_override("font_size", 21)
 		b.custom_minimum_size = Vector2(0, 66)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var key: String = t[0]
@@ -4719,7 +4770,7 @@ func _lab_open() -> void:
 	var mc = MarginContainer.new()
 	mc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	mc.add_theme_constant_override("margin_right", 30)
+	mc.add_theme_constant_override("margin_right", 60)
 	sc.add_child(mc)
 	lab.lstc = mc
 	var lst = VBoxContainer.new()
@@ -4773,6 +4824,30 @@ func _lab_copy() -> void:
 			lab.cb.text = "Copy settings")
 
 
+func _lab_grp(t: String) -> String:
+	if t in ["shield", "orbs", "haze"]:
+		return "near"
+	if t in ["ship", "pillar"]:
+		return t
+	return "fx"
+
+
+# Schiff zurück an die Teststelle (nach dem Fahren im Reiter „Ship“)
+func _lab_park() -> void:
+	var g: Dictionary = ships[0]
+	g.z = LZ
+	g.lat = 0.0
+	g.psi = 0.0
+	g.vpsi = 0.0
+	g.u = 0.0
+	g.spd = 0.0
+	g.air = false
+	g.h = 0.0
+	g.vy = 0.0
+	for i in range(3):
+		laps[i].position = Vector3(0, 0, (i - 1) * T.LAP)
+
+
 func _lab_close() -> void:
 	_fx_save()
 	get_tree().reload_current_scene()
@@ -4789,9 +4864,9 @@ func _lab_style() -> void:
 	var sa = _style(Color(0.2, 0.75, 0.45) if lab.auto else Color(1, 1, 1, 0.08), Color(0.6, 1, 0.75) if lab.auto else Color(1, 1, 1, 0.22))
 	for sk in ["normal", "pressed", "hover", "focus"]:
 		lab.ab.add_theme_stylebox_override(sk, sa)
-	lab.fire.disabled = lab.tab == "env"
-	lab.fire.text = "BOOST" if lab.tab == "haze" else "FIRE"
-	lab.fire.modulate.a = 0.35 if lab.tab == "env" else 1.0
+	lab.fire.disabled = lab.tab in ["env", "pillar"]
+	lab.fire.modulate.a = 0.35 if lab.fire.disabled else 1.0
+	lab.fire.text = "BOOST" if lab.tab in ["haze", "ship"] else "FIRE"
 
 
 func _lab_val(it: Array, v: float) -> String:
@@ -4806,9 +4881,21 @@ func _lab_val(it: Array, v: float) -> String:
 
 
 func _lab_tab(t: String) -> void:
-	var ship_t = ["shield", "orbs", "haze"]
-	if lab.has("tab") and (lab.tab in ship_t) != (t in ship_t):
-		lab.dist = 5.5 if t in ship_t else 12.0
+	if lab.has("tab") and _lab_grp(lab.tab) != _lab_grp(t):
+		var V = {"near": [0.35, 0.22, 5.5], "ship": [0.55, 0.2, 6.0], "pillar": [0.45, 0.12, 6.5]}.get(_lab_grp(t), [0.35, 0.22, 12.0])
+		lab.yaw = V[0]
+		lab.pit = V[1]
+		lab.dist = V[2]
+		if lab.tab == "ship":
+			_lab_park()
+		if t == "ship":
+			var g: Dictionary = ships[0]
+			g.lane = 0.0
+			g.tl = 0.0
+			g.sk = 1.0
+			g.slow = 1.0
+	if lab.has("pn"):
+		lab.pn.visible = t == "pillar"
 	lab.tab = t
 	lab.sls = []
 	lab.grab = {}
@@ -4848,6 +4935,8 @@ func _lab_tab(t: String) -> void:
 				if key in ["city", "dens", "bh", "bw", "bd"]:
 					_city_fill()
 				_env_apply()
+			if t == "pillar":
+				_pillar_apply()
 		hs.value_changed.connect(upd)
 		lb.text = "%s   %s" % [it[1], _lab_val(it, hs.value)]
 		# − Regler +  (kleine Schritte; gedrückt halten wiederholt)
@@ -4889,6 +4978,7 @@ func _lab_reset() -> void:
 	if t == "env":
 		_city_fill()
 		_env_apply()
+	_pillar_apply()
 	lab.sv = 0.1
 	_lab_tab(t)
 
@@ -4924,7 +5014,7 @@ func _lab_fire() -> void:
 		"orbs":
 			g.wpn = "orbs"
 			_fire()
-		"haze":
+		"haze", "ship":
 			g.boost = 2.5
 			_snd("boost")
 
@@ -5014,11 +5104,11 @@ func _lab_input(ev: InputEvent) -> void:
 
 
 func _lab_step(dt: float) -> void:
-	if lab.auto and lab.tab != "env":
+	if lab.auto and not lab.tab in ["env", "pillar"]:
 		lab.at -= dt
 		if lab.at <= 0.0:
 			_lab_fire()
-			lab.at = {"quake": 4.0, "wall": 5.3 * float(fx.wall.dur) + 0.4, "mine": 3.2, "shield": 6.3, "orbs": 10.3, "haze": 3.0}.get(lab.tab, 3.0)
+			lab.at = {"ship": 4.0, "quake": 4.0, "wall": 5.3 * float(fx.wall.dur) + 0.4, "mine": 3.2, "shield": 6.3, "orbs": 10.3, "haze": 3.0}.get(lab.tab, 3.0)
 	var g: Dictionary = ships[0]
 	g.shield = maxf(0.0, g.shield - dt)
 	g.boost = maxf(0.0, g.boost - dt * 0.9)
@@ -5034,13 +5124,28 @@ func _lab_step(dt: float) -> void:
 		lab.sv -= dt
 		if lab.sv <= 0.0:
 			_fx_save()
+	var grp = _lab_grp(lab.tab)
+	if grp == "ship":
+		var nn = maxi(1, int(ceil(dt / 0.0125)))
+		var tt0 = Time.get_ticks_msec() / 1000.0
+		for _k in range(nn):
+			_phys(g, _ai_inp(g, tt0, dt / nn), true, dt / nn, true)
+		var l0 = int(floor((g.z - 20.0) / T.LAP))
+		for i in range(3):
+			laps[i].position = Vector3(0, 0, (l0 - 1 + i) * T.LAP)
 	_weapons(dt, false)
 	_tunnel(dt)
 	_pose_all(dt)
-	# Kamera kreist um die Teststelle (unten ist das Regelfeld, darum Blickpunkt etwas tiefer)
-	lab.tz = lerpf(lab.get("tz", LZ + 7.0), LZ + (0.3 if lab.tab in ["shield", "orbs", "haze"] else 7.0), 1.0 - exp(-dt / 0.3))
+	# Kamera kreist um die Teststelle bzw. fliegt im Reiter „Ship“ mit dem Gleiter mit
+	var tzz = {"near": LZ + 0.3, "ship": g.z + 0.3, "pillar": LZ + 5.0}.get(grp, LZ + 7.0)
+	var tll = g.lat if grp == "ship" else 0.0
+	if grp == "ship" and absf(lab.get("tz", tzz) - tzz) < 3.0:
+		lab.tz = tzz
+	else:
+		lab.tz = lerpf(lab.get("tz", LZ + 7.0), tzz, 1.0 - exp(-dt / 0.3))
+	lab.tl = lerpf(lab.get("tl", 0.0), tll, 1.0 - exp(-dt / 0.15))
 	var f = T.frame(lab.tz)
-	var tg: Vector3 = f.c + f.uu * (0.4 if lab.tab in ["shield", "orbs", "haze"] else 0.8)
+	var tg: Vector3 = f.c + f.rr * lab.tl + f.uu * {"near": 0.4, "ship": 0.4, "pillar": 1.1}.get(grp, 0.8)
 	var cp = cos(lab.pit)
 	var off: Vector3 = (-f.fw * cos(lab.yaw) + f.rr * sin(lab.yaw)) * cp + Vector3.UP * sin(lab.pit)
 	var ro: Vector3 = tg + off * lab.dist
@@ -5078,7 +5183,7 @@ func _shot() -> void:
 						lab.dist = float(p[6])
 				if shot_n == 80 and p[3] != "env":
 					_lab_fire()
-				var at = 60 + {"boom": 26, "mine": 75, "quake": 32, "gb": 38, "rak": 26, "wall": 50, "env": 30}.get(p[3], 40)
+				var at = 60 + {"boom": 26, "mine": 75, "quake": 32, "gb": 38, "rak": 26, "wall": 50, "env": 30, "pillar": 70, "ship": 140}.get(p[3], 40)
 				if shot_n == at:
 					get_viewport().get_texture().get_image().save_png(p[0])
 					get_tree().quit()
@@ -5207,16 +5312,33 @@ func _pose_all(dt: float) -> void:
 	for i in range(ships.size()):
 		var s: Dictionary = ships[i]
 		var f = T.frame(s.z)
-		var bob = 0.012 * sin(tt * 2.7 + s.ai)
-		var pos: Vector3 = f.c + f.rr * s.lat + f.uu * (0.16 + s.h + bob)
+		var SX: Dictionary = fx.ship
+		var bob = 0.012 * float(SX.bob) * sin(tt * 2.7 + s.ai)
+		var pos: Vector3 = f.c + f.rr * s.lat + f.uu * (0.16 * float(SX.height) + s.h + bob)
 		var dir: Vector3 = (f.fw * cos(s.psi) + f.rr * sin(s.psi)).normalized()
 		if state != "replay" and state != "kill":
-			s.roll += (s.u * 0.32 - s.roll) * (1.0 - exp(-dt / 0.15))
+			# Feder: Neigen in Kurven und Nicken beim Beschleunigen schwingen je nach „Wobble“ nach
+			var om = 9.0 * float(SX.stiff)
+			var ze = 1.0 / (1.0 + float(SX.wobble))
+			var acc = (s.spd - s.get("lspd", s.spd)) / maxf(dt, 1e-4)
+			s.lspd = s.spd
+			s.pacc = lerpf(s.get("pacc", 0.0), acc, 1.0 - exp(-dt / 0.2))
+			var tr = s.u * 0.32 * float(SX.bank)
+			var tp = clampf((s.pacc * 0.006 + s.boost * 0.035) * float(SX.pitch), -0.35, 0.35)
+			var nsub = maxi(1, int(ceil(dt * om / 0.25)))
+			var sdt = dt / nsub
+			for _i in range(nsub):
+				s.rv = s.get("rv", 0.0) + (om * om * (tr - s.roll) - 2.0 * ze * om * s.get("rv", 0.0)) * sdt
+				s.roll += s.rv * sdt
+				s.pv = s.get("pv", 0.0) + (om * om * (tp - s.get("pit", 0.0)) - 2.0 * ze * om * s.get("pv", 0.0)) * sdt
+				s.pit = s.get("pit", 0.0) + s.pv * sdt
 		var up: Vector3 = f.uu.rotated(dir, s.roll)
 		var x = up.cross(dir).normalized()
 		up = dir.cross(x).normalized()
 		var nd: Node3D = s.node
 		nd.global_transform = Transform3D(Basis(x, up, dir), pos)
+		if absf(s.get("pit", 0.0)) > 0.0001:
+			nd.rotate_object_local(Vector3(1, 0, 0), -s.pit)   # Nase hoch beim Gasgeben
 		var jets: Array = nd.get_meta("jets")
 		for j in jets:
 			j.visible = s.boost > 0.25
@@ -5225,14 +5347,15 @@ func _pose_all(dt: float) -> void:
 		var HX: Dictionary = fx.haze
 		for hm in nd.get_meta("haze"):
 			hm.set_shader_parameter("k", 0.55 + 0.9 * float(HX.boost) * minf(1.0, s.boost))
-			hm.set_shader_parameter("hs", float(HX.str))
+			hm.set_shader_parameter("hs", float(HX.amp))
 			hm.set_shader_parameter("hv", float(HX.speed))
+			hm.set_shader_parameter("hf", float(HX.fine))
 		var hzn: Array = nd.get_meta("hazen")
 		for k in range(hzn.size()):
 			var hn: MeshInstance3D = hzn[k]
 			hn.scale = Vector3.ONE * (0.75 if k == 0 else 1.1) * float(HX.size)
 			hn.position.z = -0.75 - (0.28 if k == 0 else 0.85) * float(HX.len)
-			hn.visible = float(HX.str) > 0.01
+			hn.visible = float(HX.amp) > 0.01
 		lt.omni_range = 4.0 + 4.0 * tun_k
 		lt.light_color = Color(0.6, 0.4, 1.0).lerp(Color(0.3, 0.8, 1.0), clampf(s.boost, 0.0, 1.0))
 
