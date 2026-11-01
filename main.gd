@@ -277,6 +277,7 @@ uniform vec2 gc=vec2(.5);
 uniform float gs=0.;
 uniform float gr=-1.;
 uniform float gk=0.;
+uniform float gz=1.;
 uniform float gl=0.;
 uniform float asp=.46;
 uniform float shp=.6;
@@ -299,9 +300,10 @@ void fragment(){
 	vec2 uv=SCREEN_UV;
 	// Gravitationsbombe: Bild wird zur Mitte gesogen, danach läuft eine Welle nach außen
 	vec2 dd=uv-gc;dd.x*=asp;float r=length(dd)+1e-4;vec2 dir=dd/r;dir.x/=asp;
+	r/=max(gz,.05);   // Gesamtgröße des schwarzen Lochs
 	float pull=gs*.05/(r*r*30.+.12)*smoothstep(0.,.03,r);
 	float rip=gr>=0.?sin((r-gr)*60.)*exp(-pow((r-gr)*9.,2.))*.022*gk:0.;
-	uv-=dir*(pull-rip);
+	uv-=dir*(pull-rip)*min(gz,2.);
 	// Phasen-Glitch: Zeilen verrutschen, Farben laufen auseinander
 	float band=floor(uv.y*46.+floor(TIME*24.)*3.1);float go=(h21(vec2(band,floor(TIME*30.)))-.5)*.05*gl*step(.55,h21(vec2(band,1.7)));
 	uv.x+=go;
@@ -376,6 +378,7 @@ func _post_update(dt: float) -> void:
 	elif t < 0.62:
 		gs = -1.2
 	bk *= best.get("lens", 1.0)
+	post.set_shader_parameter("gz", best.get("ps", 1.0))
 	post.set_shader_parameter("gs", gs * bk)
 	post.set_shader_parameter("gr", (t - 0.55) * 1.1 if t >= 0.55 else -1.0)
 	post.set_shader_parameter("gk", bk * clampf(1.0 - (t - 0.55) / 0.8, 0.0, 1.0))
@@ -401,7 +404,7 @@ const FXS = {
 		["boom", "Explosion size", 0.2, 6.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
 	"quake": [["height", "Wave height", 0.1, 6.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["dur", "Range", 0.1, 5.0, 1.0], ["glow", "Glow", 0.0, 8.0, 1.0],
 		["sparks", "Sparks & shards", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
-	"gb": [["size", "Pull radius", 0.2, 6.0, 1.0], ["time", "Duration", 0.2, 8.0, 1.0], ["core", "Core size", 0.2, 6.0, 1.0], ["sparks", "Sparks", 0.0, 8.0, 1.0],
+	"gb": [["scale", "Size (all)", 0.1, 4.0, 1.0], ["size", "Pull radius", 0.2, 6.0, 1.0], ["time", "Duration", 0.2, 8.0, 1.0], ["core", "Core size", 0.2, 6.0, 1.0], ["sparks", "Sparks", 0.0, 8.0, 1.0],
 		["wave", "Shock ring", 0.0, 8.0, 1.0], ["light", "Light", 0.0, 8.0, 1.0], ["lens", "Space warp", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
 	"rak": [["size", "Size", 0.2, 8.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["light", "Light", 0.0, 10.0, 1.0],
@@ -2554,7 +2557,8 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.6
 	var X: Dictionary = fx.gb
 	var hu = float(X.hue)
-	var gz = float(X.size)
+	var gsc = float(X.scale)   # Gesamtgröße: alles zusammen
+	var gz = float(X.size) * gsc
 	var core = MeshInstance3D.new()
 	var sm = SphereMesh.new()
 	sm.radius = 1.0
@@ -2614,7 +2618,7 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	lt.position = pos
 	add_child(lt)
 	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": fx_age, "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit,
-		"sz": gz, "ts": float(X.time), "cs": float(X.core) * sqrt(gz), "sp": float(X.sparks), "wv": float(X.wave), "lk": float(X.light), "lens": float(X.lens), "sh": float(X.shake), "hu": hu})
+		"sz": gz, "ps": gsc, "ts": float(X.time), "cs": float(X.core) * sqrt(float(X.size)) * gsc, "sp": float(X.sparks), "wv": float(X.wave), "lk": float(X.light), "lens": float(X.lens), "sh": float(X.shake), "hu": hu})
 	_snd("gbomb", 3.0, 1.0, pos)
 
 
