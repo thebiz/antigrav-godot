@@ -137,7 +137,7 @@ func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
-			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav"]:
+			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "minedrop.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	for k in ["engine", "idle", "field"]:
 		var p = AudioStreamPlayer.new()
@@ -2556,17 +2556,24 @@ func _add_shot(from: Dictionary, at_player := false, homing := false) -> void:
 	_snd("rak", -2.0, 1.0, (from.node as Node3D).global_position if from.idx != 0 else null)
 
 
+# Minen fallen nacheinander hinten aus dem Schiff: „dupp, dupp, dupp“
 func _drop_mines(o: Dictionary) -> void:
 	for k in range(3):
-		var sp = SphereMesh.new()
-		sp.radius = 0.12
-		sp.height = 0.24
-		var mi = _glow_node(sp, Color(1, 0.15, 0.1), 6.0)
-		var z = o.z - 1.0 - k * 0.9
-		var lat = o.lat + (k - 1) * 0.35
-		mi.position = T.world(z, lat, 0.12)
-		mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi, "own": o.idx})
-	_snd("mine", -4.0, 1.0, (o.node as Node3D).global_position if o.idx != 0 else null)
+		get_tree().create_timer(k * 0.14).timeout.connect(func(): _drop_one(o, k))
+
+
+func _drop_one(o: Dictionary, k: int) -> void:
+	if o.out or not (state == "race" or state == "done"):
+		return
+	var sp = SphereMesh.new()
+	sp.radius = 0.12
+	sp.height = 0.24
+	var mi = _glow_node(sp, Color(1, 0.15, 0.1), 6.0)
+	var z = o.z - 0.9
+	var lat = o.lat + (k - 1) * 0.22
+	mi.position = T.world(z, lat, 0.45)
+	mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi, "own": o.idx})
+	_snd("minedrop", -1.0 if o.idx == 0 else 2.0, randf_range(0.92, 1.08), (o.node as Node3D).global_position if o.idx != 0 else null)
 
 
 # Gegner sammeln an den Waffenfeldern auch etwas ein und setzen es klug ein
@@ -2889,7 +2896,11 @@ func _weapons(dt: float, racing: bool) -> void:
 	for i in range(mines.size() - 1, -1, -1):
 		var m = mines[i]
 		m.t += dt
-		(m.n as MeshInstance3D).visible = fmod(m.t, 0.5) < 0.35
+		(m.n as MeshInstance3D).visible = fmod(m.t, 0.5) < 0.35 or m.t < 0.3
+		if m.t < 0.25:
+			# kurz herunterfallen und auf der Fahrbahn aufsetzen
+			var u = clampf(m.t / 0.18, 0.0, 1.0)
+			(m.n as Node3D).position = T.world(m.z, m.lat, 0.12 + 0.33 * (1.0 - u * u))
 		var boom = false
 		for o in ships:
 			if o.idx != m.get("own", 0) and not o.out and absf(o.z - m.z) < 0.5 + o.spd * dt * 1.3 and absf(o.lat - m.lat) < 0.38:
