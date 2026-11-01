@@ -215,6 +215,37 @@ public class VideoExport extends GodotPlugin {
 		return uri.toString();
 	}
 
+	// Standbild (PNG) in die Galerie legen: Bilder/AntiGrav
+	@UsedByGodot
+	public String savePng(byte[] png) {
+		try {
+			Activity a = getActivity();
+			ContentResolver cr = a.getContentResolver();
+			ContentValues cv = new ContentValues();
+			cv.put(MediaStore.Images.Media.DISPLAY_NAME, "AntiGrav_" + System.currentTimeMillis() + ".png");
+			cv.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+			if (Build.VERSION.SDK_INT >= 29) {
+				cv.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/AntiGrav");
+				cv.put(MediaStore.Images.Media.IS_PENDING, 1);
+			}
+			Uri uri = cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+			if (uri == null) throw new Exception("MediaStore insert failed");
+			try (OutputStream os = cr.openOutputStream(uri)) {
+				os.write(png);
+			}
+			if (Build.VERSION.SDK_INT >= 29) {
+				ContentValues done = new ContentValues();
+				done.put(MediaStore.Images.Media.IS_PENDING, 0);
+				cr.update(uri, done, null, null);
+			}
+			return uri.toString();
+		} catch (Exception e) {
+			lastError = "savePng: " + e;
+			Log.e(TAG, lastError);
+			return "";
+		}
+	}
+
 	// Teilen-Menü von Android öffnen (WhatsApp, Mail, …)
 	@UsedByGodot
 	public void share(String uriStr) {

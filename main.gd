@@ -295,7 +295,6 @@ vec2 haze(vec2 uv,vec4 h){
 }
 void fragment(){
 	vec2 uv=SCREEN_UV;
-	uv+=haze(uv,hz0)+haze(uv,hz1)+haze(uv,hz2)+haze(uv,hz3);
 	// Gravitationsbombe: Bild wird zur Mitte gesogen, danach läuft eine Welle nach außen
 	vec2 dd=uv-gc;dd.x*=asp;float r=length(dd)+1e-4;vec2 dir=dd/r;dir.x/=asp;
 	float pull=gs*.05/(r*r*30.+.12)*smoothstep(0.,.03,r);
@@ -353,21 +352,6 @@ func _post_update(dt: float) -> void:
 	post.set_shader_parameter("spd", post_spd * (1.0 if q >= 1 else 0.0))
 	gl_v = maxf(0.0, gl_v - dt * 1.4)
 	post.set_shader_parameter("gl", gl_v)
-	# Hitzeflimmern: Bildschirmposition hinter jedem Triebwerk
-	for i in range(4):
-		var hv = Vector4(0, 0, 0, 0)
-		if i < ships.size() and state != "menu":
-			var s: Dictionary = ships[i]
-			var nd: Node3D = s.node
-			if not s.out and nd.visible:
-				var p0: Vector3 = nd.global_transform * Vector3(0, 0.18, -0.95)
-				var dc = (p0 - cam.global_position).length()
-				if dc < 45.0 and not cam.is_position_behind(p0):
-					var a = cam.unproject_position(p0) / vp
-					var b = cam.unproject_position(p0 + cam.global_transform.basis.x * 0.35) / vp
-					var rad = clampf((b - a).length() / asp_v(vp), 0.004, 0.25)
-					hv = Vector4(a.x, a.y, rad, (0.55 + 0.9 * minf(1.0, s.boost)) * clampf(1.0 - dc / 45.0, 0.0, 1.0) * (1.0 if q >= 1 else 0.6))
-		post.set_shader_parameter("hz%d" % i, hv)
 	# stärkste aktive Gravitationsbombe
 	var best = null
 	var bk = 0.0
@@ -1019,11 +1003,48 @@ func _ship_node(idx: int) -> Node3D:
 	lt.position = Vector3(0, 0.15, -0.95)
 	root.add_child(lt)
 	root.set_meta("jets", jets)
+	# Hitzeflimmern: zwei kleine Flächen direkt hinter der Düse, im Raum verankert.
+	# Sie verzerren nur, was dahinter liegt; steht das Schiff davor (Blick von vorn), bleibt es scharf.
+	var hz = []
+	for k in range(2):
+		var q = QuadMesh.new()
+		q.size = Vector2.ONE
+		var hm = MeshInstance3D.new()
+		hm.mesh = q
+		var mat = _shader_mat(HAZE_CODE)
+		hm.material_override = mat
+		hm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var zr = -1.5 * 0.5 - (0.28 if k == 0 else 0.85)
+		hm.position = Vector3(0, 0.2, zr)
+		hm.scale = Vector3.ONE * (0.75 if k == 0 else 1.1)
+		root.add_child(hm)
+		hz.append(mat)
+	root.set_meta("haze", hz)
 	root.set_meta("light", lt)
 	add_child(root)
 	return root
 
 
+const HAZE_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled,fog_disabled;
+uniform sampler2D scr:hint_screen_texture,filter_linear;
+uniform float k=.6;
+float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+	return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),f.x),f.y);}
+void vertex(){
+	float s=length(MODEL_MATRIX[0].xyz);
+	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(INV_VIEW_MATRIX[0]*s,INV_VIEW_MATRIX[1]*s,INV_VIEW_MATRIX[2]*s,MODEL_MATRIX[3]);
+}
+void fragment(){
+	vec2 q=UV-.5;
+	float m=smoothstep(.5,.12,length(q))*k;
+	vec2 p=UV*3.2+vec2(0.,TIME*2.8);
+	vec2 o=vec2(vn(p)+.5*vn(p*2.1+5.2),vn(p+vec2(9.7,3.1))+.5*vn(p*2.1+vec2(1.3,7.7)))-.75;
+	ALBEDO=texture(scr,SCREEN_UV+o*.016*m).rgb;
+	ALPHA=smoothstep(0.,.25,m);
+}"""
 var shield_mat: ShaderMaterial
 const GB_R = 9.0
 
@@ -1443,6 +1464,17 @@ func _hud() -> void:
 	sv.pressed.connect(_rp_save)
 	cl.add_child(sv)
 	hud.rpsave = sv
+	# Foto: nur das reine Bild, ohne Knöpfe, in die Galerie (Bilder › AntiGrav)
+	var ph = _btn("PHOTO", true)
+	ph.add_theme_font_size_override("font_size", 24)
+	ph.offset_left = 30
+	ph.offset_right = 250
+	ph.offset_top = 120
+	ph.offset_bottom = 200
+	ph.visible = false
+	ph.pressed.connect(_rp_photo)
+	cl.add_child(ph)
+	hud.rpphoto = ph
 	# Replay als Video (MP4) in die Galerie
 	var vb = _btn("SAVE VIDEO", true)
 	vb.add_theme_font_size_override("font_size", 24)
@@ -3052,6 +3084,8 @@ func _replay_start() -> void:
 	hud.rpx.visible = true
 	hud.camrow.visible = true
 	hud.rpsave.visible = rpf.is_empty()
+	hud.rpphoto.visible = true
+	hud.rpphoto.text = "PHOTO"
 	hud.board.visible = false
 	hud.rdim.visible = false
 	hud.vxb.visible = false   # Video-Export vorerst aus (zu langsam); Baustein bleibt für später im Code
@@ -3097,6 +3131,7 @@ func _replay_end() -> void:
 	hud.rpx.visible = false
 	hud.camrow.visible = false
 	hud.rpsave.visible = false
+	hud.rpphoto.visible = false
 	hud.vxb.visible = false
 	mats.road.set_shader_parameter("qs", 0.0)
 	hud.fire.visible = true
@@ -3190,6 +3225,27 @@ func _replay(dt: float) -> void:
 		_rp_next()
 	hud.top.text = "REPLAY · %s     %s" % [RP_CAMS[rp.ci][1], _fmt(minf(rp.t, F[F.size() - 1].t))]
 	_fx_update(dt)
+
+
+func _rp_photo() -> void:
+	# alle Anzeigen kurz weg, ein Bild abwarten, dann aufnehmen
+	hud.layer.visible = false
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var img = get_viewport().get_texture().get_image()
+	hud.layer.visible = true
+	if img == null:
+		return
+	var ok = false
+	if Engine.has_singleton("VideoExport"):
+		ok = str(Engine.get_singleton("VideoExport").savePng(img.save_png_to_buffer())) != ""
+	else:
+		DirAccess.make_dir_recursive_absolute("user://photos")
+		ok = img.save_png("user://photos/antigrav_%d.png" % int(Time.get_unix_time_from_system())) == OK
+	_flash(Color(1, 1, 1), 0.5)
+	_snd("pick", -6.0, 1.6)
+	hud.rpphoto.text = "SAVED ✓" if ok else "ERROR"
+	get_tree().create_timer(1.5).timeout.connect(func(): hud.rpphoto.text = "PHOTO")
 
 
 func _rp_cam_pick(ci: int) -> void:
@@ -4204,6 +4260,8 @@ func _pose_all(dt: float) -> void:
 			j.visible = s.boost > 0.25
 		var lt: OmniLight3D = nd.get_meta("light")
 		lt.light_energy = (1.4 + 3.0 * s.boost) * (1.0 + 1.2 * tun_k)
+		for hm in nd.get_meta("haze"):
+			hm.set_shader_parameter("k", 0.55 + 0.9 * minf(1.0, s.boost))
 		lt.omni_range = 4.0 + 4.0 * tun_k
 		lt.light_color = Color(0.6, 0.4, 1.0).lerp(Color(0.3, 0.8, 1.0), clampf(s.boost, 0.0, 1.0))
 
