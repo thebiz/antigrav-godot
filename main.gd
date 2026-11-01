@@ -446,7 +446,7 @@ const FXS = {
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
 		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
-		["lamps", "Track lights", 0.0, 10.0, 1.0]],
+		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections (4.7)", 0.0, 6.0, 1.0]],
 }
 const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Haze"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"]]
 var fx = {}
@@ -517,17 +517,58 @@ func _save_cfg() -> void:
 
 # Glow: ab Godot 4.6 wird er vor der Farbumrechnung berechnet und ist auf dem Handy neu gebaut – dort braucht er andere Werte
 # Ab Godot 4.6 rechnet der Handy-Renderer Licht und Himmel anders: Ausgleichswerte (nur dort)
-const NEWR = {"sky": 0.4, "moon": 3.0, "ship": 1.5, "amb": 1.5}
+const NEWR = {"sky": 0.4, "moon": 3.0, "ship": 1.5, "amb": 1.5, "expo": 1.0}
+var newr_c = {}   # einmal ermittelt (wird jedes Bild gebraucht)
 
 
 func _newr(k: String, d: float) -> float:
-	for a in OS.get_cmdline_user_args():
-		if a.begins_with("--nr" + k + "="):
-			return float(a.split("=")[1])
+	if newr_c.has(k):
+		return newr_c[k]
+	var v = d
 	var vi = Engine.get_version_info()
 	if vi.major > 4 or vi.minor >= 6:
-		return NEWR.get(k, d)
-	return d
+		v = NEWR.get(k, d)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--nr" + k + "="):
+			v = float(a.split("=")[1])
+	newr_c[k] = v
+	return v
+
+
+# ---------------------------------------------------------------- Neon-Flächenlicht (ab Godot 4.7: AreaLight3D)
+# Zwei lange Leuchtflächen auf Höhe der Neonbänder an den Leitplanken wandern mit dir mit. So spiegeln sich
+# Cyan und Magenta auf der nassen Fahrbahn und an den Schiffsflanken – wie bei echten Neonröhren.
+var nlights = []
+
+
+func _neon_lights() -> void:
+	var nk = float(fx.env.nlight)
+	if nlights.is_empty():
+		if not ClassDB.class_exists("AreaLight3D") or nk <= 0.01:
+			return
+		for sd in [-1.0, 1.0]:
+			var al: Light3D = ClassDB.instantiate("AreaLight3D")
+			al.set("area_size", Vector2(14.0, 0.12))
+			al.set("area_range", 7.0)
+			al.set("area_attenuation", 1.0)
+			al.light_color = CY if sd < 0.0 else MG
+			al.shadow_enabled = false
+			al.light_specular = 1.0
+			add_child(al)
+			nlights.append(al)
+	var g: Dictionary = _focus()
+	var f = T.frame(g.z + 5.0)
+	for i in range(nlights.size()):
+		var sd = -1.0 if i == 0 else 1.0
+		var al: Light3D = nlights[i]
+		al.visible = nk > 0.01 and tun_k < 0.5
+		al.light_energy = 2.5 * nk
+		var pos: Vector3 = f.c + f.rr * (sd * (T.TW - 0.05)) + f.uu * 0.33
+		# Licht strahlt entlang -Z: zur Fahrbahnmitte hin
+		al.global_transform = Transform3D(Basis.looking_at(-f.rr * sd, f.uu), pos)
+
+
+var expo_v = 0.0   # Helligkeits-Stoß bei Explosionen (nur neuer Renderer)
 
 
 # Streckenlampen: nur die nächsten paar vor der Kamera einschalten. Der Handy-Renderer nimmt pro Fläche nur
@@ -2593,6 +2634,8 @@ func _flash(c: Color, a: float) -> void:
 	if flash_rect.color.a > a:
 		cc = Color(flash_rect.color.r, flash_rect.color.g, flash_rect.color.b).lerp(cc, a / maxf(0.001, flash_rect.color.a))
 	flash_rect.color = Color(cc.r, cc.g, cc.b, minf(1.0, maxf(flash_rect.color.a, a)))
+	# neuer Renderer: zusätzlich kurz die ganze Szene überbelichten, damit helle Stellen weiß ausbrennen
+	expo_v = maxf(expo_v, minf(1.5, a * 1.2) * _newr("expo", 0.0))
 
 var shake = 0.0
 
@@ -5735,7 +5778,7 @@ func _shot() -> void:
 						lab.dist = float(p[6])
 				if shot_n == 80 and p[3] != "env":
 					_lab_fire()
-				var at = 60 + {"boom": 30, "mine": 26, "quake": 30, "gb": 36, "rak": 34, "wall": 40, "env": 30, "pillar": 70, "ship": 90}.get(p[3], 40)
+				var at = 60 + {"boom": 25, "mine": 26, "quake": 30, "gb": 36, "rak": 34, "wall": 40, "env": 30, "pillar": 70, "ship": 90}.get(p[3], 40)
 				if shot_n == at:
 					get_viewport().get_texture().get_image().save_png(p[0])
 					get_tree().quit()
@@ -5828,6 +5871,10 @@ func _tunnel(dt: float) -> void:
 	wenv.background_energy_multiplier = lerpf(1.0, 0.05, tun_k)
 	moon.light_energy = lerpf(0.45 * float(fx.env.moon) * _newr("moon", 1.0), 0.0, tun_k)
 	_lamps_cull()
+	_neon_lights()
+	# Explosions-Helligkeitsstoß abklingen lassen
+	expo_v = maxf(0.0, expo_v - dt * 2.2)
+	wenv.tonemap_exposure = 1.0 + expo_v
 	# im Tunnel sieht man den Mond nicht: Schattenberechnung sparen
 	moon.shadow_enabled = int(cfg.gfx) >= 1 and tun_k < 0.6 and float(fx.env.moon) > 0.01
 	if tun_l.is_empty():
