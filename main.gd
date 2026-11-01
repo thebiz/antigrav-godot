@@ -52,6 +52,8 @@ var mines = []
 var fxs = []
 var walls = []
 var quake = null
+var quake2 = null   # Super-Quake: zweite Welle rollt nach hinten
+var bwaves = []     # Super-Turbo: Druckwellen nach hinten
 var fire_req = false
 var fire_rect = Rect2()
 var t_state = 0.0
@@ -139,7 +141,7 @@ func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
-			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "minedrop.wav"]:
+			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "minedrop.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	for k in ["engine", "idle", "field"]:
 		var p = AudioStreamPlayer.new()
@@ -422,7 +424,7 @@ const FXS = {
 		["hue", "Color", -0.5, 0.5, 0.0]],
 	"shield": [["size", "Size", 0.5, 4.0, 1.0], ["glow", "Glow", 0.0, 10.0, 1.0], ["edge", "Edge sharpness", 0.2, 6.0, 1.0], ["flicker", "Flicker", 0.0, 8.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
-	"orbs": [["size", "Size", 0.2, 6.0, 1.0], ["radius", "Orbit radius", 0.3, 5.0, 1.0], ["speed", "Orbit speed", 0.1, 6.0, 1.0], ["trail", "Trail length", 0.0, 6.0, 1.0],
+	"orbs": [["shue", "Super orbs color", -0.5, 0.5, 0.0], ["sglow", "Super orbs glow", 0.0, 10.0, 1.0], ["size", "Size", 0.2, 6.0, 1.0], ["radius", "Orbit radius", 0.3, 5.0, 1.0], ["speed", "Orbit speed", 0.1, 6.0, 1.0], ["trail", "Trail length", 0.0, 6.0, 1.0],
 		["glow", "Glow", 0.0, 10.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
 	"haze": [["amp", "Shimmer", 0.0, 10.0, 1.0], ["fine", "Fineness", 0.3, 6.0, 1.0], ["speed", "Speed", 0.0, 8.0, 1.0], ["size", "Size", 0.2, 6.0, 1.0],
 		["len", "Length", 0.2, 6.0, 1.0], ["boost", "Extra with boost", 0.0, 8.0, 1.0]],
@@ -912,9 +914,10 @@ shader_type spatial;
 float h11(float x){return fract(sin(x*91.7)*4371.3);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
 // Bebenwelle: Kamm bei qz, davor ein kleiner Anlauf, dahinter ein Tal und Nachschwingen
-uniform float qz=-1000.;uniform float qs=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
+uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
 varying float wz;varying float qh;
-float quake(float z){float d=z-qz;return qs*(1.6*exp(-pow(d/2.6,2.))-.5*exp(-pow((d+6.)/2.6,2.))+.22*exp(-pow((d+12.)/2.4,2.)));}
+float qw(float d,float s){return s*(1.6*exp(-pow(d/2.6,2.))-.5*exp(-pow((d+6.)/2.6,2.))+.22*exp(-pow((d+12.)/2.4,2.)));}
+float quake(float z){return qw(z-qz,qs)+qw(qz2-z,qs2);}
 void vertex(){wz=(MODEL_MATRIX*vec4(VERTEX,1.)).z;qh=quake(wz);VERTEX+=NORMAL*qh;}
 void fragment(){
 	float x=(UV.x-.5)*4.8,z=UV.y/.08;
@@ -929,8 +932,8 @@ void fragment(){
 	base=mix(base,mix(vec3(.75,.62,.08),vec3(.05),hz),edge);
 	base*=1.-seam*.7;
 	ALBEDO=base;METALLIC=.8;ROUGHNESS=.38+.1*br+seam*.3+edge*.2;SPECULAR=.45;
-	float cr=max(qh,0.)/max(qs,.01);   // glühender Kamm, aufgerissene Fugen
-	EMISSION=(qc*pow(cr,1.5)*6.+qc*vec3(1.,.6,.62)*seam*cr*14.)*step(.01,qs)*qg;
+	float cr=max(qh,0.)/max(max(qs,qs2),.01);   // glühender Kamm, aufgerissene Fugen
+	EMISSION=(qc*pow(cr,1.5)*6.+qc*vec3(1.,.6,.62)*seam*cr*14.)*step(.01,qs+qs2)*qg;
 }""", [["vec3(.75,.62,.08)", "vec3(.8,.3,.02)"]]))
 	mats["wall"] = _metal(Color(0.07, 0.075, 0.09), 0.22)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
@@ -1356,7 +1359,7 @@ func _spawn_ships() -> void:
 		var s = {"z": starts[i][0], "lat": starts[i][1], "psi": 0.0, "vpsi": 0.0, "u": 0.0, "spd": 0.0, "boost": 0.0, "slow": 1.0,
 			"h": 0.0, "vy": 0.0, "air": false, "padK": -1, "hitT": -9.0, "sk": (1.0 + (i - 1) * 0.035) * float(cfg.ai) if i > 0 else 1.0, "sk0": 0.0, "lane": randf_range(-0.7, 0.7), "tl": 0.0, "wT": 0.0, "orbs": 0.0,
 			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0,
-			"en": 1.0, "out": false, "dealt": 0.0, "outT": 0.0, "wpn": "", "wpK": -1, "shield": 0.0, "auto": 0.0, "turbo": 0.0, "slowT": 0.0, "enL": 0, "idx": i}
+			"en": 1.0, "out": false, "dealt": 0.0, "outT": 0.0, "wpn": "", "wpK": -1, "shield": 0.0, "auto": 0.0, "turbo": 0.0, "slowT": 0.0, "enL": 0, "idx": i, "sup": false, "sorb": false, "sauto": false}
 		s.sk0 = s.sk
 		s.lane = s.lat
 		s.tl = s.lat
@@ -1561,7 +1564,7 @@ func _hud() -> void:
 		if ga.auto > 0.0 and state == "race":
 			var cc = ring.size * 0.5
 			var fr = clampf(ga.auto / 5.0, 0.0, 1.0)
-			var ac = Color(0.4, 0.95, 1.0)
+			var ac = Color(1.0, 0.78, 0.2) if ga.get("sauto", false) else Color(0.4, 0.95, 1.0)
 			ring.draw_arc(cc, 118.0, 0.0, TAU, 64, Color(ac.r, ac.g, ac.b, 0.15), 8.0, true)
 			if ga.get("ahold", false):
 				var pz = 0.5 + 0.5 * sin(Time.get_ticks_msec() / 1000.0 * 8.0)
@@ -2193,7 +2196,7 @@ func _rp_rebuild_fx() -> void:
 				"boom":
 					_explode(ev[1], ev[2], ev[3], ev[4] if ev.size() > 4 else 1.0)
 				"gb":
-					_gbomb(ev[1], ev[2], -2)
+					_gbomb(ev[1], ev[2], -2, -1, ev[3] if ev.size() > 3 else 1.0)
 				"zap":
 					_zap_ship(ships[ev[1]])
 		j -= 1
@@ -2587,15 +2590,15 @@ func _fire_ball(pos: Vector3, k: float, am := 1.0, hu := 0.0) -> void:
 
 
 # Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
-func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
+func _gbomb(z: float, lat: float, own := -1, hit := -1, sc := 1.0) -> void:
 	_pev("hole")
-	_rev(["gb", z, lat])
+	_rev(["gb", z, lat, sc])
 	_fx_res()
 	var f = T.frame(z)
 	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.6
 	var X: Dictionary = fx.gb
 	var hu = float(X.hue)
-	var gsc = float(X.scale)   # Gesamtgröße: alles zusammen
+	var gsc = float(X.scale) * sc   # Gesamtgröße: alles zusammen
 	var gz = float(X.size) * gsc
 	var core = MeshInstance3D.new()
 	var sm = SphereMesh.new()
@@ -2894,7 +2897,7 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "") -> void:
 		_msg("HIT · %s %d %%" % [nm, int(round(o.en * 100.0))], Color(1, 0.75, 0.5))
 
 
-func _add_shot(from: Dictionary, at_player := false, homing := false) -> void:
+func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0, cl := false) -> void:
 	var X: Dictionary = fx.rak
 	var cap = CapsuleMesh.new()
 	cap.radius = 0.06 * float(X.size)
@@ -2909,20 +2912,40 @@ func _add_shot(from: Dictionary, at_player := false, homing := false) -> void:
 	if homing:
 		var bd = 220.0
 		for o in ships:
-			if o.idx != from.idx and not o.out and o.z - from.z > 0.0 and o.z - from.z < bd:
-				bd = o.z - from.z
+			if o.idx != from.idx and not o.out and (o.z - from.z) * dir > 0.0 and (o.z - from.z) * dir < bd:
+				bd = (o.z - from.z) * dir
 				tg = o
-	shots.append({"z": from.z + 1.0, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) if not at_player else 0.0, "n": mi, "own": from.idx})
+	shots.append({"z": from.z + 1.0 * dir, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) * dir if not at_player else 0.0, "n": mi, "own": from.idx, "dir": dir, "cl": cl})
+	if cl:
+		(mi.material_override as StandardMaterial3D).albedo_color = Color(1.0, 0.78, 0.2)
+		(mi.material_override as StandardMaterial3D).emission = Color(1.0, 0.78, 0.2)
 	_snd("rak", -2.0, 1.0, (from.node as Node3D).global_position if from.idx != 0 else null)
 
 
-# Minen fallen nacheinander hinten aus dem Schiff: „dupp, dupp, dupp“
-func _drop_mines(o: Dictionary) -> void:
+# Rakete geht hoch: normal ein schwarzes Loch, Super-Rakete (Streubombe) zerplatzt in fünf kleine über die ganze Breite
+func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
+	if not sh.get("cl", false):
+		_gbomb(z, lat, sh.own, hit)
+		return
+	for i in range(5):
+		var la = lerpf(-T.TW * 0.8, T.TW * 0.8, i / 4.0)
+		var zz = z + 1.0 + randf() * 2.5
+		get_tree().create_timer(0.05 * i + 0.01).timeout.connect(func(): _gbomb(zz, la, sh.own, -1, 0.5))
+	_snd("boom", 0.0, 1.3)
+
+
+# Minen fallen nacheinander hinten aus dem Schiff: „dupp, dupp, dupp“; Super-Minen: Teppich über die ganze Breite
+func _drop_mines(o: Dictionary, sup := false) -> void:
+	if sup:
+		for k in range(9):
+			var la = lerpf(-T.TW + 0.35, T.TW - 0.35, k / 8.0)
+			get_tree().create_timer(k * 0.05).timeout.connect(func(): _drop_one(o, k, la, 0.6 * (k % 2)))
+		return
 	for k in range(3):
 		get_tree().create_timer(k * 0.14).timeout.connect(func(): _drop_one(o, k))
 
 
-func _drop_one(o: Dictionary, k: int) -> void:
+func _drop_one(o: Dictionary, k: int, lat_o := 999.0, back := 0.0) -> void:
 	if o.out or not (state == "race" or state == "done" or state == "lab"):
 		return
 	var X: Dictionary = fx.mine
@@ -2930,8 +2953,8 @@ func _drop_one(o: Dictionary, k: int) -> void:
 	sp.radius = 0.12 * float(X.size)
 	sp.height = 0.24 * float(X.size)
 	var mi = _glow_node(sp, _hs(Color(1, 0.15, 0.1), float(X.hue)), 6.0 * float(X.glow))
-	var z = o.z - 0.9
-	var lat = o.lat + (k - 1) * 0.22
+	var z = o.z - 0.9 - back
+	var lat = o.lat + (k - 1) * 0.22 if lat_o > 99.0 else lat_o
 	mi.position = T.world(z, lat, 0.45)
 	mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi, "own": o.idx})
 	_snd("minedrop", -1.0 if o.idx == 0 else 2.0, randf_range(0.92, 1.08), (o.node as Node3D).global_position if o.idx != 0 else null)
@@ -2947,6 +2970,10 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 		o.boost = maxf(o.boost, 1.5)
 	var wk = int(floor((o.z - 17.0) / 35.0))
 	var wz = (o.z - 17.0) / 35.0 - wk
+	if posmod(wk, 2) == 0 and wz < 0.08 and wk != o.wpK and o.wpn != "" and not o.get("sup", false):
+		o.wpK = wk
+		if randf() < 0.4:
+			o.sup = true
 	if posmod(wk, 2) == 0 and wz < 0.08 and wk != o.wpK and o.wpn == "":
 		o.wpK = wk
 		if randf() < 0.65:
@@ -2962,26 +2989,35 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 	o.wT -= dt
 	if o.wT > 0.0:
 		return
+	var sup: bool = o.get("sup", false)
 	match o.wpn:
 		"schild":
 			o.shield = 6.0
+			if sup:
+				o.en = minf(1.0, o.en + 0.5)
 			o.wpn = ""
 		"turbo":
-			o.turbo = 2.2
-			o.boost = 2.0
+			o.turbo = 3.0 if sup else 2.2
+			o.boost = 2.6 if sup else 2.0
+			if sup:
+				_backwave(o)
 			o.wpn = ""
 		"mine":
 			for x in ships:
 				if x.idx != o.idx and not x.out and o.z - x.z > 2.0 and o.z - x.z < 14.0:
-					_drop_mines(o)
+					_drop_mines(o, sup)
 					o.wpn = ""
 					break
 		_:
 			for x in ships:
 				if x.idx != o.idx and not x.out and x.z - o.z > 3.0 and x.z - o.z < 30.0:
-					_add_shot(o, false, o.wpn == "lenk")
+					_add_shot(o, false, o.wpn == "lenk", 1.0, sup and o.wpn == "rak")
+					if sup and o.wpn == "lenk":
+						_add_shot(o, false, true, -1.0)
 					o.wpn = ""
 					break
+	if o.wpn == "":
+		o.sup = false
 
 
 # Orbs: zwei Kugeln kreisen um dich, schützen dich und rammen Gegner
@@ -3007,7 +3043,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 		gt.gradient = gr
 		gt.width = 32
 		gt.height = 32
-		for j in range(2):
+		for j in range(4):
 			var sp = SphereMesh.new()
 			sp.radius = 0.11
 			sp.height = 0.22
@@ -3040,19 +3076,26 @@ func _orbs_update(dt: float, live: bool) -> void:
 	var ctr: Vector3 = nd.global_transform * (bb.get_center() + Vector3(0, 0.05, 0))
 	var bx = nd.global_transform.basis
 	var X: Dictionary = fx.orbs
+	if g.orbs <= 0.0:
+		g.sorb = false
+	var so: bool = g.get("sorb", false)
+	var no = 4 if so else 2
 	var oc = _hs(Color(1.0, 0.5, 0.12) if _noir() else Color(0.35, 0.85, 1.0), float(X.hue))
+	if so:
+		oc = _hs(Color(1.0, 0.72, 0.18), float(X.shue))
 	var orad = float(X.radius)
 	var osz = float(X.size)
-	var ogl = float(X.glow)
+	var ogl = float(X.glow) * (float(X.sglow) if so else 1.0)
 	var otr = float(X.trail)
 	for j in range(orb_n.size()):
 		var mi: MeshInstance3D = orb_n[j]
-		mi.visible = on
-		var a = tt * 5.5 * float(X.speed) + j * PI
+		var jon = on and j < no
+		mi.visible = jon
+		var a = tt * 5.5 * float(X.speed) + j * TAU / no
 		var opos = func(aa: float) -> Vector3:
 			return ctr + (bx.x.normalized() * cos(aa) * 1.0 * orad + bx.z.normalized() * sin(aa) * 1.15 * orad) + bx.y.normalized() * (0.08 * sin(aa * 2.0))
 		mi.global_position = opos.call(a)
-		if on:
+		if jon:
 			# Regler wirken sofort
 			mi.scale = Vector3.ONE * osz
 			var om: StandardMaterial3D = mi.material_override
@@ -3064,15 +3107,15 @@ func _orbs_update(dt: float, live: bool) -> void:
 			ol.light_energy = 1.5 * ogl
 		var tr: Array = mi.get_meta("tr")
 		for k in range(tr.size()):
-			tr[k].visible = on and otr > 0.01
+			tr[k].visible = jon and otr > 0.01
 			tr[k].global_position = opos.call(a - (k + 1) * 0.075 * otr)
-			if on:
+			if jon:
 				tr[k].scale = Vector3.ONE * osz
 				var tm: StandardMaterial3D = tr[k].material_override
 				tm.albedo_color = Color(oc.r * 1.5, oc.g * 1.5, oc.b * 1.5, tm.albedo_color.a)
 				tm.emission = Color(oc.r * 1.5, oc.g * 1.5, oc.b * 1.5)
 				tm.emission_energy_multiplier = 2.5 * ogl
-		if not on or not live or state != "race":
+		if not jon or not live or state != "race":
 			continue
 		for o in ships:
 			if o.idx == 0 or o.out:
@@ -3085,7 +3128,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 					o.slow = minf(o.slow, 0.55)
 					o.lat += away * 0.35
 					o.vpsi += away * 0.15
-				_dmg(o, 0.15, 0, "orbs")
+				_dmg(o, 0.3 if so else 0.15, 0, "orbs")
 				_burst(mi.global_position, fxr.spark, 50, 0.6, 5.0, 11.0, 180.0, Vector3(0, -6, 0), 0.6, 0.6, 1.2,
 					_ramp([[0.0, Color(6, 6, 8, 1)], [1.0, Color(1, 0.5, 0.2, 0)]]), null, true, false, 0.1)
 				_snd("zap", 2.0, 1.4, op)
@@ -3095,83 +3138,179 @@ func _orbs_update(dt: float, live: bool) -> void:
 func _fire() -> void:
 	var g: Dictionary = ships[0]
 	var w: String = g.wpn
+	# Super: dieselbe Waffe doppelt eingesammelt – oder Orbs, während die Orbs noch laufen
+	var sup: bool = g.get("sup", false) or (w == "orbs" and g.orbs > 0.0 and state == "race")
 	g.wpn = ""
+	g.sup = false
+	_fire_w(g, w, sup)
+
+
+func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 	match w:
 		"rak":
-			_add_shot(g)
+			_add_shot(g, false, false, 1.0, sup)
 		"lenk":
 			_add_shot(g, false, true)
+			if sup:
+				_add_shot(g, false, true, -1.0)   # zweite Lenkrakete nach hinten zum Verfolger
 		"mine":
-			_drop_mines(g)
+			_drop_mines(g, sup)
 		"orbs":
 			g.orbs = 10.0
-			_snd("shield", 0.0, 1.3)
+			g.sorb = sup
+			_snd("shield", 0.0, 1.0 if sup else 1.3)
 		"schild":
 			g.shield = 6.0
 			_snd("shield")
+			if sup:
+				g.en = minf(1.0, g.en + 0.5)
+				if g.idx == 0:
+					_msg("+50 % ENERGY", Color(0.4, 1.0, 0.55))
 		"turbo":
-			g.turbo = 2.2
-			g.boost = 2.0
+			g.turbo = 3.0 if sup else 2.2
+			g.boost = 2.6 if sup else 2.0
 			_snd("boost")
+			if sup:
+				_backwave(g)
 		"beben":
-			_fx_res()
-			var crest = Node3D.new()
-			add_child(crest)
-			# Funken und Brocken spritzen vom Kamm, so lange die Welle rollt
-			for kind in [0, 1]:
-				var p = GPUParticles3D.new()
-				var m = ParticleProcessMaterial.new()
-				m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-				m.emission_box_extents = Vector3(T.TW, 0.1, 0.4)
-				m.direction = Vector3(0, 1, -0.4)
-				m.spread = 35.0
-				m.initial_velocity_min = 4.0 if kind == 0 else 3.0
-				m.initial_velocity_max = 10.0 if kind == 0 else 7.0
-				m.gravity = Vector3(0, -14, 0)
-				if kind == 0:
-					m.particle_flag_align_y = true
-					m.color_ramp = _ramp(_rh([[0.0, Color(9, 5, 2, 1)], [1.0, Color(2, 0.4, 0.05, 0)]], float(fx.quake.hue)))
-				else:
-					m.angular_velocity_min = -600.0
-					m.angular_velocity_max = 600.0
-					m.particle_flag_rotate_y = true
-					m.scale_min = 0.7
-					m.scale_max = 2.2
-					m.color_ramp = _deb_ramp(float(fx.boom.dglow), float(fx.quake.hue))
-				p.process_material = m
-				p.draw_pass_1 = fxr.spark if kind == 0 else fxr.debris
-				p.amount = maxi(1, int((160 if kind == 0 else 60) * float(fx.quake.sparks)))
-				p.visible = float(fx.quake.sparks) > 0.01
-				p.lifetime = 0.9
-				p.local_coords = false
-				p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-				p.visibility_aabb = AABB(Vector3(-20, -10, -20), Vector3(40, 30, 40))
-				crest.add_child(p)
-			var lt = OmniLight3D.new()
-			lt.light_color = _hs(Color(1.0, 0.45, 0.12), float(fx.quake.hue))
-			lt.omni_range = 10.0
-			lt.light_energy = 8.0
-			lt.position = Vector3(0, 1.0, 0)
-			crest.add_child(lt)
-			if quake != null:
-				quake.n.queue_free()
-			quake = {"z": g.z + 3.0, "age": 0.0, "hit": [], "n": crest, "l": lt}
-			mats.road.set_shader_parameter("qc", _v3(_hs(Color(1.0, 0.42, 0.08), float(fx.quake.hue))))
-			mats.road.set_shader_parameter("qg", float(fx.quake.glow))
+			quake = _quake_make(g.z + 3.0, 1.0, quake)
+			if sup:
+				quake2 = _quake_make(g.z - 3.0, -1.0, quake2)
 			_snd("boom", 3.0, 0.6)
 			_snd("boom", 0.0, 0.8)
 			shake = maxf(shake, 1.5 * float(fx.quake.shake))
 			_flash(_hs(Color(1.0, 0.5, 0.15), float(fx.quake.hue)), 0.45 * minf(1.0, float(fx.quake.glow)))
 		"wand":
-			var mi = _wall_node()
+			var mi = _wall_node(sup)
 			var z = g.z + 12.0
 			_wall_pose(mi, z, 0.0, 0.0)
-			walls.append({"z": z, "age": 0.0, "hit": [], "n": mi, "hf": 0.0})
+			walls.append({"z": z, "age": 0.0, "hit": [], "n": mi, "hf": 0.0, "sup": sup})
 			_snd("wallon")
 		"auto":
 			g.auto = 5.0
 			g.ahold = false
+			g.sauto = sup
 			_snd("shield")
+
+
+# Bebenwelle bauen: dir 1 = nach vorn, -1 = nach hinten (Super-Quake)
+func _quake_make(z: float, dir: float, old) -> Dictionary:
+	_fx_res()
+	if old != null:
+		old.n.queue_free()
+	var crest = Node3D.new()
+	add_child(crest)
+	# Funken und Brocken spritzen vom Kamm, so lange die Welle rollt
+	for kind in [0, 1]:
+		var p = GPUParticles3D.new()
+		var m = ParticleProcessMaterial.new()
+		m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+		m.emission_box_extents = Vector3(T.TW, 0.1, 0.4)
+		m.direction = Vector3(0, 1, -0.4)
+		m.spread = 35.0
+		m.initial_velocity_min = 4.0 if kind == 0 else 3.0
+		m.initial_velocity_max = 10.0 if kind == 0 else 7.0
+		m.gravity = Vector3(0, -14, 0)
+		if kind == 0:
+			m.particle_flag_align_y = true
+			m.color_ramp = _ramp(_rh([[0.0, Color(9, 5, 2, 1)], [1.0, Color(2, 0.4, 0.05, 0)]], float(fx.quake.hue)))
+		else:
+			m.angular_velocity_min = -600.0
+			m.angular_velocity_max = 600.0
+			m.particle_flag_rotate_y = true
+			m.scale_min = 0.7
+			m.scale_max = 2.2
+			m.color_ramp = _deb_ramp(float(fx.boom.dglow), float(fx.quake.hue))
+		p.process_material = m
+		p.draw_pass_1 = fxr.spark if kind == 0 else fxr.debris
+		p.amount = maxi(1, int((160 if kind == 0 else 60) * float(fx.quake.sparks)))
+		p.visible = float(fx.quake.sparks) > 0.01
+		p.lifetime = 0.9
+		p.local_coords = false
+		p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		p.visibility_aabb = AABB(Vector3(-20, -10, -20), Vector3(40, 30, 40))
+		crest.add_child(p)
+	var lt = OmniLight3D.new()
+	lt.light_color = _hs(Color(1.0, 0.45, 0.12), float(fx.quake.hue))
+	lt.omni_range = 10.0
+	lt.light_energy = 8.0
+	lt.position = Vector3(0, 1.0, 0)
+	crest.add_child(lt)
+	mats.road.set_shader_parameter("qc", _v3(_hs(Color(1.0, 0.42, 0.08), float(fx.quake.hue))))
+	mats.road.set_shader_parameter("qg", float(fx.quake.glow))
+	return {"z": z, "age": 0.0, "hit": [], "n": crest, "l": lt, "dir": dir}
+
+
+# eine Bebenwelle weiterrollen lassen; null, wenn sie ausgelaufen ist
+func _quake_step(q, dt: float) -> Variant:
+	var g: Dictionary = ships[0]
+	var QX: Dictionary = fx.quake
+	var dir: float = q.get("dir", 1.0)
+	var qd = float(QX.dur)
+	var qmax = (60.0 if state == "lab" else 560.0) * qd * (0.35 if dir < 0.0 else 1.0)
+	q.z += base_spd * 3.2 * float(QX.speed) * dt * dir
+	q.age += dt
+	for o in ships:
+		if o.idx != 0 and not o.out and not q.hit.has(o.idx) and absf(o.z - q.z) < 2.6:
+			q.hit.append(o.idx)
+			_dmg(o, 0.2, 0, "quake")
+			if not o.out:
+				o.air = true
+				o.vy = 5.8 * sqrt(float(QX.height))
+				o.h = maxf(o.h, 0.6)
+				o.slow = 0.25
+	var f = T.frame(q.z)
+	var dist = (q.z - g.z) * dir
+	var qs = 1.3 * float(QX.height) * clampf(q.age / 0.25, 0.0, 1.0) * clampf((16.0 * qd - q.age) / 1.5, 0.0, 1.0) * clampf((qmax - dist) / (12.0 if state == "lab" else 40.0), 0.0, 1.0)
+	q.n.global_transform = Transform3D(Basis(f.rr * dir, f.uu, f.fw * dir), f.c + f.uu * (qs * 1.6))
+	q.l.light_energy = 8.0 * qs * float(QX.glow)
+	q.qs = qs
+	var sfx = "" if dir > 0.0 else "2"
+	mats.road.set_shader_parameter("qz" + sfx, q.z)
+	mats.road.set_shader_parameter("qs" + sfx, qs)
+	shake = maxf(shake, 0.35 * clampf(1.0 - absf(q.z - g.z) / 40.0, 0.0, 1.0) * float(QX.shake))
+	if dist > qmax or q.age > 16.0 * qd:
+		q.n.queue_free()
+		mats.road.set_shader_parameter("qs" + sfx, 0.0)
+		return null
+	return q
+
+
+# Super-Turbo: Druckwelle rollt nach hinten und bremst alle Verfolger aus
+func _backwave(o: Dictionary) -> void:
+	var mi = _wall_node()
+	var m: ShaderMaterial = mi.material_override
+	m.set_shader_parameter("wc", Vector3(0.25, 0.75, 1.0))
+	(mi.get_meta("l") as OmniLight3D).light_color = Color(0.4, 0.8, 1.0)
+	bwaves.append({"z": o.z - 1.5, "age": 0.0, "hit": [], "n": mi, "own": o.idx})
+	_snd("wallon", 0.0, 1.4)
+	if o.idx == 0:
+		shake = maxf(shake, 0.6)
+
+
+func _bwaves_update(dt: float) -> void:
+	for i in range(bwaves.size() - 1, -1, -1):
+		var w = bwaves[i]
+		w.age += dt
+		var step = base_spd * 2.6 * dt
+		w.z -= step
+		for o in ships:
+			if o.idx != w.own and not o.out and not w.hit.has(o.idx) and o.z <= w.z + 0.6 and o.z >= w.z - step - o.spd * dt - 0.6:
+				w.hit.append(o.idx)
+				if not _prot(o):
+					o.slow = minf(o.slow, 0.4)
+					o.slowT = 1.6
+				_dmg(o, 0.06, w.own, "wave")
+				_zap_ship(o)
+		var mi: MeshInstance3D = w.n
+		var f = T.frame(w.z)
+		mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * 0.72)
+		var a = clampf(minf(w.age / 0.12, (1.8 - w.age) / 0.5), 0.0, 1.0)
+		(mi.material_override as ShaderMaterial).set_shader_parameter("a", a)
+		(mi.get_meta("l") as OmniLight3D).light_energy = 3.0 * a
+		if w.age > 1.8:
+			mi.queue_free()
+			bwaves.remove_at(i)
 
 
 func _weapons(dt: float, racing: bool) -> void:
@@ -3183,22 +3322,33 @@ func _weapons(dt: float, racing: bool) -> void:
 	var zz = g.z
 	var wk = int(floor((zz - 17.0) / 35.0))
 	var wz = (zz - 17.0) / 35.0 - wk
-	if racing and posmod(wk, 2) == 0 and wz < 0.05 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and g.wpn == "":
+	if racing and posmod(wk, 2) == 0 and wz < 0.05 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and (g.wpn == "" or not g.get("sup", false)):
 		g.wpK = wk
-		g.wpn = _pick_w()
-		_snd("pick", -4.0)
-		_snd("vo_" + g.wpn, 3.0)   # Ansage, was du eingesammelt hast
+		if g.wpn == "":
+			g.wpn = _pick_w()
+			_snd("pick", -4.0)
+			_snd("vo_" + g.wpn, 3.0)   # Ansage, was du eingesammelt hast
+			if g.wpn == "orbs" and g.orbs > 0.0:
+				g.sup = true
+				get_tree().create_timer(0.75).timeout.connect(func(): _snd("vo_super", 3.0))
+		else:
+			# Waffe noch nicht eingesetzt: mit etwas Glück gibt das Feld dieselbe noch einmal → Super-Waffe
+			var nw = g.wpn if randf() < 0.4 else _pick_w()
+			if nw == g.wpn:
+				g.sup = true
+				_snd("pick", -2.0, 1.35)
+				_snd("vo_super", 3.0)
 	if fire_req:
 		fire_req = false
 		if g.wpn != "" and racing:
 			_fire()
-	hud.fire.text = WN.get(g.wpn, "empty")
+	hud.fire.text = WN.get(g.wpn, "empty") + ("\n×2" if g.get("sup", false) and g.wpn != "" else "")
 	if g.auto > 0.0 and g.wpn == "":
-		hud.fire.text = "AUTO …" if g.get("ahold", false) else "AUTO %.1f" % g.auto
+		hud.fire.text = ("SUPER\n" if g.get("sauto", false) else "") + "AUTO" + (" …" if g.get("ahold", false) else " %.1f" % g.auto)
 	var armed = g.wpn != ""
 	hud.armed = armed
 	hud.fire.modulate = Color(1, 1, 1, 1.0 if armed or g.auto > 0.0 else 0.4)
-	var wc: Color = WC.get(g.wpn, Color(1, 1, 1))
+	var wc: Color = WC.get(g.wpn, Color(1, 1, 1)) if not g.get("sup", false) else Color(1.0, 0.78, 0.2)
 	hud.wc = wc
 	hud.fire_sb.border_color = Color(wc.r, wc.g, wc.b, 1.0) if armed else Color(1, 1, 1, 0.25)
 	hud.fire_sb.bg_color = Color(wc.r, wc.g, wc.b, 0.22 + 0.08 * sin(Time.get_ticks_msec() / 200.0)) if armed else Color(1, 1, 1, 0.05)
@@ -3237,16 +3387,17 @@ func _weapons(dt: float, racing: bool) -> void:
 	for i in range(shots.size() - 1, -1, -1):
 		var sh = shots[i]
 		sh.t += dt
-		sh.z += spd * dt
+		var sdir: float = sh.get("dir", 1.0)
+		sh.z += spd * dt * sdir
 		if sh.pl:
 			sh.lat += (g.lat - sh.lat) * minf(1.0, dt * 3.0)
 		elif sh.hm:
-			if sh.tg == null or sh.tg.out or sh.tg.z < sh.z - 1.5:
+			if sh.tg == null or sh.tg.out or (sh.tg.z - sh.z) * sdir < -1.5:
 				sh.tg = null
 				var bd = 200.0
 				for o in ships:
-					if o.idx != sh.own and not o.out and o.z - sh.z > -1.0 and o.z - sh.z < bd:
-						bd = o.z - sh.z
+					if o.idx != sh.own and not o.out and (o.z - sh.z) * sdir > -1.0 and (o.z - sh.z) * sdir < bd:
+						bd = (o.z - sh.z) * sdir
 						sh.tg = o
 			if sh.tg != null:
 				sh.lat += (sh.tg.lat - sh.lat) * minf(1.0, dt * 5.0)
@@ -3265,10 +3416,10 @@ func _weapons(dt: float, racing: bool) -> void:
 				hit.slow = 0.35
 				hit.vpsi += randf_range(-0.25, 0.25)
 			_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket")
-			_gbomb(sh.z, sh.lat, sh.own, hit.idx)
+			_shot_boom(sh, sh.z, sh.lat, hit.idx)
 			dead = true
-		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0 or (state == "lab" and sh.z > LZ + 18.0):
-			_gbomb(sh.z, clampf(sh.lat, -T.TW, T.TW), sh.own)
+		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0 or (sh.cl and sh.t > 0.42) or (state == "lab" and absf(sh.z - LZ) > 18.0):
+			_shot_boom(sh, sh.z, clampf(sh.lat, -T.TW, T.TW), -1)
 			dead = true
 		else:
 			# Annäherungszünder: fliegt die Rakete dicht an einem Gegner vorbei, geht sie sofort hoch
@@ -3276,7 +3427,7 @@ func _weapons(dt: float, racing: bool) -> void:
 				if o.out or o.idx == sh.own or sh.pl:
 					continue
 				if absf(sh.z - o.z) < 0.8 + spd * dt * 1.5 and absf(sh.lat - o.lat) < 1.6:
-					_gbomb(sh.z, sh.lat, sh.own)
+					_shot_boom(sh, sh.z, sh.lat, -1)
 					dead = true
 					break
 		if dead:
@@ -3303,7 +3454,7 @@ func _weapons(dt: float, racing: bool) -> void:
 				_dmg(o, 0.2, m.get("own", 0), "mine")
 				boom = true
 		# Quake-Welle räumt Minen ab (egal von wem), Minen verschwinden nach 25 s von selbst
-		if not boom and quake != null and absf(m.z - quake.z) < 2.6:
+		if not boom and ((quake != null and absf(m.z - quake.z) < 2.6) or (quake2 != null and absf(m.z - quake2.z) < 2.6)):
 			boom = true
 		if state == "lab" and m.t > 1.8:
 			boom = true
@@ -3319,9 +3470,12 @@ func _weapons(dt: float, racing: bool) -> void:
 		for o in ships:
 			if o.idx != 0 and not o.out and not w.hit.has(o.idx) and o.z >= w.z and o.z - o.spd * dt * 1.5 < w.z + 0.01:
 				w.hit.append(o.idx)
-				o.slowT = 2.5
+				var ws: bool = w.get("sup", false)
+				o.slowT = 4.0 if ws else 2.5
+				if ws and not _prot(o):
+					o.slow = minf(o.slow, 0.35)
 				w.hf = 1.0
-				_dmg(o, 0.1, 0, "wall")
+				_dmg(o, 0.25 if ws else 0.1, 0, "wall")
 				_zap_ship(o)
 				_snd("zap", 2.0, 1.0, (o.node as Node3D).global_position)
 		w.hf = maxf(0.0, w.hf - dt * 2.5)
@@ -3329,34 +3483,12 @@ func _weapons(dt: float, racing: bool) -> void:
 		if w.age > 5.3 * float(fx.wall.dur):
 			w.n.queue_free()
 			walls.remove_at(i)
-	# Beben: rollt nach vorn, wirft Gegner hoch
+	# Beben: rollt nach vorn (Super: zweite Welle nach hinten), wirft Gegner hoch
 	if quake != null:
-		var QX: Dictionary = fx.quake
-		var qd = float(QX.dur)
-		var qmax = (60.0 if state == "lab" else 560.0) * qd
-		quake.z += base_spd * 3.2 * float(QX.speed) * dt
-		quake.age += dt
-		for o in ships:
-			if o.idx != 0 and not o.out and not quake.hit.has(o.idx) and absf(o.z - quake.z) < 2.6:
-				quake.hit.append(o.idx)
-				_dmg(o, 0.2, 0, "quake")
-				if not o.out:
-					o.air = true
-					o.vy = 5.8 * sqrt(float(QX.height))
-					o.h = maxf(o.h, 0.6)
-					o.slow = 0.25
-		var f = T.frame(quake.z)
-		var qs = 1.3 * float(QX.height) * clampf(quake.age / 0.25, 0.0, 1.0) * clampf((16.0 * qd - quake.age) / 1.5, 0.0, 1.0) * clampf((qmax - (quake.z - g.z)) / (12.0 if state == "lab" else 40.0), 0.0, 1.0)
-		quake.n.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * (qs * 1.6))
-		quake.l.light_energy = 8.0 * qs * float(QX.glow)
-		quake.qs = qs
-		mats.road.set_shader_parameter("qz", quake.z)
-		mats.road.set_shader_parameter("qs", qs)
-		shake = maxf(shake, 0.35 * clampf(1.0 - (quake.z - g.z) / 40.0, 0.0, 1.0) * float(QX.shake))
-		if quake.z - g.z > qmax or quake.age > 16.0 * qd:
-			quake.n.queue_free()
-			quake = null
-			mats.road.set_shader_parameter("qs", 0.0)
+		quake = _quake_step(quake, dt)
+	if quake2 != null:
+		quake2 = _quake_step(quake2, dt)
+	_bwaves_update(dt)
 	_fx_update(dt)
 	# Schild: blaue Hülle (für alle Schiffe)
 	for o in ships:
@@ -3403,14 +3535,15 @@ void fragment(){
 }"""
 
 
-func _wall_node() -> MeshInstance3D:
+func _wall_node(sup := false) -> MeshInstance3D:
 	_pev("wall")
 	var X: Dictionary = fx.wall
 	var q = QuadMesh.new()
 	q.size = Vector2(T.TW * 2.0, 1.4 * float(X.height))
 	var mi = MeshInstance3D.new()
 	mi.mesh = q
-	var m = _shader_mat(wall_code)
+	# Super-Wand: kräftiger und kaum durchsichtig
+	var m = _shader_mat(wall_code if not sup else wall_code.replace("render_mode unshaded,blend_add,", "render_mode unshaded,blend_mix,").replace("	ALBEDO=c*a*(1.+hit*2.5);", "	ALBEDO=c*a*(1.+hit*2.5);\n	ALPHA=clamp(.55+dot(c,vec3(.25)),0.,1.)*a;"))
 	m.set_shader_parameter("sd", randf() * 10.0)
 	m.set_shader_parameter("wc", _v3(_hs(Color(1.0, 0.5, 0.1), float(X.hue))))
 	m.set_shader_parameter("bk", float(X.bolts))
@@ -3423,6 +3556,7 @@ func _wall_node() -> MeshInstance3D:
 	l.position = Vector3(0, -0.2, 0)
 	mi.add_child(l)
 	mi.set_meta("l", l)
+	mi.set_meta("sup", sup)
 	add_child(mi)
 	return mi
 
@@ -3435,7 +3569,7 @@ func _wall_pose(mi: MeshInstance3D, z: float, age: float, hf: float) -> void:
 	var wm: ShaderMaterial = mi.material_override
 	wm.set_shader_parameter("wc", _v3(_hs(Color(1.0, 0.5, 0.1), float(X.hue))))
 	wm.set_shader_parameter("bk", float(X.bolts))
-	wm.set_shader_parameter("gk", float(X.glow))
+	wm.set_shader_parameter("gk", float(X.glow) * (1.8 if mi.get_meta("sup", false) else 1.0))
 	(mi.get_meta("l") as OmniLight3D).light_color = _hs(Color(1.0, 0.55, 0.15), float(X.hue))
 	var a = clampf(minf(age / 0.3, (5.3 * float(X.dur) - age) / 0.4), 0.0, 1.0)
 	var m: ShaderMaterial = mi.material_override
@@ -3605,7 +3739,7 @@ func _record(dt: float) -> void:
 	var wl = []
 	for x in walls:
 		wl.append([x.z, x.age, x.hf])
-	rec.append({"t": rec_clk, "s": sh, "w": w, "m": m, "wl": wl, "q": [quake.z, quake.get("qs", 0.0)] if quake != null else null,
+	rec.append({"t": rec_clk, "s": sh, "w": w, "m": m, "wl": wl, "q": [quake.z, quake.get("qs", 0.0)] if quake != null else null, "q2": [quake2.z, quake2.get("qs", 0.0)] if quake2 != null else null, "so": ships[0].get("sorb", false),
 		"sh": ships[0].shield, "ob": ships[0].orbs, "ev": rec_ev, "pl": hud.top.text})
 	rec_ev = []
 
@@ -3724,7 +3858,7 @@ func _replay(dt: float) -> void:
 				"boom":
 					_explode(ev[1], ev[2], ev[3], ev[4] if ev.size() > 4 else 1.0)
 				"gb":
-					_gbomb(ev[1], ev[2], -2)
+					_gbomb(ev[1], ev[2], -2, -1, ev[3] if ev.size() > 3 else 1.0)
 				"zap":
 					_zap_ship(ships[ev[1]])
 					_snd("zap", 0.0, 1.0, (ships[ev[1]].node as Node3D).global_position)
@@ -3752,6 +3886,7 @@ func _replay(dt: float) -> void:
 		_shield_vis(o)
 	var g: Dictionary = ships[0]
 	g.orbs = f0.ob
+	g.sorb = f0.get("so", false)
 	g.auto = 0.0
 	_orbs_update(dt, false)
 	var ps = _pool("shots", f0.w.size(), func():
@@ -3777,6 +3912,9 @@ func _replay(dt: float) -> void:
 		mats.road.set_shader_parameter("qs", f0.q[1])
 	else:
 		mats.road.set_shader_parameter("qs", 0.0)
+	var q2 = f0.get("q2")
+	mats.road.set_shader_parameter("qz2", q2[0] if q2 != null else -1000.0)
+	mats.road.set_shader_parameter("qs2", q2[1] if q2 != null else 0.0)
 	# Kamera-Regie wie im Fernsehen
 	rp.ct += dt
 	var cm = RP_CAMS[rp.ci]
@@ -4065,6 +4203,8 @@ func _warm_step(delta: float) -> void:
 		_gbomb(zf, g.lat - 0.6, -2)
 		var w = _wall_node()
 		_wall_pose(w, zf, 1.0, 1.0)
+		var w2 = _wall_node(true)
+		_wall_pose(w2, zf + 0.5, 1.0, 1.0)
 		_zap_ship(g)
 		g.shield = 1.0
 		_shield_vis(g)
@@ -4629,6 +4769,22 @@ func _process(delta: float) -> void:
 		g.ahold = g.auto <= 0.05 and (g.air or _curvy(g.z))
 		if g.ahold:
 			g.auto = 0.05
+		if g.get("sauto", false):
+			g.boost = maxf(g.boost, 1.3)
+			for o in ships:
+				if o.idx != 0 and not o.out and absf(o.z - g.z) < 1.7 and absf(o.lat - g.lat) < 0.8 and race_t - o.get("ramT", -9.0) > 0.8:
+					o.ramT = race_t
+					var away = signf(o.lat - g.lat) if o.lat != g.lat else 1.0
+					if not _prot(o):
+						o.lat = clampf(o.lat + away * 0.9, -T.TW + 0.3, T.TW - 0.3)
+						o.vpsi += away * 0.3
+						o.slow = minf(o.slow, 0.5)
+					_dmg(o, 0.15, 0, "ram")
+					_zap_ship(o)
+					_snd("zap", 2.0, 0.8, (o.node as Node3D).global_position)
+					shake = maxf(shake, 0.6)
+		if g.auto <= 0.0:
+			g.sauto = false
 	if g.turbo > 0.0:
 		g.turbo -= dt
 		g.boost = maxf(g.boost, 1.5)
@@ -4828,6 +4984,15 @@ func _lab_open() -> void:
 		_lab_style())
 	row.add_child(ba)
 	lab.ab = ba
+	var bsu = _btn("Super")
+	bsu.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bsu.custom_minimum_size = Vector2(0, 96)
+	bsu.add_theme_font_size_override("font_size", 28)
+	bsu.pressed.connect(func():
+		lab.sup = not lab.get("sup", false)
+		_lab_style())
+	row.add_child(bsu)
+	lab.sb = bsu
 	var bv = _btn("View")
 	bv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bv.custom_minimum_size = Vector2(0, 96)
@@ -4962,6 +5127,11 @@ func _lab_style() -> void:
 	var sa = _style(Color(0.2, 0.75, 0.45) if lab.auto else Color(1, 1, 1, 0.08), Color(0.6, 1, 0.75) if lab.auto else Color(1, 1, 1, 0.22))
 	for sk in ["normal", "pressed", "hover", "focus"]:
 		lab.ab.add_theme_stylebox_override(sk, sa)
+	var son = lab.get("sup", false)
+	var ss = _style(Color(0.9, 0.68, 0.12) if son else Color(1, 1, 1, 0.08), Color(1, 0.88, 0.5) if son else Color(1, 1, 1, 0.22))
+	if lab.has("sb"):
+		for sk in ["normal", "pressed", "hover", "focus"]:
+			lab.sb.add_theme_stylebox_override(sk, ss)
 	lab.fire.disabled = lab.tab in ["env", "pillar"]
 	lab.fire.modulate.a = 0.35 if lab.fire.disabled else 1.0
 	lab.fire.text = "BOOST" if lab.tab in ["haze", "ship"] else "FIRE"
@@ -5091,18 +5261,19 @@ func _lab_view() -> void:
 
 func _lab_fire() -> void:
 	var g: Dictionary = ships[0]
+	g.sup = lab.get("sup", false)
 	match lab.tab:
 		"boom":
 			_explode(LZ + 6.0, 0.0, true)
 		"mine":
-			_drop_mines(g)
+			_drop_mines(g, g.sup)
 		"quake":
 			g.wpn = "beben"
 			_fire()
 		"gb":
 			_gbomb(LZ + 9.0, 0.0, 0)
 		"rak":
-			_add_shot(g)
+			_add_shot(g, false, false, 1.0, g.sup)
 		"wall":
 			g.wpn = "wand"
 			_fire()
@@ -5281,13 +5452,15 @@ func _shot() -> void:
 				if shot_n == 60:
 					_lab_open()
 					_lab_tab(p[3])
-					if p.size() > 4:
+					if p.size() > 4 and p[4] == "sup":
+						lab.sup = true
+					elif p.size() > 6:
 						lab.yaw = float(p[4])
 						lab.pit = float(p[5])
 						lab.dist = float(p[6])
 				if shot_n == 80 and p[3] != "env":
 					_lab_fire()
-				var at = 60 + {"boom": 26, "mine": 75, "quake": 32, "gb": 36, "rak": 26, "wall": 50, "env": 30, "pillar": 70, "ship": 140}.get(p[3], 40)
+				var at = 60 + {"boom": 26, "mine": 26, "quake": 30, "gb": 36, "rak": 34, "wall": 40, "env": 30, "pillar": 70, "ship": 140}.get(p[3], 40)
 				if shot_n == at:
 					get_viewport().get_texture().get_image().save_png(p[0])
 					get_tree().quit()
