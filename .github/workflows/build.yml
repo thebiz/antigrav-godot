@@ -8,17 +8,37 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # Signierschlüssel: der öffentliche Standard-Testschlüssel aus dem bisherigen Image (4.3), damit sich die
+  # Signatur der App nicht ändert und Updates sich weiter einfach drüberinstallieren lassen (Einstellungen bleiben).
+  key:
     runs-on: ubuntu-latest
     container:
       image: barichello/godot-ci:4.3
     steps:
+      - run: mkdir -p k && cp /root/debug.keystore k/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signkey
+          path: k/debug.keystore
+          retention-days: 1
+
+  build:
+    needs: key
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.7.2
+    steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: signkey
+          path: /tmp/sign
 
       - name: Godot einrichten (Vorlagen, Android-SDK)
         run: |
           mkdir -p ~/.local/share/godot/export_templates ~/.config
-          cp -r /root/.local/share/godot/export_templates/4.3.stable ~/.local/share/godot/export_templates/ || true
+          cp -r /root/.local/share/godot/export_templates/4.7.2.stable ~/.local/share/godot/export_templates/ || true
           cp -r /root/.config/godot ~/.config/ || true
           ls ~/.local/share/godot/export_templates/
 
@@ -41,9 +61,9 @@ jobs:
           mkdir -p build
           exec > >(tee build/template.log) 2>&1
           rm -rf android && mkdir -p android/build
-          ls ~/.local/share/godot/export_templates/4.3.stable/
-          unzip -q ~/.local/share/godot/export_templates/4.3.stable/android_source.zip -d android/build
-          echo "4.3.stable" > android/.build_version
+          ls ~/.local/share/godot/export_templates/4.7.2.stable/
+          unzip -q ~/.local/share/godot/export_templates/4.7.2.stable/android_source.zip -d android/build
+          echo "4.7.2.stable" > android/.build_version
           touch android/build/.gdignore
           ls android/build
           grep -n "srcDirs\|java.srcDir" android/build/build.gradle || true
@@ -53,11 +73,11 @@ jobs:
           grep -n "VideoExport" android/build/AndroidManifest.xml
 
       - name: APK bauen
-        # signiert mit dem öffentlichen Standard-Testschlüssel der Bauumgebung (kein Geheimnis; bleibt gleich, solange das Image gleich bleibt)
+        # signiert mit dem öffentlichen Standard-Testschlüssel (kein Geheimnis), immer derselbe – siehe Schritt „key“
         env:
           ANDROID_HOME: /usr/lib/android-sdk
           ANDROID_SDK_ROOT: /usr/lib/android-sdk
-          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: /root/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: /tmp/sign/debug.keystore
           GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
           GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
         run: |
