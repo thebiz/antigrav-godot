@@ -515,6 +515,24 @@ func _save_cfg() -> void:
 	c.save(CFG_PATH)
 
 
+# Glow: ab Godot 4.6 wird er vor der Farbumrechnung berechnet und ist auf dem Handy neu gebaut – dort braucht er andere Werte
+func _glow_k() -> Dictionary:
+	var k = {"i": 1.0, "s": 1.0, "b": 0.08, "t": 1.0, "l6": 0.0, "l1": 0.0}
+	var vi = Engine.get_version_info()
+	if vi.major > 4 or vi.minor >= 6:
+		k = GLOW_NEW.duplicate()
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--gk="):
+			var v = a.substr(5).split(",")
+			for j in range(mini(v.size(), 6)):
+				k[["i", "s", "b", "t", "l6", "l1"][j]] = float(v[j])
+		if a.begins_with("--gl="):
+			k["lv"] = Array(a.substr(5).split(",")).map(func(x): return float(x))
+	return k
+# Werte für Godot 4.6+ (am Handy-Renderer verglichen): Schwelle etwas tiefer, enge Stufen, kräftiger – sonst fehlt das Neon-Leuchten
+const GLOW_NEW = {"i": 4.5, "s": 1.0, "b": 0.0, "t": 0.72, "l6": 0.0, "l1": 0.3, "lv": [0.3, 1.0, 1.0, 0.5, 0.0, 0.0]}
+
+
 # Grafikstufe: 0 niedrig, 1 mittel, 2 hoch
 func _apply_cfg() -> void:
 	base_spd = BASE_DEF * float(cfg.speed)
@@ -528,9 +546,17 @@ func _apply_cfg() -> void:
 	get_viewport().msaa_3d = Viewport.MSAA_4X if q >= 2 else Viewport.MSAA_DISABLED
 	get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 1 else Viewport.SCREEN_SPACE_AA_DISABLED
 	get_viewport().scaling_3d_scale = [0.7, 0.8, 1.0][q] * float(cfg.res)
-	wenv.glow_intensity = 1.6 * float(cfg.glow) * (0.7 if _noir() else 1.0)
+	var GK = _glow_k()
+	wenv.glow_intensity = 1.6 * float(cfg.glow) * (0.7 if _noir() else 1.0) * GK.i
 	wenv.adjustment_contrast = 1.18 if _noir() else 1.05
-	wenv.glow_strength = 0.6 + 0.6 * float(cfg.glow)
+	wenv.glow_strength = (0.6 + 0.6 * float(cfg.glow)) * GK.s
+	wenv.glow_bloom = GK.b
+	wenv.glow_hdr_threshold = GK.t
+	wenv.set_glow_level(6, GK.l6)
+	wenv.set_glow_level(1, GK.l1)
+	if GK.has("lv"):
+		for li in range(mini(GK.lv.size(), 6)):
+			wenv.set_glow_level(li + 1, GK.lv[li])
 	for nm in neon_mats:
 		nm[0].emission_energy_multiplier = nm[1] * float(cfg.neon)
 	for b in lights_nodes:
