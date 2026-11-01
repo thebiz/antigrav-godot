@@ -31,7 +31,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -71,6 +71,7 @@ var rpf = {}   # geladenes Replay aus einer Datei
 
 
 func _ready() -> void:
+	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 	if pending_rp != "":
 		var fa = FileAccess.open_compressed(pending_rp, FileAccess.READ, FileAccess.COMPRESSION_ZSTD)
 		if fa != null:
@@ -128,6 +129,159 @@ func _buses() -> void:
 		var lim = AudioEffectHardLimiter.new()
 		lim.ceiling_db = -0.5
 		AudioServer.add_bus_effect(vi, lim)
+
+
+# ---------------------------------------------------------------- Startsound-Labor: eigener Kanal „Start“ mit Tonhöhe, Klang, Echo, Hall, Biss
+# Countdown-Piepser und Startgrollen laufen über diesen Kanal; die Regler im Reiter „Sound“ wirken sofort.
+# Dazu auf Wunsch eigene Synth-Piepser (Tonhöhe, Klangfarbe, GO-Anstieg), im Spiel erzeugt.
+var start_prev = []   # gerade laufende Vorhör-Klänge
+var synth_c = {}      # erzeugte Synth-Piepser (nach Einstellungen)
+
+
+func _start_bus() -> int:
+	var bi = AudioServer.get_bus_index("Start")
+	if bi == -1:
+		AudioServer.add_bus()
+		bi = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(bi, "Start")
+		AudioServer.set_bus_send(bi, "Master")
+		AudioServer.add_bus_effect(bi, AudioEffectPitchShift.new())   # 0 Tonhöhe (Tempo bleibt)
+		AudioServer.add_bus_effect(bi, AudioEffectEQ6.new())          # 1 Bass/Höhen
+		var ds = AudioEffectDistortion.new()                            # 2 Biss
+		ds.mode = AudioEffectDistortion.MODE_OVERDRIVE
+		AudioServer.add_bus_effect(bi, ds)
+		AudioServer.add_bus_effect(bi, AudioEffectDelay.new())        # 3 Echo
+		AudioServer.add_bus_effect(bi, AudioEffectReverb.new())       # 4 Hall
+		var lim = AudioEffectHardLimiter.new()                          # 5 nichts übersteuert
+		lim.ceiling_db = -0.5
+		AudioServer.add_bus_effect(bi, lim)
+	return bi
+
+
+func _start_bus_apply() -> void:
+	var S: Dictionary = fx.sound
+	var bi = _start_bus()
+	AudioServer.set_bus_volume_db(bi, linear_to_db(maxf(0.001, float(S.vol))))
+	var ps: AudioEffectPitchShift = AudioServer.get_bus_effect(bi, 0)
+	ps.pitch_scale = float(S.pitch)
+	AudioServer.set_bus_effect_enabled(bi, 0, absf(float(S.pitch) - 1.0) > 0.01)
+	var eq: AudioEffectEQ6 = AudioServer.get_bus_effect(bi, 1)
+	var bs = (float(S.bass) - 1.0)
+	var tr = (float(S.treble) - 1.0)
+	var gains = [bs * 12.0, bs * 15.0, bs * 7.0, 0.0, tr * 10.0, tr * 15.0]
+	for i in range(6):
+		eq.set_band_gain_db(i, gains[i])
+	AudioServer.set_bus_effect_enabled(bi, 1, absf(bs) > 0.01 or absf(tr) > 0.01)
+	var ds: AudioEffectDistortion = AudioServer.get_bus_effect(bi, 2)
+	var gr = float(S.grit)
+	ds.drive = clampf(gr * 0.45, 0.0, 0.95)
+	ds.post_gain = -gr * 5.0
+	AudioServer.set_bus_effect_enabled(bi, 2, gr > 0.01)
+	var dl: AudioEffectDelay = AudioServer.get_bus_effect(bi, 3)
+	var ec = float(S.echo)
+	var ms = 250.0 * float(S.etime)
+	dl.tap1_active = true
+	dl.tap1_delay_ms = ms
+	dl.tap1_level_db = linear_to_db(maxf(0.001, ec * 0.5))
+	dl.tap2_active = true
+	dl.tap2_delay_ms = ms * 2.0
+	dl.tap2_level_db = linear_to_db(maxf(0.001, ec * 0.28))
+	dl.feedback_active = true
+	dl.feedback_delay_ms = ms * 3.0
+	dl.feedback_level_db = linear_to_db(maxf(0.001, ec * 0.18))
+	AudioServer.set_bus_effect_enabled(bi, 3, ec > 0.01)
+	var rv: AudioEffectReverb = AudioServer.get_bus_effect(bi, 4)
+	rv.room_size = float(S.room)
+	rv.wet = clampf(float(S.reverb) * 0.4, 0.0, 1.0)
+	rv.dry = 1.0
+	AudioServer.set_bus_effect_enabled(bi, 4, float(S.reverb) > 0.01)
+
+
+# Synth-Piepser: kurzer Ton (3, 2, 1) oder langer GO-Ton mit Anstieg; Sinus bis rechteckig
+func _synth(go: bool) -> AudioStreamWAV:
+	var S: Dictionary = fx.sound
+	var key = "%s|%.3f|%.3f|%.3f" % [go, float(S.spitch), float(S.sshape), float(S.sweep)]
+	if synth_c.has(key):
+		return synth_c[key]
+	var sr = 22050
+	var dur = 1.15 if go else 0.24
+	var n = int(dur * sr)
+	var f0 = (1320.0 if go else 880.0) * float(S.spitch)
+	var sh = float(S.sshape)
+	var sw = float(S.sweep) if go else 0.0
+	var data = PackedByteArray()
+	data.resize(n * 2)
+	var ph = 0.0
+	for i in range(n):
+		var t = float(i) / sr
+		var fq = f0 * (1.0 + sw * 0.35 * minf(t / 0.25, 1.0))
+		ph += TAU * fq / sr
+		var sn = sin(ph)
+		var sq = clampf(sn * 6.0, -1.0, 1.0)
+		var v = lerpf(sn, sq, sh) * 0.85 + sin(ph * 2.0) * 0.08
+		var env = minf(t / 0.006, 1.0) * clampf((dur - t) / (0.25 if go else 0.05), 0.0, 1.0)
+		data.encode_s16(i * 2, int(clampf(v * env, -1.0, 1.0) * 26000.0))
+	var w = AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = sr
+	w.stereo = false
+	w.data = data
+	if synth_c.size() > 16:
+		synth_c.clear()
+	synth_c[key] = w
+	return w
+
+
+func _start_snd(st: AudioStream, db: float, from := 0.0) -> AudioStreamPlayer:
+	if st == null or warm:
+		return null
+	_start_bus()
+	var p = AudioStreamPlayer.new()
+	p.stream = st
+	p.volume_db = db
+	p.bus = "Start"
+	add_child(p)
+	p.play(from)
+	p.finished.connect(p.queue_free)
+	return p
+
+
+# Countdown-Schritt im Rennen: c = 3, 2, 1 kurze Piepser, 0 = GO; beim ersten Schritt Original-Piepser und Grollen
+func _start_step(c: int, first: bool) -> void:
+	var S: Dictionary = fx.sound
+	_start_bus_apply()
+	if first:
+		if float(S.beeps) > 0.01:
+			_start_snd(snd.get("count"), linear_to_db(float(S.beeps)))
+		if float(S.rumble) > 0.01:
+			_start_snd(snd.get("start"), linear_to_db(float(S.rumble)))
+	if float(S.synth) > 0.01:
+		_start_snd(_synth(c <= 0), linear_to_db(float(S.synth)) - 4.0)
+
+
+# Labor: ganzer Countdown (PLAY) oder kurzes Vorhören nach dem Verstellen (letzter Piepser + GO)
+func _start_play(short: bool) -> void:
+	for p in start_prev:
+		if is_instance_valid(p):
+			p.queue_free()
+	start_prev.clear()
+	var S: Dictionary = fx.sound
+	_start_bus_apply()
+	var t0 = 2.0 if short else 0.0
+	if float(S.beeps) > 0.01:
+		start_prev.append(_start_snd(snd.get("count"), linear_to_db(float(S.beeps)), t0))
+	if float(S.rumble) > 0.01:
+		start_prev.append(_start_snd(snd.get("start"), linear_to_db(float(S.rumble)), t0 * 0.5))
+	if float(S.synth) > 0.01:
+		var steps = [[0.0, 1], [1.0, 0]] if short else [[0.0, 3], [1.0, 2], [2.0, 1], [3.0, 0]]
+		for stp in steps:
+			var c: int = stp[1]
+			if stp[0] <= 0.0:
+				start_prev.append(_start_snd(_synth(c <= 0), linear_to_db(float(S.synth)) - 4.0))
+			else:
+				get_tree().create_timer(stp[0]).timeout.connect(func():
+					if state == "lab":
+						start_prev.append(_start_snd(_synth(c <= 0), linear_to_db(float(S.synth)) - 4.0)))
 
 
 var duck_until = 0.0
@@ -448,8 +602,15 @@ const FXS = {
 		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
 		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections (4.7)", 0.0, 6.0, 1.0],
 		["gloss", "Road gloss", 0.0, 4.0, 2.0], ["wet", "Wet road", 0.0, 4.0, 1.0]],
+	"city": [["holo", "Holograms", 0.0, 4.0, 1.0], ["hsize", "Hologram size", 0.3, 3.0, 1.0], ["hflick", "Hologram glitch", 0.0, 4.0, 1.0], ["hhue", "Hologram color", -0.5, 0.5, 0.0],
+		["koi", "Koi fish", 0.0, 4.0, 1.0], ["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
+		["mega", "Mega towers", 0.0, 3.0, 1.0]],
+	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
+		["grit", "Grit", 0.0, 2.0, 0.0], ["echo", "Echo", 0.0, 2.0, 0.0], ["etime", "Echo time", 0.2, 3.0, 1.0], ["reverb", "Reverb", 0.0, 2.0, 0.0], ["room", "Room size", 0.0, 1.0, 0.6],
+		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
+		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
 }
-const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Haze"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"]]
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Haze"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["sound", "Sound"]]
 var fx = {}
 
 
@@ -625,6 +786,9 @@ const GLOW_NEW = {"i": 4.5, "s": 1.0, "b": 0.0, "t": 0.72, "l6": 0.0, "l1": 0.3,
 # Grafikstufe: 0 niedrig, 1 mittel, 2 hoch
 func _apply_cfg() -> void:
 	base_spd = BASE_DEF * float(cfg.speed)
+	Engine.max_fps = 60 if int(cfg.cap) == 1 else 0
+	if ui.has("fps"):
+		ui.fps.visible = int(cfg.fps) == 1
 	var q = int(cfg.gfx)
 	# Bildschirm-Spiegelungen und Umgebungsverdeckung gibt es nur im Desktop-Renderer (Forward+), nicht auf dem Handy
 	var fp = _fplus()
@@ -667,6 +831,7 @@ func _env_apply() -> void:
 	if mats.has("road"):
 		_rset("rgl", float(E.gloss))
 	_wet_apply()
+	_city_apply()
 	if sky_m != null:
 		sky_m.set_shader_parameter("sb", float(E.skyb) * _newr("sky", 1.0))
 		sky_m.set_shader_parameter("st", float(E.stars))
@@ -1314,6 +1479,7 @@ void fragment(){
 	bld_mm.transform_format = MultiMesh.TRANSFORM_3D
 	bld_mm.use_custom_data = true
 	bld_mm.mesh = box
+	_city_extras_make()
 	_city_fill()
 	for n in laps:
 		var mmi = MultiMeshInstance3D.new()
@@ -1321,6 +1487,15 @@ void fragment(){
 		mmi.extra_cull_margin = 60.0
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		n.add_child(mmi)
+		for mm in [sign_mm, srch_mm, car_mm]:
+			var xi = MultiMeshInstance3D.new()
+			xi.multimesh = mm
+			xi.extra_cull_margin = 80.0
+			xi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			n.add_child(xi)
+			city_xi.append(xi)
+	_holos_make()
+	_city_apply()
 
 
 var city_mat: ShaderMaterial
@@ -1417,6 +1592,7 @@ func _city_fill() -> void:
 	var E: Dictionary = fx.env
 	var dens = float(E.dens) if float(E.city) > 0.5 else 0.0
 	var items = []
+	var blds = []
 	var rng = RandomNumberGenerator.new()
 	rng.seed = 7
 	var stepz = 16.0 / maxf(0.05, dens)
@@ -1433,13 +1609,426 @@ func _city_fill() -> void:
 			var pos = Vector3(f.c.x - lat, -42.0 + H / 2.0, zc + (rng.randf() - 0.5) * 6.0)
 			var c = _neo(rng.randf())
 			items.append([Transform3D(Basis.from_scale(Vector3(w / 2.0, H / 2.0, d / 2.0)), pos), c, pos.y + H / 2.0])
+			blds.append([pos, w, d, H, f.c.x])
 		zc += stepz
+	# Mega-Türme: riesige Hochhäuser weit draußen, im Dunst nur als Silhouette mit Fensterlichtern (wie in Blade Runner)
+	var mk = float(fx.city.mega) if float(E.city) > 0.5 else 0.0
+	if mk > 0.01:
+		var rm = RandomNumberGenerator.new()
+		rm.seed = 11
+		var zm = 30.0
+		while zm < 720.0:
+			var fm = T.frame(zm)
+			for sd in [-1.0, 1.0]:
+				if rm.randf() < 0.35:
+					continue
+				var latm: float = sd * (75.0 + rm.randf() * 90.0)
+				var Hm = (130.0 + pow(rm.randf(), 1.3) * 210.0) * (0.55 + 0.45 * mk)
+				var wm = 14.0 + rm.randf() * 22.0
+				var posm = Vector3(fm.c.x - latm, -42.0 + Hm / 2.0, zm + (rm.randf() - 0.5) * 20.0)
+				items.append([Transform3D(Basis.from_scale(Vector3(wm / 2.0, Hm / 2.0, wm / 2.0)), posm), _neo(rm.randf()), posm.y + Hm / 2.0])
+			zm += 62.0 / clampf(mk, 0.3, 3.0)
 	bld_mm.instance_count = 0
 	bld_mm.instance_count = items.size()
 	for i in range(items.size()):
 		bld_mm.set_instance_transform(i, items[i][0])
 		var c: Color = items[i][1]
 		bld_mm.set_instance_custom_data(i, Color(c.r, c.g, c.b, items[i][2]))
+	_city_extras_fill(blds)
+
+
+# ---------------------------------------------------------------- Blade-Runner-Stadt: Hologramme, Leuchtschilder, Suchscheinwerfer, fliegende Autos
+# Riesige, leicht flackernde Hologramme zwischen den Hochhäusern (eine tanzende Frau, schwebende Koi-Karpfen),
+# senkrechte Neon-Schilder an den Häusern, Lichtkegel in den Himmel und Gleiter-Autos über der Stadt.
+# Nichts davon wirft Licht, alles zusammen sind nur wenige Zeichenaufrufe – das Handy merkt davon kaum etwas.
+var city_root: Node3D
+var city_xi = []      # Schilder/Scheinwerfer/Autos je Rundenkopie
+var holos = []        # {n, mat, kind, ap, spot}
+var sign_mm: MultiMesh
+var srch_mm: MultiMesh
+var car_mm: MultiMesh
+var sign_mat: ShaderMaterial
+var srch_mat: ShaderMaterial
+var car_mat: ShaderMaterial
+# Standorte je Runde: [z, Seite (+1 rechts, -1 links), Art]  – nicht in den Tunneln (160–245, 510–595)
+const HOLO_SPOTS = [[80.0, 1.0, "dancer"], [300.0, -1.0, "dancer"], [455.0, 1.0, "dancer"], [655.0, -1.0, "dancer"],
+	[128.0, -1.0, "koi"], [392.0, 1.0, "koi"], [615.0, -1.0, "koi"]]
+const DANCER_H = 1.66   # Größe der Figur im Modell (m)
+
+const HOLO_CODE = """
+shader_type spatial;
+// Hologramm: nur leuchtende Ränder, feine Bildzeilen, ein heller Streifen wandert hoch, ab und zu eine Bildstörung
+render_mode unshaded,blend_add,cull_back,depth_draw_never,shadows_disabled,fog_disabled;
+uniform vec3 c1=vec3(1.,.3,.75);uniform vec3 c2=vec3(.25,.85,1.);
+uniform float hk=1.;uniform float fl=1.;uniform float sd=0.;uniform float by=0.;uniform float hh=40.;
+varying vec3 wp;varying float my;
+float h11(float x){return fract(sin(x*127.1)*43758.5453);}
+void vertex(){
+	vec3 w=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;
+	my=clamp((w.y-by)/hh,0.,1.);
+	// Bildstörung: ein waagrechter Streifen verrutscht kurz zur Seite
+	float tk=floor(TIME*9.+sd*7.);
+	float on=step(1.-.08*fl,h11(tk+sd*3.1));
+	float band=step(abs(fract(my*2.5+h11(tk*1.7))-.5),.07);
+	vec3 off=vec3((h11(tk*3.1)-.5)*.06*hh*on*band,0.,0.);
+	VERTEX+=inverse(mat3(MODEL_MATRIX))*off;
+	wp=w+off;
+}
+void fragment(){
+	float fr=clamp(1.-abs(dot(NORMAL,VIEW)),0.,1.);
+	float rim=fr*fr*1.7+.05;
+	float scan=.72+.28*sin(wp.y*10.-TIME*7.);
+	float sweep=exp(-pow(abs(fract(my*.7-TIME*.16)-.5)*12.,2.));
+	float fk=1.-min(fl,1.)*.6*step(.93,h11(floor(TIME*15.)+sd*5.));
+	vec3 c=mix(c2,c1,my);
+	float fd=exp(-length(VERTEX)*.0012);
+	ALBEDO=c*((.2+rim*1.6)*scan+sweep*.7*(.3+rim))*fk*hk*fd;
+}"""
+
+const KOI_CODE = """
+shader_type spatial;
+// Koi-Hologramm: weiß mit orangeroten Flecken, schwimmt mit wedelndem Schwanz durch die Luft
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform float hk=1.;uniform float fl=1.;uniform float sd=0.;uniform float nr=0.;uniform vec3 ec=vec3(.3,.85,1.);
+varying vec3 wp;
+float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+	return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),f.x),f.y);}
+void vertex(){
+	float t=clamp(.5-VERTEX.z,0.,1.);   // 0 = Kopf … 1 = Schwanz
+	VERTEX.x+=sin(VERTEX.z*7.-TIME*3.4+sd)*(.012+.12*t*t);
+	wp=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;
+}
+void fragment(){
+	float fr=clamp(1.-abs(dot(NORMAL,VIEW)),0.,1.);
+	float rim=fr*fr*1.5+.08;
+	float sp=smoothstep(.42,.62,vn(UV*vec2(7.,4.)+sd*13.));
+	vec3 kc=nr>.5?mix(vec3(.85),vec3(1.,.36,.03),sp):mix(vec3(1.,.93,.88),vec3(1.,.3,.07),sp);
+	float scan=.72+.28*sin(wp.y*10.-TIME*6.);
+	float fk=1.-min(fl,1.)*.5*step(.93,h21(vec2(floor(TIME*13.),sd)));
+	float fd=exp(-length(VERTEX)*.0012);
+	ALBEDO=(kc*(.22+.9*rim)+ec*rim*.6)*scan*fk*hk*fd;
+}"""
+
+
+func _city_extras_make() -> void:
+	city_root = Node3D.new()
+	add_child(city_root)
+	# senkrechte Leuchtschilder mit erfundenen Schriftzeichen
+	var q = QuadMesh.new()
+	q.size = Vector2.ONE
+	sign_mat = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,cull_disabled;
+uniform float ak=1.;
+varying vec4 cd;varying vec2 ar;
+void vertex(){cd=INSTANCE_CUSTOM;ar=vec2(length(MODEL_MATRIX[0].xyz),length(MODEL_MATRIX[1].xyz));}
+float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
+void fragment(){
+	float sd=cd.a;
+	vec2 uv=UV;
+	uv.y+=step(.72,fract(sd*7.3))*TIME*.08;            // manche Schilder laufen durch
+	float cols=fract(sd*3.7)>.6?2.:1.;
+	vec2 g=vec2(uv.x*cols,uv.y*ar.y/ar.x*cols);         // quadratische Zeichenfelder
+	vec2 ci=floor(g),cf=fract(g);
+	vec2 sg=cf*3.;vec2 si=floor(sg),sf=fract(sg);
+	float r=h21(ci*7.3+si*1.7+sd*13.);
+	float bar=r>.62?step(abs(sf.y-.5),.2):(r>.3?step(abs(sf.x-.5),.2):0.);
+	float mg=step(.14,cf.x)*step(cf.x,.86)*step(.12,cf.y)*step(cf.y,.88);
+	float glyph=bar*mg*step(.18,h21(ci+sd));
+	float fw=.035;
+	float frame=1.-step(fw,UV.x)*step(UV.x,1.-fw*1.)*step(fw*ar.x/ar.y,UV.y)*step(UV.y,1.-fw*ar.x/ar.y);
+	float fk=1.-.85*step(.975,h21(vec2(floor(TIME*9.),sd*31.)));   // kurzes Aussetzen wie bei alten Röhren
+	ALBEDO=vec3(.012)+cd.rgb*(glyph*2.4+frame*3.)*fk*ak;
+}""")
+	q.material = sign_mat
+	sign_mm = MultiMesh.new()
+	sign_mm.transform_format = MultiMesh.TRANSFORM_3D
+	sign_mm.use_custom_data = true
+	sign_mm.mesh = q
+	# Suchscheinwerfer: Lichtkegel schwenken langsam über den Himmel
+	var cy = CylinderMesh.new()
+	cy.top_radius = 4.0
+	cy.bottom_radius = 0.35
+	cy.height = 140.0
+	cy.radial_segments = 10
+	cy.rings = 1
+	cy.cap_top = false
+	cy.cap_bottom = false
+	srch_mat = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform float sk=1.;
+varying float v;
+void vertex(){
+	float sd=INSTANCE_CUSTOM.a;
+	vec3 p=VERTEX+vec3(0.,70.,0.);                      // Fuß des Kegels auf dem Dach
+	v=p.y/140.;
+	float a=sin(TIME*(.16+.1*sd)+sd*40.)*.55;
+	float b=.2+.2*sin(TIME*.1+sd*17.);
+	mat3 rz=mat3(vec3(cos(a),sin(a),0.),vec3(-sin(a),cos(a),0.),vec3(0.,0.,1.));
+	mat3 rx=mat3(vec3(1.,0.,0.),vec3(0.,cos(b),sin(b)),vec3(0.,-sin(b),cos(b)));
+	VERTEX=rx*rz*p;
+	NORMAL=rx*rz*NORMAL;
+}
+void fragment(){
+	float core=pow(abs(dot(NORMAL,VIEW)),3.);
+	float fade=(1.-v)*(1.-v)*smoothstep(0.,.03,v);
+	ALBEDO=vec3(.7,.82,1.)*core*fade*.3*sk*exp(-length(VERTEX)*.003);
+}""")
+	cy.material = srch_mat
+	srch_mm = MultiMesh.new()
+	srch_mm.transform_format = MultiMesh.TRANSFORM_3D
+	srch_mm.use_custom_data = true
+	srch_mm.mesh = cy
+	# fliegende Autos: vorn helle Scheinwerfer, hinten rote Lichter – ziehen über der Stadt ihre Bahnen
+	var bx = BoxMesh.new()
+	bx.size = Vector3(0.8, 0.32, 2.6)
+	car_mat = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,cull_disabled,shadows_disabled;
+uniform float ck=1.;
+varying float f;
+void vertex(){
+	vec4 cd=INSTANCE_CUSTOM;
+	float dir=cd.r>.5?1.:-1.;
+	float sp=dir*(26.+cd.g*34.);
+	f=VERTEX.z*dir/1.3;
+	VERTEX.z+=mod(TIME*sp+cd.b*700.,700.);
+	VERTEX.y+=sin(TIME*.6+cd.b*30.)*1.2;
+}
+void fragment(){
+	vec3 c=vec3(.03,.035,.05);
+	c+=vec3(1.,.95,.85)*smoothstep(.8,1.,f)*7.;
+	c+=vec3(1.,.08,.12)*smoothstep(-.8,-1.,f)*6.;
+	ALBEDO=c*ck;
+}""")
+	bx.material = car_mat
+	car_mm = MultiMesh.new()
+	car_mm.transform_format = MultiMesh.TRANSFORM_3D
+	car_mm.use_custom_data = true
+	car_mm.mesh = bx
+
+
+# Schilder an die Häuser, Scheinwerfer auf die Dächer, Autos in die Luft (eine Runde; die Rundenkopien teilen sich das)
+func _city_extras_fill(blds: Array) -> void:
+	if sign_mm == null:
+		return
+	var rng = RandomNumberGenerator.new()
+	rng.seed = 23
+	var pal = [Color(1.0, 0.15, 0.45), Color(0.1, 0.85, 1.0), Color(1.0, 0.62, 0.1), Color(1.0, 0.12, 0.12), Color(0.95, 0.3, 1.0), Color(0.3, 1.0, 0.6)]
+	if _noir():
+		pal = [OR, Color(0.9, 0.9, 0.92), Color(1.0, 0.5, 0.12)]
+	var sg = []
+	var sl = []
+	for b in blds:
+		var pos: Vector3 = b[0]
+		var w: float = b[1]
+		var H: float = b[3]
+		var top = H - 42.0
+		if rng.randf() < 0.55 and top > 14.0:
+			var sw = 2.2 + rng.randf() * 1.6
+			var sh = 8.0 + rng.randf() * 9.0
+			var sgn = signf(b[4] - pos.x)
+			var y = minf(2.0 + rng.randf() * 24.0, top - sh * 0.5 - 1.0)
+			var p = Vector3(pos.x + sgn * (w * 0.5 + sw * 0.5 + 0.15), y, pos.z + (rng.randf() - 0.5) * b[2] * 0.6)
+			var c: Color = pal[rng.randi() % pal.size()]
+			sg.append([Transform3D(Basis.from_scale(Vector3(sw, sh, 1.0)), p), Color(c.r, c.g, c.b, rng.randf())])
+		if top > 45.0 and rng.randf() < 0.22:
+			sl.append([Transform3D(Basis.IDENTITY, Vector3(pos.x, top, pos.z)), Color(0, 0, 0, rng.randf())])
+	sign_mm.instance_count = 0
+	sign_mm.instance_count = sg.size()
+	for i in range(sg.size()):
+		sign_mm.set_instance_transform(i, sg[i][0])
+		sign_mm.set_instance_custom_data(i, sg[i][1])
+	srch_mm.instance_count = 0
+	srch_mm.instance_count = sl.size()
+	for i in range(sl.size()):
+		srch_mm.set_instance_transform(i, sl[i][0])
+		srch_mm.set_instance_custom_data(i, sl[i][1])
+	var nc = 28
+	car_mm.instance_count = nc
+	# Autos und Lichtkegel bewegen sich im Shader: Sichtbarkeitsbox über die ganze Runde
+	car_mm.custom_aabb = AABB(Vector3(-120, -10, 0), Vector3(240, 90, 760))
+	srch_mm.custom_aabb = AABB(Vector3(-260, -60, 0), Vector3(520, 420, 760))
+	var rc = RandomNumberGenerator.new()
+	rc.seed = 31
+	for i in range(nc):
+		var side = -1.0 if i % 2 == 0 else 1.0
+		var x = side * (8.0 + rc.randf() * 70.0)
+		car_mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, Vector3(x, 14.0 + rc.randf() * 34.0, 20.0)))
+		car_mm.set_instance_custom_data(i, Color(1.0 if rc.randf() < 0.5 else 0.0, rc.randf(), rc.randf(), 0.0))
+
+
+# Regler aus dem Reiter „City“ auf Schilder, Scheinwerfer und Autos anwenden
+func _city_apply() -> void:
+	if sign_mat == null:
+		return
+	var C: Dictionary = fx.city
+	var on = float(fx.env.city) > 0.5
+	_sp(sign_mat, "ak", float(C.signs))
+	_sp(srch_mat, "sk", float(C.search))
+	_sp(car_mat, "ck", float(C.cars))
+	for i in range(city_xi.size()):
+		var xi: MultiMeshInstance3D = city_xi[i]
+		var k = [float(C.signs), float(C.search), float(C.cars)][i % 3]
+		xi.visible = on and k > 0.01
+
+
+func _holo_node(kind: String) -> Dictionary:
+	var h = {"kind": kind, "spot": -1.0e9}
+	var mat: ShaderMaterial
+	if kind == "dancer":
+		mat = _shader_mat(HOLO_CODE)
+		var n: Node3D = load("res://holo/dancer.glb").instantiate()
+		for mi in n.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).material_override = mat
+			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			(mi as MeshInstance3D).extra_cull_margin = 0.6
+		var aps = n.find_children("*", "AnimationPlayer", true, false)
+		if not aps.is_empty():
+			var ap: AnimationPlayer = aps[0]
+			var nm = "SambaDance" if ap.has_animation("SambaDance") else ap.get_animation_list()[0]
+			ap.get_animation(nm).loop_mode = Animation.LOOP_LINEAR
+			ap.play(nm)
+			h.ap = ap
+		h.n = n
+	else:
+		mat = _shader_mat(KOI_CODE)
+		var mi = MeshInstance3D.new()
+		mi.mesh = _koi_mesh()
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		h.n = mi
+	h.mat = mat
+	(h.n as Node3D).visible = false
+	city_root.add_child(h.n)
+	return h
+
+
+func _holos_make() -> void:
+	for kind in ["dancer", "dancer", "koi", "koi"]:
+		var h = _holo_node(kind)
+		_sp(h.mat, "sd", float(holos.size()) * 1.37)
+		holos.append(h)
+
+
+# Koi aus einem gebogenen Rumpf mit Schwanz-, Rücken- und Brustflossen (Länge 1, Kopf bei +z)
+var koi_m: ArrayMesh
+
+
+func _koi_mesh() -> ArrayMesh:
+	if koi_m != null:
+		return koi_m
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var NS = 14
+	var NA = 12
+	var rings = []
+	for i in range(NS + 1):
+		var u = float(i) / NS
+		var w = 0.12 * pow(sin(PI * (0.06 + 0.9 * u)), 0.75) * (1.0 - 0.55 * u) + 0.012
+		var z = 0.5 - u * 0.8
+		var ring = []
+		for a in range(NA + 1):
+			var an = TAU * a / NA
+			ring.append([Vector3(cos(an) * w, sin(an) * w * 0.85, z), Vector2(u, float(a) / NA)])
+		rings.append(ring)
+	for i in range(NS):
+		for a in range(NA):
+			var p0 = rings[i][a]
+			var p1 = rings[i + 1][a]
+			var p2 = rings[i + 1][a + 1]
+			var p3 = rings[i][a + 1]
+			for qv in [p0, p2, p1, p0, p3, p2]:
+				st.set_uv(qv[1])
+				st.add_vertex(qv[0])
+	var fins = [
+		[Vector3(0, 0, -0.27), Vector3(0, 0.19, -0.58), Vector3(0, 0, -0.44)],    # Schwanz oben
+		[Vector3(0, 0, -0.27), Vector3(0, 0, -0.44), Vector3(0, -0.19, -0.58)],   # Schwanz unten
+		[Vector3(0, 0.08, 0.16), Vector3(0, 0.16, 0.0), Vector3(0, 0.07, -0.12)],  # Rückenflosse
+		[Vector3(0.07, -0.04, 0.24), Vector3(0.22, -0.1, 0.1), Vector3(0.06, -0.05, 0.12)],
+		[Vector3(-0.07, -0.04, 0.24), Vector3(-0.06, -0.05, 0.12), Vector3(-0.22, -0.1, 0.1)]]
+	for fn in fins:
+		for v in fn:
+			st.set_uv(Vector2(0.5, 0.5))
+			st.add_vertex(v)
+	st.generate_normals()
+	koi_m = st.commit()
+	return koi_m
+
+
+# jedes Bild: Hologramme an die nächsten Standorte vor der Kamera setzen (2 Tänzerinnen, 2 Koi)
+func _city_live() -> void:
+	if holos.is_empty() or cam == null:
+		return
+	var C: Dictionary = fx.city
+	var city_on = float(fx.env.city) > 0.5
+	var hk = float(C.holo) if city_on else 0.0
+	var kk = float(C.koi) if city_on else 0.0
+	var hs = float(C.hsize)
+	var cz = cam.global_position.z
+	var base = floor((cz - 20.0) / T.LAP) * T.LAP
+	var cands = {"dancer": [], "koi": []}
+	for sp in HOLO_SPOTS:
+		for k in [-1.0, 0.0, 1.0]:
+			var zz: float = sp[0] + base + k * T.LAP
+			var d = zz - cz
+			if d > -80.0 and d < 520.0:
+				cands[sp[2]].append([d, zz, sp[1]])
+	for kd in cands:
+		cands[kd].sort_custom(_by_first)
+	var used = {"dancer": 0, "koi": 0}
+	var hue = float(C.hhue)
+	var c1 = _hs(Color(1.0, 0.3, 0.75), hue)
+	var c2 = _hs(Color(0.25, 0.85, 1.0), hue)
+	if _noir():
+		c1 = OR
+		c2 = Color(0.9, 0.9, 0.95)
+	var tt = Time.get_ticks_msec() / 1000.0
+	for h in holos:
+		var kind: String = h.kind
+		var lst: Array = cands[kind]
+		var i: int = used[kind]
+		used[kind] = i + 1
+		var vis = (hk if kind == "dancer" else kk) > 0.01 and i < lst.size()
+		var nd: Node3D = h.n
+		if nd.visible != vis:
+			nd.visible = vis
+		if h.has("ap") and (h.ap as AnimationPlayer).active != vis:
+			(h.ap as AnimationPlayer).active = vis
+		if not vis:
+			continue
+		var c: Array = lst[i]
+		var f = T.frame(c[1])
+		var mat: ShaderMaterial = h.mat
+		_sp(mat, "fl", float(C.hflick))
+		if kind == "dancer":
+			var sc = 27.0 * hs
+			if h.spot != c[1] or h.get("sc", 0.0) != sc:
+				h.spot = c[1]
+				h.sc = sc
+				var p: Vector3 = f.c + f.rr * (c[2] * (T.TW + 22.0 + 8.0 * hs)) + Vector3.UP * (-14.0)
+				var dir: Vector3 = (f.c - f.fw * 40.0 - p) * Vector3(1, 0, 1)
+				nd.global_transform = Transform3D(Basis.looking_at(-dir.normalized(), Vector3.UP).scaled(Vector3.ONE * sc), p)
+				_sp(mat, "by", p.y)
+				_sp(mat, "hh", DANCER_H * sc)
+			_sp(mat, "hk", hk)
+			_sp(mat, "c1", _v3(c1))
+			_sp(mat, "c2", _v3(c2))
+		else:
+			# Koi zieht weite Kreise über den Dächern neben der Strecke
+			var R = 16.0 * hs
+			var ctr: Vector3 = f.c + f.rr * (c[2] * (T.TW + 18.0 + R * 0.6)) + Vector3.UP * (26.0 + 6.0 * hs)
+			var a = tt * 0.28 + float(h.mat.get_shader_parameter("sd"))
+			var pos = ctr + Vector3(cos(a), 0.0, sin(a)) * R + Vector3.UP * sin(tt * 0.5 + a) * 2.0
+			var tg = Vector3(-sin(a), 0.12 * cos(tt * 0.5 + a), cos(a)).normalized()
+			var bx = Vector3.UP.cross(tg).normalized()
+			var by = tg.cross(bx).normalized()
+			nd.global_transform = Transform3D(Basis(bx, by, tg).rotated(tg, -0.25).scaled(Vector3.ONE * 21.0 * hs), pos)
+			_sp(mat, "hk", kk)
+			_sp(mat, "nr", 1.0 if _noir() else 0.0)
+			_sp(mat, "ec", _v3(c2))
 
 
 # ---------------------------------------------------------------- Gleiter
@@ -1915,8 +2504,17 @@ func _hud() -> void:
 	var b3 = _btn("MENU")
 	b3.pressed.connect(func(): get_tree().reload_current_scene())
 	bx.add_child(b3)
+	# Leistungsbericht in die Zwischenablage – zum Einfügen im Chat
+	var b4 = _btn("COPY PERFORMANCE REPORT")
+	b4.add_theme_font_size_override("font_size", 22)
+	b4.custom_minimum_size = Vector2(0, 64)
+	b4.pressed.connect(func():
+		DisplayServer.clipboard_set(_perf_text())
+		b4.text = "REPORT COPIED ✓")
+	bx.add_child(b4)
+	bx.offset_bottom = 470
 	hud.resb = bx
-	hud.resbtn = [b1, b2, b3]
+	hud.resbtn = [b1, b2, b3, b4]
 	# Ergebnistafel: alle vier Fahrer – erst Zeiten, dann abwechselnd ausgeteilter Schaden
 	var bd = VBoxContainer.new()
 	bd.anchor_left = 0.08
@@ -2334,6 +2932,32 @@ func _menu() -> void:
 				get_tree().reload_current_scene())
 		pr.add_child(b)
 		ui.pads.append(b)
+	# Bildrate anzeigen (mit Zeit für Grafikkarte/Prozessor) und auf 60 begrenzen (gleichmäßiger, Handy bleibt kühler)
+	var twin2 = HBoxContainer.new()
+	twin2.add_theme_constant_override("separation", 24)
+	sp.add_child(twin2)
+	ui.fpsb = []
+	ui.capb = []
+	for grp in [["FPS display", ["Off", "On"], "fps", ui.fpsb], ["Frame rate", ["Max", "60"], "cap", ui.capb]]:
+		var col = VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		twin2.add_child(col)
+		col.add_child(_lbl(grp[0], 32))
+		var rr = HBoxContainer.new()
+		rr.add_theme_constant_override("separation", 10)
+		col.add_child(rr)
+		for q in range(2):
+			var b = _btn(grp[1][q])
+			b.add_theme_font_size_override("font_size", 30)
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var ck: String = grp[2]
+			b.pressed.connect(func():
+				cfg[ck] = q
+				_save_cfg()
+				_apply_cfg()
+				_refresh_ui())
+			rr.add_child(b)
+			grp[3].append(b)
 	var back = _btn("Done", true)
 	back.pressed.connect(func(): _show_settings(false))
 	sp.add_child(back)
@@ -2439,7 +3063,7 @@ func _dot(r: int) -> ImageTexture:
 
 func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
-	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · private use only"
+	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Hologram dancer: Mixamo (Adobe) · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
 	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
 	ui.sl.res.text = "Resolution  %d %%" % int(round(float(cfg.res) * 100.0))
@@ -2454,6 +3078,13 @@ func _refresh_ui() -> void:
 		ui.gfx[q].add_theme_stylebox_override("normal", _style(Color(0.93, 0.41, 0.18) if on else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on else Color(1, 1, 1, 0.22)))
 		ui.gfx[q].add_theme_stylebox_override("pressed", ui.gfx[q].get_theme_stylebox("normal"))
 		ui.gfx[q].add_theme_stylebox_override("hover", ui.gfx[q].get_theme_stylebox("normal"))
+	for q in range(2):
+		for pair in [[ui.get("fpsb", []), "fps"], [ui.get("capb", []), "cap"]]:
+			if q < pair[0].size():
+				var on4 = int(cfg[pair[1]]) == q
+				var st4 = _style(Color(0.93, 0.41, 0.18) if on4 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on4 else Color(1, 1, 1, 0.22))
+				for k in ["normal", "pressed", "hover"]:
+					pair[0][q].add_theme_stylebox_override(k, st4)
 	for q in range(2):
 		var on3 = int(cfg.pads) == q
 		var st3 = _style(Color(0.93, 0.41, 0.18) if on3 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on3 else Color(1, 1, 1, 0.22))
@@ -5019,7 +5650,22 @@ func _board_update(dt: float) -> void:
 
 
 # ---------------------------------------------------------------- Leistungsmessung: Bildzeiten im Rennen, Ruckler mit Umständen
-var pf = {"n": 0, "sum": 0.0, "hist": [0, 0, 0, 0, 0], "sec": [], "acc": 0.0, "an": 0, "aw": 0.0, "sp": [], "ev": {}}
+var pf = {"n": 0, "sum": 0.0, "hist": [0, 0, 0, 0, 0], "sec": [], "acc": 0.0, "an": 0, "aw": 0.0, "sp": [], "ev": {},
+	"gs": 0.0, "cs": 0.0, "ps": 0.0, "ag": 0.0, "ac": 0.0, "ap": 0.0}
+var gpu_ms = 0.0   # Grafikkarte: Zeit fürs letzte Bild (ms)
+var cpu_ms = 0.0   # Prozessor: Spiel-Logik + Zeichenbefehle (ms)
+var fps_t = 0.0
+
+
+# Zeitmessung von Grafikkarte und Prozessor (zeigt, wer bremst)
+func _measure(delta: float) -> void:
+	var rid = get_viewport().get_viewport_rid()
+	gpu_ms = RenderingServer.viewport_get_measured_render_time_gpu(rid)
+	cpu_ms = Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0 + RenderingServer.viewport_get_measured_render_time_cpu(rid) + RenderingServer.get_frame_setup_time_cpu()
+	fps_t -= delta
+	if fps_t <= 0.0:
+		fps_t = 0.5
+		ui.fps.text = "%d fps · gpu %.1f · cpu %.1f ms" % [Engine.get_frames_per_second(), gpu_ms, cpu_ms]
 
 
 func _pev(k: String) -> void:
@@ -5069,11 +5715,18 @@ func _perf(delta: float) -> void:
 	pf.acc += delta
 	pf.an += 1
 	pf.aw = maxf(pf.aw, ms)
+	pf.gs += gpu_ms
+	pf.cs += cpu_ms
+	pf.ps += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	pf.ag += gpu_ms
+	pf.ac += cpu_ms
 	if pf.acc >= 1.0:
-		pf.sec.append("%5.1f  %3d fps  worst %3d ms  %s" % [race_t, int(round(pf.an / pf.acc)), int(pf.aw), _perf_ctx()])
+		pf.sec.append("%5.1f  %3d fps  worst %3d ms  gpu %4.1f  cpu %4.1f  %s" % [race_t, int(round(pf.an / pf.acc)), int(pf.aw), pf.ag / pf.an, pf.ac / pf.an, _perf_ctx()])
 		pf.acc = 0.0
 		pf.an = 0
 		pf.aw = 0.0
+		pf.ag = 0.0
+		pf.ac = 0.0
 	if ms > maxf(45.0, 2.0 * pf.sum / pf.n):
 		pf.sp.append([ms, "%5.1f  %3d ms  %s" % [race_t, int(ms), _perf_ctx()]])
 		if pf.sp.size() > 40:
@@ -5093,6 +5746,11 @@ func _perf_text() -> String:
 		var h: Array = pf.hist
 		t += "Frames %d · avg %.1f ms (%.0f fps)\n" % [pf.n, pf.sum / pf.n, 1000.0 / (pf.sum / pf.n)]
 		t += "Frame times: <18ms %d · 18-25 %d · 25-34 %d · 34-50 %d · >50 %d\n" % [h[0], h[1], h[2], h[3], h[4]]
+		t += "Average GPU %.1f ms · CPU %.1f ms (game logic %.1f ms) · refresh %d Hz · fps cap %d\n" % [pf.gs / pf.n, pf.cs / pf.n, pf.ps / pf.n,
+			maxi(0, int(DisplayServer.screen_get_refresh_rate())), Engine.max_fps]
+		var E: Dictionary = fx.env
+		var C: Dictionary = fx.city
+		t += "FX: wet %.2f · gloss %.2f · neon light %.2f · fog %.2f · lamps %.2f · holo %.2f · signs %.2f · haze %.2f\n" % [float(E.wet), float(E.gloss), float(E.nlight), float(E.fog), float(E.lamps), float(C.holo), float(C.signs), float(fx.haze.amp)]
 	t += "\nWorst hitches (time, ms, situation):\n"
 	var sp: Array = pf.sp.duplicate()
 	sp.sort_custom(func(a, c): return a[0] > c[0])
@@ -5223,7 +5881,7 @@ func _process(delta: float) -> void:
 	if flash_rect != null and flash_rect.visible and flash_rect.color.a <= 0.003:
 		flash_rect.visible = false   # unsichtbare Vollbild-Fläche nicht jedes Bild zeichnen
 	t_state += dt
-	ui.fps.text = "%d fps" % Engine.get_frames_per_second()
+	_measure(delta)
 	_duck(delta / maxf(0.01, Engine.time_scale))
 	_perf(delta)
 	var g: Dictionary = ships[0]
@@ -5293,9 +5951,7 @@ func _process(delta: float) -> void:
 	elif state == "count":
 		var c = 3 - int(floor(t_state))
 		if c != last_c:
-			if last_c == 99:
-				_snd("count")
-				_snd("start")
+			_start_step(c, last_c == 99)
 			last_c = c
 		hud.mid.text = str(c) if c > 0 else "GO"
 		if c <= 0:
@@ -5507,7 +6163,7 @@ func _lab_open() -> void:
 	vb.add_theme_constant_override("separation", 12)
 	root.add_child(vb)
 	var grid = GridContainer.new()
-	grid.columns = 6
+	grid.columns = 7
 	grid.add_theme_constant_override("h_separation", 8)
 	grid.add_theme_constant_override("v_separation", 8)
 	vb.add_child(grid)
@@ -5647,6 +6303,8 @@ func _lab_copy() -> void:
 func _lab_grp(t: String) -> String:
 	if t in ["shield", "orbs", "haze"]:
 		return "near"
+	if t == "city":
+		return "city"
 	if t in ["ship", "pillar"]:
 		return t
 	return "fx"
@@ -5688,9 +6346,9 @@ func _lab_style() -> void:
 	if lab.has("sb"):
 		for sk in ["normal", "pressed", "hover", "focus"]:
 			lab.sb.add_theme_stylebox_override(sk, ss)
-	lab.fire.disabled = lab.tab in ["env", "pillar"]
+	lab.fire.disabled = lab.tab in ["env", "pillar", "city"]
 	lab.fire.modulate.a = 0.35 if lab.fire.disabled else 1.0
-	lab.fire.text = "BOOST" if lab.tab in ["haze", "ship"] else "FIRE"
+	lab.fire.text = "BOOST" if lab.tab in ["haze", "ship"] else ("PLAY" if lab.tab == "sound" else "FIRE")
 
 
 func _lab_val(it: Array, v: float) -> String:
@@ -5706,7 +6364,7 @@ func _lab_val(it: Array, v: float) -> String:
 
 func _lab_tab(t: String) -> void:
 	if lab.has("tab") and _lab_grp(lab.tab) != _lab_grp(t):
-		var V = {"near": [0.35, 0.22, 5.5], "ship": [0.55, 0.2, 6.0], "pillar": [0.45, 0.12, 6.5]}.get(_lab_grp(t), [0.35, 0.22, 12.0])
+		var V = {"near": [0.35, 0.22, 5.5], "ship": [0.55, 0.2, 6.0], "pillar": [0.45, 0.12, 6.5], "city": [0.25, 0.08, 80.0]}.get(_lab_grp(t), [0.35, 0.22, 12.0])
 		lab.yaw = V[0]
 		lab.pit = V[1]
 		lab.dist = V[2]
@@ -5761,6 +6419,13 @@ func _lab_tab(t: String) -> void:
 				_env_apply()
 			if t == "pillar":
 				_pillar_apply()
+			if t == "city":
+				if key == "mega":
+					_city_fill()
+				_city_apply()
+			if t == "sound":
+				_start_bus_apply()
+				lab.sndre = 0.45   # kurz nach dem Loslassen probehören
 		hs.value_changed.connect(upd)
 		lb.text = "%s   %s" % [it[1], _lab_val(it, hs.value)]
 		# − Regler +  (kleine Schritte; gedrückt halten wiederholt)
@@ -5799,9 +6464,11 @@ func _lab_reset() -> void:
 	var t: String = lab.tab
 	for it in FXS[t]:
 		fx[t][it[0]] = it[4]
-	if t == "env":
+	if t == "env" or t == "city":
 		_city_fill()
 		_env_apply()
+	if t == "sound":
+		_start_bus_apply()
 	_pillar_apply()
 	lab.sv = 0.1
 	_lab_tab(t)
@@ -5842,6 +6509,8 @@ func _lab_fire() -> void:
 		"haze", "ship":
 			g.boost = 2.5
 			_snd("boost")
+		"sound":
+			_start_play(false)
 
 
 # Mittelpunkt des Reglerknopfs (x, Bildschirm)
@@ -5929,11 +6598,11 @@ func _lab_input(ev: InputEvent) -> void:
 
 
 func _lab_step(dt: float) -> void:
-	if lab.auto and not lab.tab in ["env", "pillar"]:
+	if lab.auto and not lab.tab in ["env", "pillar", "city"]:
 		lab.at -= dt
 		if lab.at <= 0.0:
 			_lab_fire()
-			lab.at = {"ship": 4.0, "quake": 4.0, "wall": 5.3 * float(fx.wall.dur) + 0.4, "mine": 3.2, "shield": 6.3, "orbs": 10.3, "haze": 3.0}.get(lab.tab, 3.0)
+			lab.at = {"ship": 4.0, "quake": 4.0, "wall": 5.3 * float(fx.wall.dur) + 0.4, "mine": 3.2, "shield": 6.3, "orbs": 10.3, "haze": 3.0, "sound": 7.0}.get(lab.tab, 3.0)
 	var g: Dictionary = ships[0]
 	g.shield = maxf(0.0, g.shield - dt)
 	g.boost = maxf(0.0, g.boost - dt * 0.9)
@@ -5949,6 +6618,10 @@ func _lab_step(dt: float) -> void:
 		lab.sv -= dt
 		if lab.sv <= 0.0:
 			_fx_save()
+	if lab.get("sndre", 0.0) > 0.0 and lab.rep.is_empty():
+		lab.sndre -= dt
+		if lab.sndre <= 0.0:
+			_start_play(true)
 	var grp = _lab_grp(lab.tab)
 	if grp == "ship":
 		var nn = maxi(1, int(ceil(dt / 0.0125)))
@@ -5966,7 +6639,7 @@ func _lab_step(dt: float) -> void:
 	_tunnel(dt)
 	_pose_all(dt)
 	# Kamera kreist um die Teststelle bzw. fliegt im Reiter „Ship“ mit dem Gleiter mit
-	var tzz = {"near": LZ + 0.3, "ship": g.z + 0.3, "pillar": LZ + 5.0}.get(grp, LZ + 7.0)
+	var tzz = {"near": LZ + 0.3, "ship": g.z + 0.3, "pillar": LZ + 5.0, "city": LZ + 2.0}.get(grp, LZ + 7.0)
 	var tll = g.lat if grp == "ship" else 0.0
 	if grp == "ship" and absf(lab.get("tz", tzz) - tzz) < 3.0:
 		lab.tz = tzz
@@ -5974,7 +6647,11 @@ func _lab_step(dt: float) -> void:
 		lab.tz = lerpf(lab.get("tz", LZ + 7.0), tzz, 1.0 - exp(-dt / 0.3))
 	lab.tl = lerpf(lab.get("tl", 0.0), tll, 1.0 - exp(-dt / 0.15))
 	var f = T.frame(lab.tz)
-	var tg: Vector3 = f.c + f.rr * lab.tl + f.uu * {"near": 0.4, "ship": 0.4, "pillar": 1.1}.get(grp, 0.8)
+	var tg: Vector3 = f.c + f.rr * lab.tl + f.uu * {"near": 0.4, "ship": 0.4, "pillar": 1.1, "city": 3.0}.get(grp, 0.8)
+	if grp == "city" and not holos.is_empty() and (holos[0].n as Node3D).visible:
+		# Reiter „City“: um die Hologramm-Tänzerin kreisen
+		var hn: Node3D = holos[0].n
+		tg = hn.global_position + Vector3.UP * DANCER_H * float(holos[0].get("sc", 27.0)) * 0.62
 	var cp = cos(lab.pit)
 	var off: Vector3 = (-f.fw * cos(lab.yaw) + f.rr * sin(lab.yaw)) * cp + Vector3.UP * sin(lab.pit)
 	var ro: Vector3 = tg + off * lab.dist
@@ -5989,7 +6666,8 @@ func _lab_step(dt: float) -> void:
 	cam.look_at(tg, Vector3.UP)
 	cam.fov = 62.0
 	# Teststelle in die obere Bildhälfte (unten liegt das Regelfeld): Kamera etwas nach unten neigen
-	cam.rotate_object_local(Vector3(1, 0, 0), -0.29)
+	# – im Reiter „City“ dagegen nach oben, zu den Hologrammen und Hochhäusern
+	cam.rotate_object_local(Vector3(1, 0, 0), 0.12 if grp == "city" else -0.29)
 	_sound_update(dt)
 	_post_update(dt)
 	_shot()
@@ -6127,6 +6805,7 @@ func _tunnel(dt: float) -> void:
 	moon.light_energy = lerpf(0.45 * float(fx.env.moon) * _newr("moon", 1.0), 0.0, tun_k)
 	_lamps_cull()
 	_neon_lights()
+	_city_live()
 	# Explosions-Helligkeitsstoß abklingen lassen
 	expo_v = maxf(0.0, expo_v - dt * 2.2)
 	if wenv.tonemap_exposure != 1.0 + expo_v:
