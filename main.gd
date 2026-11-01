@@ -1902,7 +1902,7 @@ func _rp_seek(t: float) -> void:
 	rp.dirty = true   # Effekte passend zur neuen Zeit neu aufbauen
 
 
-const FX_DUR = {"boom": 7.5, "gb": 2.0, "zap": 2.6}
+const FX_DUR = {"boom": 4.0, "gb": 2.0, "zap": 2.6}
 
 
 # alle Effekte so aufbauen, wie sie zur Replay-Zeit rp.t aussehen (Explosionen mittendrin, Rauch, schwarze Löcher …)
@@ -2280,7 +2280,9 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 	p.position = pos
 	add_child(p)
 	if fx_age > 0.0:
-		p.preprocess = fx_age
+		# Vorlauf beim Spulen: begrenzt und in groben Schritten, damit der Grafikchip nicht überlastet
+		p.fixed_fps = 12
+		p.preprocess = minf(fx_age, 3.0)
 	p.emitting = true
 	get_tree().create_timer(life + 0.6 - fx_age).timeout.connect(p.queue_free)
 
@@ -4140,7 +4142,7 @@ func _process(delta: float) -> void:
 			var hold = rp.get("paused", false) or rp.get("scrub", false)
 			_replay(0.0 if hold else dt)
 			if not rp.is_empty():
-				if rp.get("dirty", false) and Time.get_ticks_msec() - rp.get("rbt", 0) > 70:
+				if rp.get("dirty", false) and Time.get_ticks_msec() - rp.get("rbt", 0) > 250:
 					_rp_rebuild_fx()
 				_rp_freeze(hold)
 		if state == "replay":
