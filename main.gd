@@ -4,7 +4,8 @@ extends Node3D
 
 # gespeichertes Replay, das nach dem Neuladen der Szene abgespielt werden soll (bleibt über reload_current_scene erhalten)
 static var pending_rp = ""
-static var restart = false   # „Race again“: nach dem Neuladen direkt losfahren
+static var restart = false
+static var bench_req = false   # Leistungstest: nach dem Neuladen direkt starten   # „Race again“: nach dem Neuladen direkt losfahren
 
 const T = preload("res://track.gd")
 # Gleiter: Datei, Name, Nase zeigt im Modell nach hinten (wird umgedreht), Herkunft
@@ -91,6 +92,8 @@ func _ready() -> void:
 	_fx_load()
 	if OS.get_cmdline_user_args().has("--noir"):
 		cfg.look = 1
+	if OS.get_cmdline_user_args().has("--bench"):
+		bench_req = true
 	if _noir():
 		CY = Color(0.9, 0.92, 0.95)
 		MG = OR
@@ -431,6 +434,7 @@ var scr_v = 0.0
 
 # ---------------------------------------------------------------- Bildfilter über der 3D-Szene (unter der Anzeige)
 var post: ShaderMaterial
+var post_rect: ColorRect
 
 
 func _post() -> void:
@@ -510,6 +514,7 @@ void fragment(){
 	COLOR=vec4(col,1.);
 }""")
 	r.material = post
+	post_rect = r
 	cl.add_child(r)
 
 
@@ -3046,6 +3051,13 @@ func _menu() -> void:
 				_refresh_ui())
 			rr.add_child(b)
 			grp[3].append(b)
+	# Leistungstest: misst 30 Sekunden lang, was auf diesem Handy wie viel Rechenzeit kostet
+	var bbn = _btn("Performance test (30 s)")
+	bbn.add_theme_font_size_override("font_size", 30)
+	bbn.pressed.connect(func():
+		bench_req = true
+		get_tree().reload_current_scene())
+	sp.add_child(bbn)
 	var back = _btn("Done", true)
 	back.pressed.connect(func(): _show_settings(false))
 	sp.add_child(back)
@@ -5955,6 +5967,137 @@ func _notification(what: int) -> void:
 			get_tree().reload_current_scene()
 
 
+# ---------------------------------------------------------------- Leistungstest: feste Szene, jeder Effekt einmal aus
+# Gleiche Stelle, gleiche Kamera – nur ein Schalter ändert sich je Abschnitt. So sieht man genau, was die Grafikkarte kostet.
+var bench = {}
+const BENCH = [["base", "Everything on (your settings)"], ["msaa", "Edge smoothing (MSAA) off"], ["res75", "Resolution 75 %"], ["fsr", "Resolution 75 % + FSR sharpening"],
+	["shadow", "Moon shadows off"], ["glow", "Glow off"], ["post", "Screen filter off"], ["haze", "Heat shimmer off"], ["nlight", "Neon area lights off"],
+	["lamps", "Track lamps off"], ["jets", "Plasma jets off"], ["city", "Holograms/signs/cars off"], ["sky", "Sky shader off"], ["wet", "Wet road off/on"], ["base2", "Everything on again"]]
+
+
+func _bench_begin() -> void:
+	_start()
+	state = "bench"
+	hud.mid.text = ""
+	bench = {"i": -1, "t": 0.0, "res": [], "fx": JSON.parse_string(JSON.stringify(fx)), "nosh": false}
+	_bench_next()
+
+
+func _bench_undo() -> void:
+	fx = JSON.parse_string(JSON.stringify(bench.fx))
+	bench.nosh = false
+	_apply_cfg()
+	_env_apply()
+	_city_apply()
+	get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	wenv.glow_enabled = true
+	wenv.background_mode = Environment.BG_SKY
+	if post_rect != null:
+		post_rect.visible = true
+
+
+func _bench_next() -> void:
+	_bench_undo()
+	bench.i += 1
+	bench.t = 0.0
+	bench.g = 0.0
+	bench.f = 0.0
+	bench.n = 0
+	if bench.i >= BENCH.size():
+		_bench_end()
+		return
+	var k: String = BENCH[bench.i][0]
+	var vp = get_viewport()
+	match k:
+		"msaa":
+			vp.msaa_3d = Viewport.MSAA_DISABLED
+		"res75":
+			vp.scaling_3d_scale = vp.scaling_3d_scale * 0.75
+		"fsr":
+			vp.scaling_3d_scale = vp.scaling_3d_scale * 0.75
+			vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
+		"shadow":
+			bench.nosh = true
+		"glow":
+			wenv.glow_enabled = false
+		"post":
+			post_rect.visible = false
+		"haze":
+			fx.haze.amp = 0.0
+		"nlight":
+			fx.env.nlight = 0.0
+		"lamps":
+			fx.env.lamps = 0.0
+			for b in lights_nodes:
+				b.visible = false
+		"jets":
+			fx.haze.jglow = 0.0
+		"city":
+			for c in ["holo", "koi", "signs", "search", "cars"]:
+				fx.city[c] = 0.0
+			_city_apply()
+		"sky":
+			wenv.background_mode = Environment.BG_COLOR
+			wenv.background_color = Color(0.01, 0.01, 0.03)
+		"wet":
+			fx.env.wet = 0.0 if float(fx.env.wet) > 0.01 else 1.0
+			_wet_apply()
+	hud.mid.add_theme_font_size_override("font_size", 40)
+	hud.mid.text = "PERFORMANCE TEST %d/%d\n%s" % [bench.i + 1, BENCH.size(), BENCH[bench.i][1]]
+
+
+func _bench_step(dt: float) -> void:
+	# feste Szene: offenes Stück mit Stadt, Hologramm und drei Gegnern vor dir
+	var g: Dictionary = ships[0]
+	g.z = 300.0
+	g.lat = 0.3
+	g.spd = base_spd
+	g.boost = 0.0
+	for i in range(1, ships.size()):
+		var o: Dictionary = ships[i]
+		o.z = g.z + 5.0 + i * 4.0
+		o.lat = [-1.0, 0.9, -0.2][i - 1]
+		o.spd = base_spd
+		o.boost = 0.5 if i == 2 else 0.0
+		(o.node as Node3D).visible = true
+	_lap_pos(g.z)
+	_tunnel(dt)
+	_pose_all(dt)
+	_camera(dt)
+	_post_update(dt)
+	_resb_arm(dt)
+	if bench.i < 0 or bench.i >= BENCH.size():
+		return
+	bench.t += dt
+	if bench.t > 0.8:
+		bench.g += gpu_ms
+		bench.f += get_process_delta_time() * 1000.0
+		bench.n += 1
+	if bench.t > 2.8:
+		bench.res.append([BENCH[bench.i][1], bench.g / maxf(1, bench.n), bench.f / maxf(1, bench.n)])
+		_bench_next()
+
+
+func _bench_end() -> void:
+	var t = "AntiGrav 3D performance test\n"
+	t += "Device: %s · %s · Godot %s\n" % [OS.get_model_name(), RenderingServer.get_video_adapter_name(), Engine.get_version_info().string]
+	t += "Settings: gfx %s · res %d %% · 3D scale %.2f · fps cap %s · refresh %d Hz\n\n" % [["Low", "Medium", "High"][int(cfg.gfx)], int(float(cfg.res) * 100),
+		get_viewport().scaling_3d_scale, "60" if int(cfg.cap) == 1 else "max", maxi(0, int(DisplayServer.screen_get_refresh_rate()))]
+	t += "GPU ms · frame ms · test\n"
+	var b0 = bench.res[0][1] if not bench.res.is_empty() else 0.0
+	for r in bench.res:
+		t += "%5.1f · %5.1f · %s  (%+.1f)\n" % [r[1], r[2], r[0], r[1] - b0]
+	DisplayServer.clipboard_set(t)
+	hud.mid.add_theme_font_size_override("font_size", 22)
+	hud.mid.text = "Performance test done – result copied.\nPaste it in the chat.\n\n" + t
+	_show_resb()
+	if OS.get_cmdline_user_args().has("--bench"):
+		print(t)
+		await get_tree().create_timer(0.5).timeout
+		get_viewport().get_texture().get_image().save_png("user://bench.png")
+		get_tree().quit()
+
+
 # Rundenkopien (hinter/unter/vor dir) zur Stelle z schieben – nur wenn sich die Runde ändert
 func _lap_pos(z: float) -> void:
 	var l0 = int(floor((z - 20.0) / T.LAP))
@@ -5975,6 +6118,12 @@ func _process(delta: float) -> void:
 	var g: Dictionary = ships[0]
 	if warm_t >= 0.0:
 		_warm_step(delta)
+	if state == "menu" and bench_req and warm_t < 0.0:
+		bench_req = false
+		_bench_begin()
+	if state == "bench":
+		_bench_step(dt)
+		return
 	if state == "menu" and restart and warm_t < 0.0 and rpf.is_empty():
 		restart = false
 		_start()
@@ -6900,7 +7049,7 @@ func _tunnel(dt: float) -> void:
 		wenv.tonemap_exposure = 1.0 + expo_v
 	# im Tunnel sieht man den Mond nicht: Schattenberechnung sparen
 	# (nur bei Änderung setzen – jedes Setzen ordnet die Schatten neu zu)
-	var sh_on = int(cfg.gfx) >= 1 and tun_k < 0.6 and float(fx.env.moon) > 0.01
+	var sh_on = int(cfg.gfx) >= 1 and tun_k < 0.6 and float(fx.env.moon) > 0.01 and not bench.get("nosh", false)
 	if moon.shadow_enabled != sh_on:
 		moon.shadow_enabled = sh_on
 	if tun_l.is_empty():
