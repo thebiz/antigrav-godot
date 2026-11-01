@@ -2908,7 +2908,10 @@ func _weapons(dt: float, racing: bool) -> void:
 					o.slow = 0.35
 				_dmg(o, 0.2, m.get("own", 0), "mine")
 				boom = true
-		if boom or m.t > 40.0:
+		# Quake-Welle räumt Minen ab (egal von wem), Minen verschwinden nach 25 s von selbst
+		if not boom and quake != null and absf(m.z - quake.z) < 2.6:
+			boom = true
+		if boom or m.t > 25.0:
 			if boom:
 				_explode(m.z, m.lat)
 			m.n.queue_free()
