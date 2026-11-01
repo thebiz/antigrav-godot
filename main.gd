@@ -4597,9 +4597,29 @@ func _lab_open() -> void:
 	var sc = ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	sc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+	sc.mouse_filter = Control.MOUSE_FILTER_IGNORE   # Wischen in der Liste übernimmt _lab_input
 	vb.add_child(sc)
+	# breite Scrollleiste rechts, bequem mit dem Daumen zu schieben
+	var vsb: VScrollBar = sc.get_v_scroll_bar()
+	vsb.custom_minimum_size = Vector2(46, 0)
+	var trk = StyleBoxFlat.new()
+	trk.bg_color = Color(1, 1, 1, 0.08)
+	trk.set_corner_radius_all(14)
+	trk.content_margin_left = 6
+	trk.content_margin_right = 6
+	vsb.add_theme_stylebox_override("scroll", trk)
+	vsb.add_theme_stylebox_override("scroll_focus", trk)
+	for sk in ["grabber", "grabber_highlight", "grabber_pressed"]:
+		var gb = StyleBoxFlat.new()
+		gb.bg_color = Color(0.93, 0.41, 0.18, 0.85 if sk == "grabber" else 1.0)
+		gb.set_corner_radius_all(14)
+		gb.content_margin_left = 16
+		gb.content_margin_right = 16
+		vsb.add_theme_stylebox_override(sk, gb)
 	var lst = VBoxContainer.new()
 	lst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lst.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lst.add_theme_constant_override("separation", 2)
 	sc.add_child(lst)
 	lab.lst = lst
@@ -4613,6 +4633,14 @@ func _lab_open() -> void:
 	br.add_theme_font_size_override("font_size", 30)
 	br.pressed.connect(_lab_reset)
 	row2.add_child(br)
+	var bc = _btn("Copy settings")
+	bc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bc.size_flags_stretch_ratio = 1.5
+	bc.custom_minimum_size = Vector2(0, 84)
+	bc.add_theme_font_size_override("font_size", 28)
+	bc.pressed.connect(_lab_copy)
+	row2.add_child(bc)
+	lab.cb = bc
 	var bb = _btn("Done", true)
 	bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bb.custom_minimum_size = Vector2(0, 84)
@@ -4620,6 +4648,24 @@ func _lab_open() -> void:
 	bb.pressed.connect(_lab_close)
 	row2.add_child(bb)
 	_lab_tab("boom")
+
+
+# alle Werte als Text in die Zwischenablage – zum Einfügen im Chat, damit sie fest ins Spiel kommen
+func _lab_copy() -> void:
+	_fx_save()
+	var ch = {}
+	for gk in FXS:
+		for it in FXS[gk]:
+			var v = float(fx[gk][it[0]])
+			if absf(v - float(it[4])) > 0.0001:
+				if not ch.has(gk):
+					ch[gk] = {}
+				ch[gk][it[0]] = snappedf(v, 0.01)
+	DisplayServer.clipboard_set("ANTIGRAV FX " + JSON.stringify(ch))
+	lab.cb.text = "Copied ✓"
+	get_tree().create_timer(2.0).timeout.connect(func():
+		if is_instance_valid(lab.get("cb")):
+			lab.cb.text = "Copy settings")
 
 
 func _lab_close() -> void:
@@ -4655,6 +4701,8 @@ func _lab_val(it: Array, v: float) -> String:
 
 func _lab_tab(t: String) -> void:
 	lab.tab = t
+	lab.sls = []
+	lab.grab = {}
 	for c in lab.lst.get_children():
 		c.queue_free()
 	for it in FXS[t]:
@@ -4678,6 +4726,8 @@ func _lab_tab(t: String) -> void:
 		tsb.content_margin_bottom = 6
 		tsb.set_corner_radius_all(6)
 		hs.add_theme_stylebox_override("slider", tsb)
+		hs.mouse_filter = Control.MOUSE_FILTER_IGNORE   # nur der Knopf selbst lässt sich ziehen (siehe _lab_input)
+		lab.sls.append(hs)
 		var upd = func(v: float):
 			fx[t][key] = v
 			lb.text = "%s   %s" % [it[1], _lab_val(it, v)]
@@ -4731,7 +4781,56 @@ func _lab_fire() -> void:
 			_fire()
 
 
+# Mittelpunkt des Reglerknopfs (x, Bildschirm)
+func _knob_x(hs: HSlider) -> float:
+	var r = hs.get_global_rect()
+	var gw = 40.0
+	var u = (hs.value - hs.min_value) / maxf(0.0001, hs.max_value - hs.min_value)
+	return r.position.x + gw * 0.5 + u * (r.size.x - gw)
+
+
+func _lab_list(ev: InputEvent) -> bool:
+	var sr: Rect2 = lab.sc.get_global_rect()
+	var vsb: VScrollBar = lab.sc.get_v_scroll_bar()
+	if ev is InputEventScreenTouch:
+		if ev.pressed:
+			if not sr.has_point(ev.position) or (vsb.visible and vsb.get_global_rect().grow(6).has_point(ev.position)):
+				return false
+			# Knopf getroffen? Dann wird nur dieser Regler gezogen, sonst wird gescrollt
+			for hs in lab.sls:
+				var r: Rect2 = hs.get_global_rect().grow_individual(0, 14, 0, 14)
+				var kx = _knob_x(hs)
+				if r.has_point(ev.position) and absf(ev.position.x - kx) < 48.0:
+					lab.grab[ev.index] = {"hs": hs, "off": kx - ev.position.x}
+					hs.add_theme_icon_override("grabber", _dot(52))
+					return true
+			lab.grab[ev.index] = {"scroll": true, "sy": float(lab.sc.scroll_vertical)}
+			return true
+		elif lab.grab.has(ev.index):
+			var gd = lab.grab[ev.index]
+			if gd.has("hs") and is_instance_valid(gd.hs):
+				gd.hs.add_theme_icon_override("grabber", _dot(40))
+			lab.grab.erase(ev.index)
+			return true
+	elif ev is InputEventScreenDrag and lab.grab.has(ev.index):
+		var gd = lab.grab[ev.index]
+		if gd.has("hs"):
+			var hs: HSlider = gd.hs
+			if is_instance_valid(hs):
+				var r = hs.get_global_rect()
+				var u = clampf((ev.position.x + gd.off - r.position.x - 20.0) / maxf(1.0, r.size.x - 40.0), 0.0, 1.0)
+				hs.value = hs.min_value + u * (hs.max_value - hs.min_value)
+		else:
+			gd.sy -= ev.relative.y
+			gd.sy = clampf(gd.sy, 0.0, maxf(0.0, lab.lst.size.y - sr.size.y))
+			lab.sc.scroll_vertical = int(gd.sy)
+		return true
+	return false
+
+
 func _lab_input(ev: InputEvent) -> void:
+	if _lab_list(ev):
+		return
 	var top = get_viewport().get_visible_rect().size.y * 0.5
 	if ev is InputEventScreenTouch:
 		if ev.pressed and ev.position.y < top:
