@@ -1091,7 +1091,7 @@ func _spawn_ships() -> void:
 		var s = {"z": starts[i][0], "lat": starts[i][1], "psi": 0.0, "vpsi": 0.0, "u": 0.0, "spd": 0.0, "boost": 0.0, "slow": 1.0,
 			"h": 0.0, "vy": 0.0, "air": false, "padK": -1, "hitT": -9.0, "sk": (1.0 + (i - 1) * 0.035) * float(cfg.ai) if i > 0 else 1.0, "sk0": 0.0, "lane": randf_range(-0.7, 0.7), "tl": 0.0, "wT": 0.0, "orbs": 0.0,
 			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0,
-			"en": 1.0, "out": false, "wpn": "", "wpK": -1, "shield": 0.0, "auto": 0.0, "turbo": 0.0, "slowT": 0.0, "enL": 0, "idx": i}
+			"en": 1.0, "out": false, "dealt": 0.0, "outT": 0.0, "wpn": "", "wpK": -1, "shield": 0.0, "auto": 0.0, "turbo": 0.0, "slowT": 0.0, "enL": 0, "idx": i}
 		s.sk0 = s.sk
 		s.lane = s.lat
 		s.tl = s.lat
@@ -1322,6 +1322,14 @@ func _hud() -> void:
 	fsb.set_corner_radius_all(95)
 	hud.fire.add_theme_stylebox_override("normal", fsb)
 	hud.fire_sb = fsb
+	# dunkler Schleier hinter Ergebnis und Tafel
+	var rdim = ColorRect.new()
+	rdim.color = Color(0, 0, 0, 0.6)
+	rdim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rdim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rdim.visible = false
+	cl.add_child(rdim)
+	hud.rdim = rdim
 	hud.res = mk.call(34, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.res.anchor_right = 1.0
 	hud.res.anchor_top = 0.36
@@ -1330,12 +1338,12 @@ func _hud() -> void:
 	var bx = VBoxContainer.new()
 	bx.anchor_left = 0.5
 	bx.anchor_right = 0.5
-	bx.anchor_top = 0.5
-	bx.anchor_bottom = 0.5
+	bx.anchor_top = 0.66
+	bx.anchor_bottom = 0.66
 	bx.offset_left = -230
 	bx.offset_right = 230
 	bx.offset_top = 0
-	bx.offset_bottom = 360
+	bx.offset_bottom = 260
 	bx.add_theme_constant_override("separation", 22)
 	bx.visible = false
 	cl.add_child(bx)
@@ -1345,14 +1353,34 @@ func _hud() -> void:
 	var b2 = _btn("RACE AGAIN")
 	b2.pressed.connect(func(): get_tree().reload_current_scene())
 	bx.add_child(b2)
-	var b3 = _btn("COPY PERFORMANCE DATA")
-	b3.add_theme_font_size_override("font_size", 26)
-	b3.custom_minimum_size = Vector2(0, 80)
-	b3.pressed.connect(func():
-		DisplayServer.clipboard_set(_perf_text())
-		b3.text = "COPIED ✓")
-	bx.add_child(b3)
 	hud.resb = bx
+	# Ergebnistafel: alle vier Fahrer – erst Zeiten, dann abwechselnd ausgeteilter Schaden
+	var bd = VBoxContainer.new()
+	bd.anchor_left = 0.08
+	bd.anchor_right = 0.92
+	bd.anchor_top = 0.43
+	bd.anchor_bottom = 0.43
+	bd.add_theme_constant_override("separation", 8)
+	bd.visible = false
+	cl.add_child(bd)
+	hud.board = bd
+	var bt = mk.call(24, HORIZONTAL_ALIGNMENT_CENTER)
+	bt.reparent(bd)
+	bt.modulate = Color(1, 0.75, 0.4)
+	hud.boardt = bt
+	hud.rows = []
+	for i in range(4):
+		var row = HBoxContainer.new()
+		bd.add_child(row)
+		var cols = []
+		for c in range(3):
+			var l = mk.call(32, [HORIZONTAL_ALIGNMENT_LEFT, HORIZONTAL_ALIGNMENT_LEFT, HORIZONTAL_ALIGNMENT_RIGHT][c])
+			l.reparent(row)
+			l.custom_minimum_size = Vector2([90, 0, 0][c], 0)
+			if c > 0:
+				l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			cols.append(l)
+		hud.rows.append(cols)
 	var rb = _btn("EXIT REPLAY")
 	rb.anchor_left = 0.5
 	rb.anchor_right = 0.5
@@ -1633,6 +1661,7 @@ func _menu() -> void:
 	ui.fps.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	ui.fps.position = Vector2(24, 24)
 	ui.fps.modulate = Color(1, 1, 1, 0.55)
+	ui.fps.visible = false
 	fl.add_child(ui.fps)
 	hud.layer.visible = false
 	_refresh_ui()
@@ -2341,12 +2370,15 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "") -> void:
 		return
 	var before: float = o.en
 	o.en = maxf(0.0, o.en - a)
+	if src >= 0 and src < ships.size() and src != o.idx:
+		ships[src].dealt += before - o.en
 	# wer austeilt, heilt sich: abgezogene Energie wird dir gutgeschrieben
 	if src == 0 and o.idx != 0:
 		ships[0].en = minf(1.0, ships[0].en + (before - o.en))
 	var nm = NAMES[o.idx]
 	if o.en <= 0.0:
 		o.out = true
+		o.outT = race_t
 		_explode(o.z, o.lat, true)
 		(o.node as Node3D).visible = false
 		if (o.node as Node3D).has_meta("eng"):
@@ -3020,6 +3052,8 @@ func _replay_start() -> void:
 	hud.rpx.visible = true
 	hud.camrow.visible = true
 	hud.rpsave.visible = rpf.is_empty()
+	hud.board.visible = false
+	hud.rdim.visible = false
 	hud.vxb.visible = false   # Video-Export vorerst aus (zu langsam); Baustein bleibt für später im Code
 	hud.rpsave.text = "SAVE REPLAY"
 	hud.rpsave.disabled = false
@@ -3268,7 +3302,6 @@ func _vx_finish() -> void:
 		RenderingServer.frame_post_draw.disconnect(_vx_capture)
 	Engine.time_scale = 1.0
 	AudioServer.set_bus_mute(0, false)
-	ui.fps.visible = true
 	hud.layer.visible = true
 	var uri = str(vx.p.finish())
 	vx.uri = uri
@@ -3604,6 +3637,56 @@ func _mine_warn(dt: float, racing: bool) -> void:
 		mine_bt = lerpf(0.09, 0.5, k)
 
 
+# Ergebnistafel nach dem Rennen
+var board_t = 0.0
+
+
+func _board_update(dt: float) -> void:
+	var show = state == "done" and hud.resb.visible
+	hud.board.visible = show
+	hud.rdim.visible = show
+	hud.ring.visible = not show
+	if show:
+		hud.fire.visible = false
+	if not show:
+		board_t = 0.0
+		return
+	board_t += dt
+	var dmg_mode = fmod(board_t, 9.0) > 5.0
+	var list = ships.duplicate()
+	if dmg_mode:
+		hud.boardt.text = "DAMAGE DEALT"
+		list.sort_custom(func(a, b): return a.dealt > b.dealt)
+	else:
+		hud.boardt.text = "RESULTS"
+		list.sort_custom(func(a, b):
+			var ka = 0 if a.fin > 0.0 else (1 if not a.out else 2)
+			var kb = 0 if b.fin > 0.0 else (1 if not b.out else 2)
+			if ka != kb:
+				return ka < kb
+			if ka == 0:
+				return a.fin < b.fin
+			if ka == 1:
+				return a.z > b.z
+			return a.outT > b.outT)
+	for i in range(list.size()):
+		var o: Dictionary = list[i]
+		var cols: Array = hud.rows[i]
+		cols[0].text = ["1st", "2nd", "3rd", "4th"][i]
+		cols[1].text = "YOU" if o.idx == 0 else NAMES[o.idx].to_upper()
+		if dmg_mode:
+			cols[2].text = "%d %%" % int(round(o.dealt * 100.0))
+		elif o.fin > 0.0:
+			cols[2].text = _fmt(o.fin)
+		elif o.out:
+			cols[2].text = "ELIMINATED"
+		else:
+			cols[2].text = "racing …"
+		var c = Color(1, 0.85, 0.4) if o.idx == 0 else (Color(1, 0.45, 0.4) if o.out and not dmg_mode else Color(1, 1, 1))
+		for l in cols:
+			l.modulate = c
+
+
 # ---------------------------------------------------------------- Leistungsmessung: Bildzeiten im Rennen, Ruckler mit Umständen
 var pf = {"n": 0, "sum": 0.0, "hist": [0, 0, 0, 0, 0], "sec": [], "acc": 0.0, "an": 0, "aw": 0.0, "sp": [], "ev": {}}
 
@@ -3868,7 +3951,7 @@ func _process(delta: float) -> void:
 	if state == "race" and t_state > 0.7 and hud.mid.text == "GO":
 		hud.mid.text = ""
 	if racing or state == "done":
-		race_t += dt if racing else 0.0
+		race_t += dt
 	# Lenkung mit Anlaufkurve
 	var b = _steer_input()
 	if b != steer_btn:
@@ -3922,7 +4005,7 @@ func _process(delta: float) -> void:
 			g.lat += pu * 0.6 * dt * 6.0
 			o.lat -= pu * 0.6 * dt * 6.0
 		var fin = T.ZST + T.LAPS * T.LAP
-		if o.z >= fin and o.fin == 0.0 and racing:
+		if o.z >= fin and o.fin == 0.0 and (racing or state == "done"):
 			o.fin = race_t
 	# Ziel
 	var finish = T.ZST + T.LAPS * T.LAP
@@ -3951,6 +4034,7 @@ func _process(delta: float) -> void:
 		_snd("win")
 		hud.resb.visible = true
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
+	_board_update(dt)
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
 	if state != "done" or t_state < 0.1:
 		hud.top.text = _fmt(race_t)
