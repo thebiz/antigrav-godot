@@ -26,7 +26,7 @@ const BASE_DEF = 12.0  # Grundtempo (Einheiten/s) bei Tempo 100 %
 const NAMES = ["You", "Vega", "Kato", "Mira"]
 
 var laps: Array[Node3D] = []
-var lap_mesh: ArrayMesh
+var lap_meshes = []
 var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
@@ -295,31 +295,27 @@ uniform float gl=0.;
 uniform float asp=.46;
 uniform float shp=.6;
 uniform float grn=.035;
-uniform vec4 hz0=vec4(0.);uniform vec4 hz1=vec4(0.);uniform vec4 hz2=vec4(0.);uniform vec4 hz3=vec4(0.);
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
-float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
-	return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),f.x),f.y);}
-// Hitzeflimmern: weiche, wabernde Wolken aus Rauschen, ziehen vom Triebwerk weg
-vec2 haze(vec2 uv,vec4 h){
-	if(h.w<=0.)return vec2(0.);
-	vec2 q=uv-h.xy;q.x*=asp;q.y-=h.z*.4;
-	float m=smoothstep(1.,.1,length(q*vec2(1.,.7))/h.z)*h.w;
-	if(m<=.001)return vec2(0.);
-	vec2 p=q/h.z*3.2+vec2(0.,-TIME*2.6);
-	vec2 o=vec2(vn(p)+.5*vn(p*2.1+5.2),vn(p+vec2(9.7,3.1))+.5*vn(p*2.1+vec2(1.3,7.7)))-.75;
-	return o*.0075*m;
-}
+// Filmkorn-Zufall ohne sin(): bleibt auch bei großen Pixelzahlen gleichmäßig (sin großer Werte wird auf Handy-GPUs ungenau → Muster)
+float hg(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 void fragment(){
 	vec2 uv=SCREEN_UV;
 	// Gravitationsbombe: Bild wird zur Mitte gesogen, danach läuft eine Welle nach außen
-	vec2 dd=uv-gc;dd.x*=asp;float r=length(dd)+1e-4;vec2 dir=dd/r;dir.x/=asp;
-	r/=max(gz,.05);   // Gesamtgröße des schwarzen Lochs
-	float pull=gs*.05/(r*r*30.+.12)*smoothstep(0.,.03,r);
-	float rip=gr>=0.?sin((r-gr)*60.)*exp(-pow(abs((r-gr)*9.),2.))*.022*gk:0.;
-	uv-=dir*(pull-rip)*min(gz,2.);
+	// (alles Teure nur, wenn wirklich eine Bombe oder ein Glitch läuft – sonst spart das Handy die Rechnerei)
+	bool bomb=gs!=0.||gr>=0.;
+	float r=1.;
+	if(bomb){
+		vec2 dd=uv-gc;dd.x*=asp;r=length(dd)+1e-4;vec2 dir=dd/r;dir.x/=asp;
+		r/=max(gz,.05);   // Gesamtgröße des schwarzen Lochs
+		float pull=gs*.05/(r*r*30.+.12)*smoothstep(0.,.03,r);
+		float rip=gr>=0.?sin((r-gr)*60.)*exp(-pow(abs((r-gr)*9.),2.))*.022*gk:0.;
+		uv-=dir*(pull-rip)*min(gz,2.);
+	}
 	// Phasen-Glitch: Zeilen verrutschen, Farben laufen auseinander
-	float band=floor(uv.y*46.+floor(TIME*24.)*3.1);float go=(h21(vec2(band,floor(TIME*30.)))-.5)*.05*gl*step(.55,h21(vec2(band,1.7)));
-	uv.x+=go;
+	if(gl>0.){
+		float band=floor(uv.y*46.+floor(TIME*24.)*3.1);
+		uv.x+=(h21(vec2(band,floor(TIME*30.)))-.5)*.05*gl*step(.55,h21(vec2(band,1.7)));
+	}
 	// Geschwindigkeit: radiale Zoom-Unschärfe mit Farbversatz zu den Rändern
 	vec2 cd=uv-vec2(.5,.47);float e=smoothstep(.12,.75,length(cd*vec2(asp,1.)));
 	float ca=.004*spd*e+.006*gl+.01*abs(gs);
@@ -331,20 +327,24 @@ void fragment(){
 		col+=vec3(texture(scr,q-cd*ca).r,texture(scr,q).g,texture(scr,q+cd*ca).b);}
 	col/=6.;}
 	// schwarzer Kern und leuchtender Ring der Bombe
-	float gp=max(gs,0.);
-	col*=1.-smoothstep(.06*gp+.01,.0,r)*gp*gd;
-	col+=grc*exp(-pow(abs((r-.075*gp)*55./grw),2.))*gp*1.6*grb;
-	if(gr>=0.)col+=vec3(.6,.45,1.)*exp(-pow(abs((r-gr)*30.),2.))*gk*.8;
+	if(bomb){
+		float gp=max(gs,0.);
+		col*=1.-smoothstep(.06*gp+.01,.0,r)*gp*gd;
+		col+=grc*exp(-pow(abs((r-.075*gp)*55./grw),2.))*gp*1.6*grb;
+		if(gr>=0.)col+=vec3(.6,.45,1.)*exp(-pow(abs((r-gr)*30.),2.))*gk*.8;
+	}
 	// Speed-Linien: helle Streifen fliegen von der Mitte nach außen
-	float an=atan(cd.y,cd.x*asp);float lane=floor(an*70.);float hl=h21(vec2(lane,3.));
-	float sl=step(.93,hl)*smoothstep(.0,.15,fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl))*smoothstep(.5,.1,fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl));
-	col+=vec3(.75,.88,1.)*sl*spd*e*.45;
+	if(spd*e>.001){
+		float an=atan(cd.y,cd.x*asp);float lane=floor(an*70.);float hl=h21(vec2(lane,3.));
+		float ph=fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl);
+		col+=vec3(.75,.88,1.)*step(.93,hl)*smoothstep(.0,.15,ph)*smoothstep(.5,.1,ph)*spd*e*.45;
+	}
 	// knackig: Kanten schärfen, feines Filmkorn
 	vec2 px=SCREEN_PIXEL_SIZE;
 	vec3 bl=(texture(scr,uv+px*vec2(1.,.5)).rgb+texture(scr,uv-px*vec2(1.,.5)).rgb)*.5;
 	col+=(c0-bl)*shp;
 	col=max(col,vec3(0.));
-	col+=(h21(floor(uv/px)+fract(TIME*7.3)*91.)-.5)*grn*(.5+.5*(1.-clamp(dot(col,vec3(.33)),0.,1.)));
+	col+=(hg(floor(SCREEN_UV/px)+floor(fract(TIME*7.3)*91.)*17.)-.5)*grn*(.5+.5*(1.-clamp(dot(col,vec3(.33)),0.,1.)));
 	// Vignette bei Tempo
 	col*=1.-spd*.25*smoothstep(.3,.9,length(cd*vec2(asp,1.))*1.4);
 	COLOR=vec4(col,1.);
@@ -357,18 +357,18 @@ func _post_update(dt: float) -> void:
 	if post == null:
 		return
 	var vp = get_viewport().get_visible_rect().size
-	post.set_shader_parameter("asp", vp.x / maxf(1.0, vp.y))
-	post.set_shader_parameter("shp", 0.9 if _noir() else 0.6)
-	post.set_shader_parameter("grn", 0.06 if _noir() else 0.035)
+	_sp(post, "asp", vp.x / maxf(1.0, vp.y))
+	_sp(post, "shp", 0.9 if _noir() else 0.6)
+	_sp(post, "grn", 0.06 if _noir() else 0.035)
 	var g: Dictionary = ships[0]
 	var q = int(cfg.gfx)
 	var sp = 0.0
 	if state == "race" or state == "done":
 		sp = clampf((g.spd / BASE_DEF - 1.1) * 0.35 + g.boost * 0.55 + (0.4 if g.turbo > 0.0 else 0.0), 0.0, 1.0)
 	post_spd += (sp - post_spd) * (1.0 - exp(-dt / 0.25))
-	post.set_shader_parameter("spd", post_spd * (1.0 if q >= 1 else 0.0))
+	_sp(post, "spd", post_spd * (1.0 if q >= 1 else 0.0) if post_spd > 0.002 else 0.0)
 	gl_v = maxf(0.0, gl_v - dt * 1.4)
-	post.set_shader_parameter("gl", gl_v)
+	_sp(post, "gl", gl_v)
 	# stärkste aktive Gravitationsbombe
 	var best = null
 	var bk = 0.0
@@ -379,8 +379,8 @@ func _post_update(dt: float) -> void:
 				bk = k
 				best = e
 	if best == null:
-		post.set_shader_parameter("gs", 0.0)
-		post.set_shader_parameter("gr", -1.0)
+		_sp(post, "gs", 0.0)
+		_sp(post, "gr", -1.0)
 		return
 	var c = cam.unproject_position(best.pos) / vp
 	post.set_shader_parameter("gc", c)
@@ -446,7 +446,8 @@ const FXS = {
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
 		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
-		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections (4.7)", 0.0, 6.0, 1.0]],
+		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections (4.7)", 0.0, 6.0, 1.0],
+		["gloss", "Road gloss", 0.0, 4.0, 2.0], ["wet", "Wet road", 0.0, 4.0, 1.0]],
 }
 const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Haze"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"]]
 var fx = {}
@@ -506,6 +507,7 @@ func _load_cfg() -> void:
 		for k in cfg.keys():
 			cfg[k] = c.get_value("s", k, cfg[k])
 	cfg.ship = clampi(int(cfg.ship), 0, SHIPS.size() - 1)
+	cfg.gfx = clampi(int(cfg.gfx), 0, 2)
 
 
 func _save_cfg() -> void:
@@ -539,12 +541,15 @@ func _newr(k: String, d: float) -> float:
 # Zwei lange Leuchtflächen auf Höhe der Neonbänder an den Leitplanken wandern mit dir mit. So spiegeln sich
 # Cyan und Magenta auf der nassen Fahrbahn und an den Schiffsflanken – wie bei echten Neonröhren.
 var nlights = []
+var has_al = ClassDB.class_exists("AreaLight3D")
 
 
 func _neon_lights() -> void:
 	var nk = float(fx.env.nlight)
+	if not nlights.is_empty() and not is_instance_valid(nlights[0]):
+		nlights.clear()
 	if nlights.is_empty():
-		if not ClassDB.class_exists("AreaLight3D") or nk <= 0.01:
+		if not has_al or nk <= 0.01:
 			return
 		for sd in [-1.0, 1.0]:
 			var al: Light3D = ClassDB.instantiate("AreaLight3D")
@@ -577,15 +582,27 @@ func _lamps_cull() -> void:
 	if cam == null or float(fx.env.lamps) <= 0.01:
 		return
 	var cz = cam.global_position.z
-	var near = []
+	near_l.clear()
 	for b in lights_nodes:
 		var dz = (b as Node3D).global_position.z - cz
-		b.visible = false
 		if dz > -8.0 and dz < 70.0:
-			near.append([absf(dz - 10.0), b])
-	near.sort_custom(func(x, y): return x[0] < y[0])
-	for i in range(mini(6, near.size())):
-		near[i][1].visible = true
+			near_l.append([absf(dz - 10.0), b])
+	near_l.sort_custom(_by_first)
+	var on = {}
+	for i in range(mini(6, near_l.size())):
+		on[near_l[i][1]] = true
+	# nur umschalten, wenn sich etwas ändert – sonst muss der Renderer die Lichter jedes Bild neu zuordnen
+	for b in lights_nodes:
+		var v = on.has(b)
+		if b.visible != v:
+			b.visible = v
+
+
+var near_l = []
+
+
+func _by_first(x, y) -> bool:
+	return x[0] < y[0]
 
 
 func _glow_k() -> Dictionary:
@@ -609,8 +626,11 @@ const GLOW_NEW = {"i": 4.5, "s": 1.0, "b": 0.0, "t": 0.72, "l6": 0.0, "l1": 0.3,
 func _apply_cfg() -> void:
 	base_spd = BASE_DEF * float(cfg.speed)
 	var q = int(cfg.gfx)
-	wenv.ssr_enabled = q >= 2
-	wenv.ssao_enabled = q >= 2
+	# Bildschirm-Spiegelungen und Umgebungsverdeckung gibt es nur im Desktop-Renderer (Forward+), nicht auf dem Handy
+	var fp = _fplus()
+	_wet_apply()
+	wenv.ssr_enabled = q >= 2 and fp
+	wenv.ssao_enabled = q >= 2 and fp
 	# Medium: ein einfacher, kurzer Schatten statt zwei Stufen, schnelle Kantenglättung (FXAA) statt MSAA
 	moon.shadow_enabled = q >= 1
 	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if q >= 2 else DirectionalLight3D.SHADOW_ORTHOGONAL
@@ -644,6 +664,9 @@ var fog_c = Color()
 # Regler aus dem FX Lab (Bereich „World“) auf Himmel, Nebel, Häuser, Lichtsäulen und Lampen anwenden
 func _env_apply() -> void:
 	var E: Dictionary = fx.env
+	if mats.has("road"):
+		_rset("rgl", float(E.gloss))
+	_wet_apply()
 	if sky_m != null:
 		sky_m.set_shader_parameter("sb", float(E.skyb) * _newr("sky", 1.0))
 		sky_m.set_shader_parameter("st", float(E.stars))
@@ -716,12 +739,12 @@ void sky(){
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
 	for i in range(1, 7):
 		env.set_glow_level(i, 1.0 if i >= 2 and i <= 5 else 0.0)
-	env.ssr_enabled = true
+	env.ssr_enabled = _fplus()
 	env.ssr_max_steps = 72
 	env.ssr_fade_in = 0.1
 	env.ssr_fade_out = 2.5
 	env.ssr_depth_tolerance = 0.35
-	env.ssao_enabled = true
+	env.ssao_enabled = _fplus()
 	env.ssao_intensity = 1.6
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.045, 0.045, 0.05) if _noir() else Color(0.05, 0.03, 0.09)
@@ -798,7 +821,71 @@ func _road_mat() -> StandardMaterial3D:
 	return m
 
 
-var shader_cache = {}
+static var shader_cache = {}   # bleibt beim Neustart erhalten: keine Neu-Kompilierung, kein Ruckeln
+
+
+# Fahrbahn-Wert setzen – Bebenwelle auch für die Nass-Spiegelung (zweiter Durchgang), damit beide gleich gewölbt sind
+func _rset(p: StringName, v) -> void:
+	mats.road.set_shader_parameter(p, v)
+	if road_wet != null and (String(p).begins_with("qz") or String(p).begins_with("qs")):
+		road_wet.set_shader_parameter(p, v)
+
+
+# Nasse Fahrbahn wie im alten HTML-Spiel: Helles über einem Punkt (Neonbänder, Lampen, Fenster, Gleiter) spiegelt
+# sich als weicher Streifen darunter. Zweiter Durchgang über der Fahrbahn, liest das fertige Bild (ohne Durchsichtiges).
+var road_wet: ShaderMaterial
+const WET_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,depth_draw_never,shadows_disabled,fog_disabled;
+uniform sampler2D scr:hint_screen_texture,filter_linear;
+uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;
+uniform float wk=1.;uniform float wn=12.;
+float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
+float quake(float z){return qw(z-qz,qs)+qw(qz2-z,qs2);}
+void vertex(){float wz=(MODEL_MATRIX*vec4(VERTEX,1.)).z;VERTEX+=NORMAL*(quake(wz)+.002);}
+void fragment(){
+	vec3 r=vec3(0.);float ws=0.;
+	// kleiner Zufallsversatz je Pixel: aus sichtbaren Stufen wird feines Rauschen (das Filmkorn deckt es zu)
+	vec3 p3=fract(vec3(FRAGCOORD.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);float jt=fract((p3.x+p3.y)*p3.z);
+	for(int i=1;i<=14;i++){
+		float k=float(i);
+		if(k>wn)break;
+		vec2 q=SCREEN_UV-vec2(0.,(k-jt)*.0075);
+		if(q.y<0.)break;
+		vec3 c=texture(scr,q).rgb;
+		float w=exp(-k*.16);
+		r+=(max(c-.45,vec3(0.))*1.4+c*.05)*w;ws+=w;
+	}
+	float fr=.3+.7*pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),3.);
+	float fd=exp(-length(VERTEX)*.018);
+	ALBEDO=min(r/max(ws,.001),vec3(4.))*.6*fr*fd*wk;
+}"""
+
+
+func _wet_apply() -> void:
+	if not mats.has("road"):
+		return
+	var wk = float(fx.env.wet)
+	var q = int(cfg.gfx)
+	if wk <= 0.01 or q <= 0:
+		mats.road.next_pass = null
+		return
+	if road_wet == null:
+		road_wet = _shader_mat(WET_CODE)
+		road_wet.render_priority = -2   # vor allem anderen Durchsichtigen (Funken, Rauch, Flimmern liegen darüber)
+		for k in ["qz", "qs", "qz2", "qs2"]:
+			var v = mats.road.get_shader_parameter(k)
+			if v != null:
+				road_wet.set_shader_parameter(k, v)
+	_sp(road_wet, "wk", wk)
+	_sp(road_wet, "wn", 12.0 if q >= 2 else 7.0)
+	mats.road.next_pass = road_wet
+
+
+# Shader-Wert nur setzen, wenn er sich ändert (jedes Setzen lädt die Materialdaten neu auf die Grafikkarte)
+func _sp(m: ShaderMaterial, p: StringName, v) -> void:
+	if m.get_shader_parameter(p) != v:
+		m.set_shader_parameter(p, v)
 
 
 func _shader_mat(code: String) -> ShaderMaterial:
@@ -816,6 +903,13 @@ var CY = Color(0.0, 0.78, 1.0)
 var MG = Color(1.0, 0.06, 0.42)
 var AM = Color(1.0, 0.62, 0.08)
 const OR = Color(1.0, 0.36, 0.03)
+
+
+# Desktop-Renderer (Forward+)? Die Abfrage gibt es erst ab Godot 4.4 – auf 4.3 also vorsichtig über has_method
+func _fplus() -> bool:
+	if RenderingServer.has_method("get_current_rendering_method"):
+		return str(RenderingServer.call("get_current_rendering_method")) == "forward_plus"
+	return str(ProjectSettings.get_setting_with_override("rendering/renderer/rendering_method")) == "forward_plus"
 
 
 func _noir() -> bool:
@@ -839,14 +933,17 @@ func _neo(k: float) -> Color:
 
 # ---------------------------------------------------------------- Geometrie-Helfer (alles in einer Runde, z 20…720)
 var sts = {}
+var st_z = 20.0   # Streckenstelle des gerade gebauten Teils
+const CHUNK = 50.0   # Runde in Abschnitte zerlegt: gezeichnet wird nur, was die Kamera sieht
 
 
 func _st(key: String) -> SurfaceTool:
-	if not sts.has(key):
+	var ck = key + "|" + str(clampi(int(floor((st_z - 20.0) / CHUNK)), 0, int(T.LAP / CHUNK) - 1))
+	if not sts.has(ck):
 		var st = SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		sts[key] = st
-	return sts[key]
+		sts[ck] = st
+	return sts[ck]
 
 
 func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, n: Vector3, ua = Vector2.ZERO, ub = Vector2.ZERO, uc = Vector2.ZERO) -> void:
@@ -855,13 +952,23 @@ func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, n: Vector3, ua = 
 	st.set_normal(n); st.set_uv(uc); st.add_vertex(c)
 
 
+var keep_wind = false   # Felder mit Texturkoordinaten aus der Eckreihenfolge (_fix_uv) nicht umdrehen
+
+
 func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, ua = Vector2.ZERO, ub = Vector2.ZERO, uc = Vector2.ZERO, ud = Vector2.ZERO) -> void:
+	# Vorderseite (bei Godot im Uhrzeigersinn) muss zur Normalen passen – sonst dreht der Renderer bei
+	# beidseitigen Materialien die Normale um und die Fläche wird falsch beleuchtet / spiegelt das Falsche
+	if not keep_wind and (c - a).cross(b - a).dot(n) < 0.0:
+		_tri(st, a, c, b, n, ua, uc, ub)
+		_tri(st, a, d, c, n, ua, ud, uc)
+		return
 	_tri(st, a, b, c, n, ua, ub, uc)
 	_tri(st, a, c, d, n, ua, uc, ud)
 
 
 # Kasten im Streckenrahmen: Mitte (lat, h) an Stelle z, halbe Maße (seitlich, hoch, längs)
 func _box(key: String, z: float, lat: float, h: float, hx: float, hy: float, hz: float) -> void:
+	st_z = z
 	var f = T.frame(z)
 	var c: Vector3 = f.c + f.rr * lat + f.uu * h
 	var X: Vector3 = f.rr * hx
@@ -878,20 +985,34 @@ func _box(key: String, z: float, lat: float, h: float, hx: float, hy: float, hz:
 
 # Leuchtstreifen auf/an der Strecke: von lat a nach b, Höhe h, entlang z0…z1
 func _strip(key: String, z0: float, z1: float, la: float, lb: float, ha: float, hb: float) -> void:
-	var st = _st(key)
+	# kurze Streifen (Felder, Startlinie) bleiben am Stück in einem Abschnitt – ihre Texturkoordinaten zählen die Vierecke
+	var whole = z1 - z0 < 10.0
+	keep_wind = key == "pad" or key == "start" or key == "wpad"
+	st_z = z0
 	var z = z0
 	var prev = []
 	while z <= z1 + 0.001:
 		var f = T.frame(z)
-		var p: Array = [f.c + f.rr * la + f.uu * ha, f.c + f.rr * lb + f.uu * hb, f.uu]
+		var p: Array = [f.c + f.rr * la + f.uu * ha, f.c + f.rr * lb + f.uu * hb]
 		if prev.size() > 0 and not T.gap(z - 0.25):
-			_quad(st, prev[0], prev[1], p[1], p[0], p[2])
+			if not whole:
+				st_z = z - 0.25
+			# echte Flächennormale (bei senkrechten Bändern zeigt sie zur Seite, nicht nach oben)
+			var n: Vector3 = (p[0] - prev[0]).cross(prev[1] - prev[0])
+			if n.length_squared() < 1e-10:
+				n = f.uu
+			n = n.normalized()
+			if n.dot(f.uu) < -0.2 or (absf(n.dot(f.uu)) <= 0.2 and n.dot(f.rr * signf(la + lb + 0.0001)) > 0.0):
+				n = -n
+			_quad(_st(key), prev[0], prev[1], p[1], p[0], n)
 		prev = p
 		z += 0.5
+	keep_wind = false
 
 
 # Ring um die Strecke (Röhre mit Radius rt), Bogen von -am bis am (Winkel 0 = oben)
 func _ring(key: String, z: float, rad: float, cy: float, rt: float, am: float = PI, ns: int = 40) -> void:
+	st_z = z
 	var f = T.frame(z)
 	var st = _st(key)
 	var prev = []
@@ -915,10 +1036,11 @@ func _ring(key: String, z: float, rad: float, cy: float, rt: float, am: float = 
 func _build_track() -> void:
 	var TW = T.TW
 	# Fahrbahn: nasser Asphalt (Reihen alle 0,5 Einheiten, 8 Spalten)
-	var road = _st("road")
 	var prev = []
 	var z = 20.0
 	while z <= 720.0 + 0.001:
+		st_z = z - 0.25
+		var road = _st("road")
 		var f = T.frame(z)
 		var row = []
 		for i in range(9):
@@ -998,6 +1120,7 @@ func _build_track() -> void:
 		var pr = []
 		var z2: float = tu[0]
 		while z2 <= tu[1] + 0.001:
+			st_z = z2 - 0.5
 			var f = T.frame(z2)
 			var ring = []
 			for i in range(na + 1):
@@ -1023,6 +1146,7 @@ float h11(float x){return fract(sin(x*91.7)*4371.3);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
 // Bebenwelle: Kamm bei qz, davor ein kleiner Anlauf, dahinter ein Tal und Nachschwingen
 uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
+uniform float rgl=1.;   // Glanz der Fahrbahn (FX Lab): mehr = glatter, schärfere Spiegelungen
 varying float wz;varying float qh;
 float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
 float quake(float z){return qw(z-qz,qs)+qw(qz2-z,qs2);}
@@ -1039,7 +1163,7 @@ void fragment(){
 	float hz=step(.5,fract(z*.5));
 	base=mix(base,mix(vec3(.75,.62,.08),vec3(.05),hz),edge);
 	base*=1.-seam*.7;
-	ALBEDO=base;METALLIC=.8;ROUGHNESS=.38+.1*br+seam*.3+edge*.2;SPECULAR=.45;
+	ALBEDO=base;METALLIC=.8;ROUGHNESS=clamp((.38+.1*br)/(.6+.4*rgl)+seam*.3+edge*.2,.04,1.);SPECULAR=.45;
 	float cr=max(qh,0.)/max(max(qs,qs2),.01);   // glühender Kamm, aufgerissene Fugen
 	EMISSION=(qc*pow(cr,1.5)*6.+qc*vec3(1.,.6,.62)*seam*cr*14.)*step(.01,qs+qs2)*qg;
 }""", [["vec3(.75,.62,.08)", "vec3(.8,.3,.02)"]]))
@@ -1074,20 +1198,31 @@ void fragment(){
 	mats["start"] = _shader_mat("""
 shader_type spatial;
 render_mode unshaded,cull_disabled;
-void fragment(){vec2 q=floor(vec2(UV.x*12.,UV.y*2.));ALBEDO=vec3(mod(q.x+q.y,2.)*1.2+.02);}""")
-	lap_mesh = ArrayMesh.new()
-	for key in sts.keys():
-		var st: SurfaceTool = sts[key]
+void fragment(){vec2 q=floor(vec2(UV.x*2.,UV.y*12.));ALBEDO=vec3(mod(q.x+q.y,2.)*.85+.02);}""")
+	# je Abschnitt ein Mesh – so kann der Renderer alles außerhalb des Blickfelds (und des Schattenbereichs) weglassen
+	var chunks = {}
+	for ck in sts.keys():
+		var key: String = ck.get_slice("|", 0)
+		var ci = int(ck.get_slice("|", 1))
+		var st: SurfaceTool = sts[ck]
 		if key == "pad" or key == "start" or key == "wpad":
-			_fix_uv(st, key)
-		st.commit(lap_mesh)
-		lap_mesh.surface_set_material(lap_mesh.get_surface_count() - 1, mats[key])
+			st = _fix_uv(st, key)
+		st.index()
+		if not chunks.has(ci):
+			chunks[ci] = ArrayMesh.new()
+		var am: ArrayMesh = chunks[ci]
+		st.commit(am)
+		am.surface_set_material(am.get_surface_count() - 1, mats[key])
+	sts.clear()
+	lap_meshes = chunks.values()
 	# drei Kopien der Runde: hinter dir, unter dir, vor dir – wandern mit
 	for i in range(3):
 		var n = Node3D.new()
-		var mi = MeshInstance3D.new()
-		mi.mesh = lap_mesh
-		n.add_child(mi)
+		for cm in lap_meshes:
+			var mi = MeshInstance3D.new()
+			mi.mesh = cm
+			mi.extra_cull_margin = maxf(2.5, 2.2 * float(fx.quake.height))   # Bebenwelle hebt die Fahrbahn an
+			n.add_child(mi)
 		for l in lights:
 			var om = OmniLight3D.new()
 			om.light_color = l[1]
@@ -1131,7 +1266,7 @@ var beam_n = []
 
 
 # Boost-Felder und Startlinie: UV aus der Lage im Streifen (x längs, y quer)
-func _fix_uv(st: SurfaceTool, key: String) -> void:
+func _fix_uv(st: SurfaceTool, key: String) -> SurfaceTool:
 	var arr = st.commit_to_arrays()
 	var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 	var uv = PackedVector2Array()
@@ -1152,7 +1287,7 @@ func _fix_uv(st: SurfaceTool, key: String) -> void:
 	arr[Mesh.ARRAY_TEX_UV] = uv
 	var st2 = SurfaceTool.new()
 	st2.create_from_arrays(arr)
-	sts[key] = st2
+	return st2
 
 
 # ---------------------------------------------------------------- Hochhäuser neben der Strecke (eine Instanz-Liste, Fenster im Shader)
@@ -1355,6 +1490,9 @@ func _ship_node(idx: int) -> Node3D:
 		var hm = MeshInstance3D.new()
 		hm.mesh = q
 		var mat = _shader_mat(HAZE_CODE)
+		# vor allen anderen durchsichtigen Dingen zeichnen: das Flimmern liest das Bild ohne Durchsichtiges –
+		# sonst würde es die Düsenflammen und Funken dahinter einfach überdecken
+		mat.render_priority = -1
 		hm.material_override = mat
 		hm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var zr = -1.5 * 0.5 - (0.28 if k == 0 else 0.85)
@@ -1403,7 +1541,7 @@ shader_type spatial;
 render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
 uniform vec3 sc=vec3(.12,.45,1.);uniform float sg=1.;uniform float sf=1.;uniform float se=1.;
 void fragment(){
-	float fr=pow(1.-abs(dot(NORMAL,VIEW)),2.6*se);
+	float fr=pow(max(1.-abs(dot(NORMAL,VIEW)),0.),2.6*se);
 	float sh=1.-.15*sf+.15*sf*sin(TIME*3.*max(sf,.3)+VERTEX.y*6.);
 	float scan=smoothstep(.96,1.,fract(UV.y*1.-TIME*.4))*.35*min(sf,2.);
 	ALBEDO=sc*(.012+fr*1.1*sh+scan*.15)*sg;
@@ -1436,10 +1574,10 @@ func _shield_vis(o: Dictionary) -> void:
 		if shn.visible:
 			var X: Dictionary = fx.shield
 			shn.scale = (shn.get_meta("bs") as Vector3) * float(X.size)
-			shield_mat.set_shader_parameter("sc", _v3(_hs(Color(0.12, 0.45, 1.0), float(X.hue))))
-			shield_mat.set_shader_parameter("sg", float(X.glow))
-			shield_mat.set_shader_parameter("sf", float(X.flicker))
-			shield_mat.set_shader_parameter("se", float(X.edge))
+			_sp(shield_mat, "sc", _v3(_hs(Color(0.12, 0.45, 1.0), float(X.hue))))
+			_sp(shield_mat, "sg", float(X.glow))
+			_sp(shield_mat, "sf", float(X.flicker))
+			_sp(shield_mat, "se", float(X.edge))
 
 
 func _rel_xf(top: Node3D, n: Node) -> Transform3D:
@@ -1463,7 +1601,9 @@ func _spawn_ships() -> void:
 	for i in range(4):
 		var sm = int(cfg.ship) if i == 0 else others[(i - 1) % others.size()]
 		if not rpf.is_empty():
-			sm = clampi(int(rpf.sm[i]), 0, SHIPS.size() - 1)
+			var rsm: Array = rpf.get("sm", [])
+			if i < rsm.size():
+				sm = clampi(int(rsm[i]), 0, SHIPS.size() - 1)
 		var s = {"z": starts[i][0], "lat": starts[i][1], "psi": 0.0, "vpsi": 0.0, "u": 0.0, "spd": 0.0, "boost": 0.0, "slow": 1.0,
 			"h": 0.0, "vy": 0.0, "air": false, "padK": -1, "hitT": -9.0, "sk": (1.0 + (i - 1) * 0.035) * float(cfg.ai) if i > 0 else 1.0, "sk0": 0.0, "lane": randf_range(-0.7, 0.7), "tl": 0.0, "wT": 0.0, "orbs": 0.0,
 			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0,
@@ -2387,22 +2527,39 @@ func _rp_input(ev: InputEvent) -> void:
 func _rp_seek(t: float) -> void:
 	var F = rec
 	rp.t = clampf(t, F[0].t, F[F.size() - 1].t)
-	var i = 0
-	while i < F.size() - 2 and F[i + 1].t <= rp.t:
-		i += 1
+	# binäre Suche: auch spät in langen Replays ruckelfrei spulen
+	var lo = 0
+	var hi = F.size() - 2
+	while lo < hi:
+		var mid = (lo + hi + 1) >> 1
+		if F[mid].t <= rp.t:
+			lo = mid
+		else:
+			hi = mid - 1
+	var i = lo
 	rp.i = i
+	rp.sp = null   # Streckenkamera nach dem Spulen neu aufstellen
 	rp.ei = i
 	rp.dirty = true   # Effekte passend zur neuen Zeit neu aufbauen
 
 
-const FX_DUR = {"boom": 4.0, "gb": 2.0, "zap": 2.6}
+# wie lange ein Effekt sichtbar bleibt (fürs Neuaufbauen beim Spulen) – hängt von den FX-Lab-Reglern ab
+func _fx_dur(k: String) -> float:
+	match k:
+		"boom":
+			return maxf(4.0, 10.0 * float(fx.boom.slife) + 0.5)
+		"gb":
+			return float(fx.gb.time) * maxf(1.25, 0.55 + 0.9 / maxf(0.1, float(fx.gb.wspeed))) + 0.3
+		"zap":
+			return 2.6
+	return 0.0
 
 
 # alle Effekte so aufbauen, wie sie zur Replay-Zeit rp.t aussehen (Explosionen mittendrin, Rauch, schwarze Löcher …)
 func _rp_rebuild_fx() -> void:
 	var keep = rp.get("base", [])
 	var pools = []
-	for k in ["shots", "mines", "walls"]:
+	for k in ["shots", "mines", "walls", "swalls"]:
 		pools.append_array(rp.get(k, []))
 	for n in get_children():
 		if (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D) and not keep.has(n) and not pools.has(n) and not tun_l.has(n) and not n.has_meta("keep"):
@@ -2414,13 +2571,16 @@ func _rp_rebuild_fx() -> void:
 	fxs.clear()
 	var F = rec
 	var j = rp.i
+	fx_gen += 1
 	warm = true   # kein Ton, kein Blitz beim Aufbauen
 	fx_rebuild = true
 	live_bursts = 0
-	while j >= 0 and F[j].t >= rp.t - 8.0:
+	var durs = {"boom": _fx_dur("boom"), "gb": _fx_dur("gb"), "zap": _fx_dur("zap")}
+	var win = maxf(durs.boom, durs.gb)
+	while j >= 0 and F[j].t >= rp.t - win:
 		for ev in F[j].ev:
 			var age: float = rp.t - F[j].t
-			if age < 0.0 or age > FX_DUR.get(ev[0], 0.0):
+			if age < 0.0 or age > durs.get(ev[0], 0.0):
 				continue
 			fx_age = age
 			match ev[0]:
@@ -2446,6 +2606,10 @@ func _rp_freeze(on: bool) -> void:
 	if rp.get("fr", 0) > 0:
 		rp.fr -= 1
 		on = false
+	elif rp.get("frz", false) == on and rp.get("frc", -1) == get_child_count():
+		return   # nichts geändert (auch keine neuen Funken/Rauchwolken): nicht jedes Bild alle Knoten durchgehen
+	rp.frz = on
+	rp.frc = get_child_count()
 	for n in get_children():
 		if n is GPUParticles3D:
 			n.speed_scale = 0.0 if on else 1.0
@@ -2574,6 +2738,22 @@ func _pick_w() -> String:
 	return "rak"
 
 
+# Kugelnetz mit wenigen Dreiecken, einmal je Größe gebaut und wiederverwendet
+var lowsph = {}
+
+
+func _lowsphere(r: float, seg: int, rings: int) -> SphereMesh:
+	var key = "%.3f_%d_%d" % [r, seg, rings]
+	if not lowsph.has(key):
+		var sp = SphereMesh.new()
+		sp.radius = r
+		sp.height = r * 2.0
+		sp.radial_segments = seg
+		sp.rings = rings
+		lowsph[key] = sp
+	return lowsph[key]
+
+
 func _glow_node(mesh: Mesh, c: Color, e: float, alpha := 1.0) -> MeshInstance3D:
 	var m = StandardMaterial3D.new()
 	m.albedo_color = Color(c.r, c.g, c.b, alpha)
@@ -2634,6 +2814,7 @@ func _flash(c: Color, a: float) -> void:
 	if flash_rect.color.a > a:
 		cc = Color(flash_rect.color.r, flash_rect.color.g, flash_rect.color.b).lerp(cc, a / maxf(0.001, flash_rect.color.a))
 	flash_rect.color = Color(cc.r, cc.g, cc.b, minf(1.0, maxf(flash_rect.color.a, a)))
+	flash_rect.visible = true
 	# neuer Renderer: zusätzlich kurz die ganze Szene überbelichten, damit helle Stellen weiß ausbrennen
 	expo_v = maxf(expo_v, minf(1.5, a * 1.2) * _newr("expo", 0.0))
 
@@ -2815,6 +2996,7 @@ var live_bursts = 0
 # Alter, mit dem neue Effekte entstehen (im Replay beim Spulen: Effekt startet schon „mittendrin“)
 var fx_age = 0.0
 var fx_rebuild = false
+var fx_gen = 0
 
 
 # später ausführen – oder sofort, wenn der Effekt schon älter ist als die Verzögerung
@@ -2825,7 +3007,11 @@ func _later(d: float, f: Callable) -> void:
 		f.call()
 		fx_age = old
 	else:
-		get_tree().create_timer(d - fx_age).timeout.connect(f)
+		# Spulen/Neuaufbau im Replay macht alte, verzögerte Effekte ungültig
+		var gen = fx_gen
+		get_tree().create_timer(d - fx_age).timeout.connect(func():
+			if gen == fx_gen:
+				f.call())
 
 
 func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vmax: float, spread: float, grav: Vector3, damp: float, smin: float, smax: float, ramp: GradientTexture1D, scurve: CurveTexture, align := false, spin := false, rad := 0.25) -> void:
@@ -2908,10 +3094,7 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1, sc := 1.0) -> void:
 	var gsc = float(X.scale) * sc   # Gesamtgröße: alles zusammen
 	var gz = float(X.size) * gsc
 	var core = MeshInstance3D.new()
-	var sm = SphereMesh.new()
-	sm.radius = 1.0
-	sm.height = 2.0
-	core.mesh = sm
+	core.mesh = _lowsphere(1.0, 24, 12)
 	var cm = StandardMaterial3D.new()
 	cm.albedo_color = Color(0, 0, 0, float(X.dark))
 	cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -2967,7 +3150,7 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1, sc := 1.0) -> void:
 	lt.light_energy = 0.0
 	lt.position = pos
 	add_child(lt)
-	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": fx_age, "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit,
+	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": fx_age / maxf(0.05, float(X.time)), "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit,
 		"sz": gz, "ps": gsc, "ts": float(X.time), "wt": float(X.wthick), "ws": float(X.wspeed), "wz": float(X.wsize), "whu": hu + float(X.whue), "gr": float(X.gring),
 		"rimw": float(X.rimw), "rimb": float(X.rimb), "rimh": hu + float(X.rimh), "dark": float(X.dark), "cs": float(X.core) * sqrt(float(X.size)) * gsc, "sp": float(X.sparks), "wv": float(X.wave), "lk": float(X.light), "lens": float(X.lens), "sh": float(X.shake), "hu": hu})
 	_snd("gbomb", 3.0, 1.0, pos)
@@ -3027,7 +3210,7 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		var f = e.f
 		# Rückstoß: Funken und Lichtblitz nach außen, Ring über die Fahrbahn
 		var old_age = fx_age
-		fx_age = maxf(0.0, t - 0.55) if fx_rebuild else 0.0
+		fx_age = maxf(0.0, (t - 0.55) * e.get("ts", 1.0)) if fx_rebuild else 0.0
 		var sp: float = e.get("sp", 1.0)
 		var hu: float = e.get("hu", 0.0)
 		if sp > 0.01:
@@ -3061,7 +3244,7 @@ shader_type spatial;
 render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
 uniform vec3 wc=vec3(.7,.5,1.);uniform float u=0.;uniform float th=1.;uniform float br=1.;
 void fragment(){
-	float fr=1.-abs(dot(NORMAL,VIEW));
+	float fr=clamp(1.-abs(dot(NORMAL,VIEW)),0.,1.);
 	float shell=pow(fr,mix(7.,1.3,clamp(th*.35,0.,1.)));
 	float f=(1.-u);
 	ALBEDO=wc*(shell*2.4+.05*th)*br*f*f;
@@ -3072,7 +3255,7 @@ void fragment(){
 		sph.material_override = smt
 		sph.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		sph.extra_cull_margin = 20.0
-		sph.visible = e.get("wv", 1.0) > 0.01
+		sph.visible = e.get("wv", 1.0) > 0.01 and e.get("ps", 1.0) >= 0.75 * float(fx.gb.scale)
 		sph.position = e.pos
 		sph.scale = Vector3.ONE * 0.3
 		add_child(sph)
@@ -3100,9 +3283,12 @@ void fragment(){
 				if e.has(k):
 					e[k].queue_free()
 			return true
-	# Ring zeigt immer zur Kamera
-	rg.look_at(cam.global_position, Vector3.UP)
-	rg.rotate_object_local(Vector3(1, 0, 0), PI / 2.0)
+	# Ring zeigt zur Kamera (nur solange er sichtbar ist; nicht, wenn die Kamera genau darüber steht)
+	if not e.snap:
+		var dv: Vector3 = cam.global_position - rg.global_position
+		if dv.length() > 0.01 and absf(dv.normalized().y) < 0.999:
+			rg.look_at(cam.global_position, Vector3.UP)
+			rg.rotate_object_local(Vector3(1, 0, 0), PI / 2.0)
 	return false
 
 
@@ -3257,10 +3443,7 @@ func _drop_one(o: Dictionary, k: int, lat_o := 999.0, back := 0.0) -> void:
 	if o.out or not (state == "race" or state == "done" or state == "lab"):
 		return
 	var X: Dictionary = fx.mine
-	var sp = SphereMesh.new()
-	sp.radius = 0.12 * float(X.size)
-	sp.height = 0.24 * float(X.size)
-	var mi = _glow_node(sp, _hs(Color(1, 0.15, 0.1), float(X.hue)), 6.0 * float(X.glow))
+	var mi = _glow_node(_lowsphere(0.12 * float(X.size), 12, 6), _hs(Color(1, 0.15, 0.1), float(X.hue)), 6.0 * float(X.glow))
 	var z = o.z - 0.9 - back
 	var lat = o.lat + (k - 1) * 0.22 if lat_o > 99.0 else lat_o
 	mi.position = T.world(z, lat, 0.45)
@@ -3270,9 +3453,9 @@ func _drop_one(o: Dictionary, k: int, lat_o := 999.0, back := 0.0) -> void:
 
 # Gegner sammeln an den Waffenfeldern auch etwas ein und setzen es klug ein
 func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
+	o.shield = maxf(0.0, o.shield - dt)
 	if not racing or o.out:
 		return
-	o.shield = maxf(0.0, o.shield - dt)
 	if o.turbo > 0.0:
 		o.turbo -= dt
 		o.boost = maxf(o.boost, 1.5)
@@ -3280,11 +3463,12 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 	var wz = (o.z - _wzp(wk)) / 35.0
 	if wz < 0.0 or not _pad_ok(_wzp(wk)):
 		wz = 9.0
-	if posmod(wk, 2) == 0 and wz < 0.08 and wk != o.wpK and o.wpn != "" and not o.get("sup", false):
+	var wwin = maxf(2.8, o.spd * dt * 1.3) / 35.0
+	if posmod(wk, 2) == 0 and wz < wwin and wk != o.wpK and o.wpn != "" and not o.get("sup", false):
 		o.wpK = wk
 		if randf() < 0.4:
 			o.sup = true
-	if posmod(wk, 2) == 0 and wz < 0.08 and wk != o.wpK and o.wpn == "":
+	if posmod(wk, 2) == 0 and wz < wwin and wk != o.wpK and o.wpn == "":
 		o.wpK = wk
 		if randf() < 0.65:
 			var r = randf()
@@ -3334,6 +3518,9 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 var orb_n = []
 
 
+var orb_key = Vector4(-1, -1, -1, -1)
+
+
 func _orbs_update(dt: float, live: bool) -> void:
 	var g: Dictionary = ships[0]
 	if live:
@@ -3343,20 +3530,9 @@ func _orbs_update(dt: float, live: bool) -> void:
 		if not on:
 			return
 		_fx_res()
-		var gt = GradientTexture2D.new()
-		gt.fill = GradientTexture2D.FILL_RADIAL
-		gt.fill_from = Vector2(0.5, 0.5)
-		gt.fill_to = Vector2(1.0, 0.5)
-		var gr = Gradient.new()
-		gr.set_color(0, Color(1, 1, 1, 1))
-		gr.set_color(1, Color(1, 1, 1, 0))
-		gt.gradient = gr
-		gt.width = 32
-		gt.height = 32
+		orb_key = Vector4(-1, -1, -1, -1)   # neue Materialien: Farben sicher setzen
 		for j in range(4):
-			var sp = SphereMesh.new()
-			sp.radius = 0.11
-			sp.height = 0.22
+			var sp = _lowsphere(0.11, 16, 8)
 			var c = Color(1.0, 0.5, 0.12) if _noir() else Color(0.35, 0.85, 1.0)
 			var mi = _glow_node(sp, Color(c.r * 4.0, c.g * 4.0, c.b * 4.0), 3.0)
 			var l = OmniLight3D.new()
@@ -3368,11 +3544,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 			# Schweif: kleiner werdende Kugeln auf der Bahn dahinter
 			var tr = []
 			for k in range(6):
-				var sp2 = SphereMesh.new()
-				sp2.radius = 0.09 * (1.0 - k * 0.14)
-				sp2.height = sp2.radius * 2.0
-				sp2.radial_segments = 12
-				sp2.rings = 6
+				var sp2 = _lowsphere(0.09 * (1.0 - k * 0.14), 12, 6)
 				var tn = _glow_node(sp2, Color(c.r * 1.5, c.g * 1.5, c.b * 1.5), 2.5, 0.45 * (1.0 - k * 0.15))
 				(tn.material_override as StandardMaterial3D).blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 				tn.set_meta("keep", true)
@@ -3380,6 +3552,8 @@ func _orbs_update(dt: float, live: bool) -> void:
 			mi.set_meta("tr", tr)
 			mi.set_meta("keep", true)
 			orb_n.append(mi)
+	if not on and not (orb_n[0] as Node3D).visible:
+		return   # aus und schon versteckt: nichts zu tun
 	var nd: Node3D = g.node
 	var tt = Time.get_ticks_msec() / 1000.0
 	var bb: AABB = nd.get_meta("bb")
@@ -3397,6 +3571,10 @@ func _orbs_update(dt: float, live: bool) -> void:
 	var osz = float(X.size)
 	var ogl = float(X.glow) * (float(X.sglow) if so else 1.0)
 	var otr = float(X.trail)
+	# Farben/Leuchtkraft nur neu setzen, wenn sich ein Regler oder die Art der Kugeln ändert
+	var okey = Vector4(oc.r, oc.g, oc.b, ogl)
+	var orecol = okey != orb_key
+	orb_key = okey
 	for j in range(orb_n.size()):
 		var mi: MeshInstance3D = orb_n[j]
 		var jon = on and j < no
@@ -3408,6 +3586,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 		if jon:
 			# Regler wirken sofort
 			mi.scale = Vector3.ONE * osz
+		if jon and orecol:
 			var om: StandardMaterial3D = mi.material_override
 			om.albedo_color = Color(oc.r * 4.0, oc.g * 4.0, oc.b * 4.0)
 			om.emission = om.albedo_color
@@ -3421,6 +3600,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 			tr[k].global_position = opos.call(a - (k + 1) * 0.075 * otr)
 			if jon:
 				tr[k].scale = Vector3.ONE * osz
+			if jon and orecol:
 				var tm: StandardMaterial3D = tr[k].material_override
 				tm.albedo_color = Color(oc.r * 1.5, oc.g * 1.5, oc.b * 1.5, tm.albedo_color.a)
 				tm.emission = Color(oc.r * 1.5, oc.g * 1.5, oc.b * 1.5)
@@ -3546,8 +3726,8 @@ func _quake_make(z: float, dir: float, old) -> Dictionary:
 	lt.light_energy = 8.0
 	lt.position = Vector3(0, 1.0, 0)
 	crest.add_child(lt)
-	mats.road.set_shader_parameter("qc", _v3(_hs(Color(1.0, 0.42, 0.08), float(fx.quake.hue))))
-	mats.road.set_shader_parameter("qg", float(fx.quake.glow))
+	_rset("qc", _v3(_hs(Color(1.0, 0.42, 0.08), float(fx.quake.hue))))
+	_rset("qg", float(fx.quake.glow))
 	return {"z": z, "age": 0.0, "hit": [], "n": crest, "l": lt, "dir": dir}
 
 
@@ -3568,7 +3748,7 @@ func _quake_step(q, dt: float) -> Variant:
 				o.air = true
 				o.vy = 5.8 * sqrt(float(QX.height))
 				o.h = maxf(o.h, 0.6)
-				o.slow = 0.25
+				o.slow = minf(o.slow, 0.25)
 	var f = T.frame(q.z)
 	var dist = (q.z - g.z) * dir
 	var qs = 1.3 * float(QX.height) * clampf(q.age / 0.25, 0.0, 1.0) * clampf((16.0 * qd - q.age) / 1.5, 0.0, 1.0) * clampf((qmax - dist) / (12.0 if state == "lab" else 40.0), 0.0, 1.0)
@@ -3576,12 +3756,12 @@ func _quake_step(q, dt: float) -> Variant:
 	q.l.light_energy = 8.0 * qs * float(QX.glow)
 	q.qs = qs
 	var sfx = "" if dir > 0.0 else "2"
-	mats.road.set_shader_parameter("qz" + sfx, q.z)
-	mats.road.set_shader_parameter("qs" + sfx, qs)
+	_rset("qz" + sfx, q.z)
+	_rset("qs" + sfx, qs)
 	shake = maxf(shake, 0.35 * clampf(1.0 - absf(q.z - g.z) / 40.0, 0.0, 1.0) * float(QX.shake))
 	if dist > qmax or q.age > 16.0 * qd:
 		q.n.queue_free()
-		mats.road.set_shader_parameter("qs" + sfx, 0.0)
+		_rset("qs" + sfx, 0.0)
 		return null
 	return q
 
@@ -3596,6 +3776,13 @@ func _backwave(o: Dictionary) -> void:
 	_snd("wallon", 0.0, 1.4)
 	if o.idx == 0:
 		shake = maxf(shake, 0.6)
+
+
+func _bwaves_clear() -> void:
+	for w in bwaves:
+		if is_instance_valid(w.n):
+			w.n.queue_free()
+	bwaves.clear()
 
 
 func _bwaves_update(dt: float) -> void:
@@ -3634,7 +3821,7 @@ func _weapons(dt: float, racing: bool) -> void:
 	var wz = (zz - _wzp(wk)) / 35.0
 	if wz < 0.0 or not _pad_ok(_wzp(wk)):
 		wz = 9.0
-	if racing and posmod(wk, 2) == 0 and wz < 0.05 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and (g.wpn == "" or not g.get("sup", false)):
+	if racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and (g.wpn == "" or not g.get("sup", false)):
 		g.wpK = wk
 		if g.wpn == "":
 			g.wpn = _pick_w()
@@ -3725,7 +3912,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		var dead = false
 		if hit != null:
 			if not _prot(hit):
-				hit.slow = 0.35
+				hit.slow = minf(hit.slow, 0.35)
 				hit.vpsi += randf_range(-0.25, 0.25)
 			_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket")
 			_shot_boom(sh, sh.z, sh.lat, hit.idx)
@@ -3762,7 +3949,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		for o in ships:
 			if o.idx != m.get("own", 0) and not o.out and absf(o.z - m.z) < 0.5 + o.spd * dt * 1.3 and absf(o.lat - m.lat) < 0.38:
 				if not _prot(o):
-					o.slow = 0.35
+					o.slow = minf(o.slow, 0.35)
 				_dmg(o, 0.2, m.get("own", 0), "mine")
 				boom = true
 		# Quake-Welle räumt Minen ab (egal von wem), Minen verschwinden nach 25 s von selbst
@@ -3839,6 +4026,7 @@ void fragment(){
 	for(int i=0;i<4;i++){
 		float fi=float(i);float tq=floor(TIME*(11.+fi*2.)+fi*3.7+sd*5.);
 		float on=step(.4-hit*.4,h11(tq*1.31+fi*9.1));
+		if(on<.5||bk<.001)continue;
 		float y0=.15+.7*h11(tq+fi*2.3);
 		float pth=y0+(n1(uv.x*6.+tq*3.1)-.5)*.42+(n1(uv.x*21.+tq*5.7)-.5)*.14+(n1(uv.x*60.+tq)-.5)*.04;
 		float d=abs(uv.y-pth);
@@ -3846,6 +4034,10 @@ void fragment(){
 	}
 	ALBEDO=c*a*(1.+hit*2.5);
 }"""
+
+
+func _swall_node() -> MeshInstance3D:
+	return _wall_node(true)
 
 
 func _wall_node(sup := false) -> MeshInstance3D:
@@ -3878,12 +4070,15 @@ func _wall_pose(mi: MeshInstance3D, z: float, age: float, hf: float) -> void:
 	var f = T.frame(z)
 	var X: Dictionary = fx.wall
 	mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * (0.72 * float(X.height)))
-	(mi.mesh as QuadMesh).size = Vector2(T.TW * 2.0, 1.4 * float(X.height))
-	var wm: ShaderMaterial = mi.material_override
-	wm.set_shader_parameter("wc", _v3(_hs(Color(1.0, 0.5, 0.1), float(X.hue))))
-	wm.set_shader_parameter("bk", float(X.bolts))
-	wm.set_shader_parameter("gk", float(X.glow) * (1.8 if mi.get_meta("sup", false) else 1.0))
-	(mi.get_meta("l") as OmniLight3D).light_color = _hs(Color(1.0, 0.55, 0.15), float(X.hue))
+	var wkey = Vector4(float(X.height), float(X.hue), float(X.bolts), float(X.glow))
+	if mi.get_meta("wkey", Vector4(-1, -1, -1, -1)) != wkey:
+		mi.set_meta("wkey", wkey)
+		(mi.mesh as QuadMesh).size = Vector2(T.TW * 2.0, 1.4 * float(X.height))
+		var wm: ShaderMaterial = mi.material_override
+		wm.set_shader_parameter("wc", _v3(_hs(Color(1.0, 0.5, 0.1), float(X.hue))))
+		wm.set_shader_parameter("bk", float(X.bolts))
+		wm.set_shader_parameter("gk", float(X.glow) * (1.8 if mi.get_meta("sup", false) else 1.0))
+		(mi.get_meta("l") as OmniLight3D).light_color = _hs(Color(1.0, 0.55, 0.15), float(X.hue))
 	var a = clampf(minf(age / 0.3, (5.3 * float(X.dur) - age) / 0.4), 0.0, 1.0)
 	var m: ShaderMaterial = mi.material_override
 	m.set_shader_parameter("a", a)
@@ -4023,6 +4218,7 @@ var rec = []
 var rec_ev = []
 var rec_clk = 0.0
 var rec_acc = 0.0
+var rec_pl = ""   # Platzierungszeile beim letzten Aufzeichnungsbild (fürs Ergebnis nach dem Replay)
 var rp = {}
 const RP_CAMS = [["chase", "Chase", 6.0], ["side", "Trackside", 7.0], ["cock", "Cockpit", 6.0], ["side", "Trackside", 7.0], ["heli", "Aerial", 6.0], ["front", "Front", 5.0], ["free", "Free", 9999.0]]
 
@@ -4039,7 +4235,8 @@ func _record(dt: float) -> void:
 	rec_acc += dt
 	if rec_acc < 1.0 / 30.0 and not rec.is_empty() and rec_ev.is_empty():
 		return
-	rec_acc = 0.0
+	rec_acc = maxf(0.0, minf(rec_acc - 1.0 / 30.0, 1.0 / 30.0))
+	rec_pl = hud.top.text
 	var sh = []
 	for o in ships:
 		sh.append([o.z, o.lat, o.h, o.psi, o.roll, o.boost, o.spd, 0 if o.out else 1, o.shield])
@@ -4051,9 +4248,9 @@ func _record(dt: float) -> void:
 		m.append([x.z, x.lat])
 	var wl = []
 	for x in walls:
-		wl.append([x.z, x.age, x.hf])
+		wl.append([x.z, x.age, x.hf, 1 if x.get("sup", false) else 0])
 	rec.append({"t": rec_clk, "s": sh, "w": w, "m": m, "wl": wl, "q": [quake.z, quake.get("qs", 0.0)] if quake != null else null, "q2": [quake2.z, quake2.get("qs", 0.0)] if quake2 != null else null, "so": ships[0].get("sorb", false),
-		"sh": ships[0].shield, "ob": ships[0].orbs, "ev": rec_ev, "pl": hud.top.text})
+		"sh": ships[0].shield, "ob": ships[0].orbs, "ev": rec_ev})
 	rec_ev = []
 
 
@@ -4080,7 +4277,7 @@ func _replay_start() -> void:
 		if n is GPUParticles3D:
 			n.queue_free()
 	for e in fxs:
-		for k in ["ring", "l", "core", "sw"]:
+		for k in ["ring", "l", "core", "sw", "sph"]:
 			if e.has(k) and e[k] != null and is_instance_valid(e[k]):
 				e[k].queue_free()
 	fxs.clear()
@@ -4088,7 +4285,16 @@ func _replay_start() -> void:
 		e.mi.queue_free()
 		e.l.queue_free()
 	zaps.clear()
-	rp.base = get_children()
+	_bwaves_clear()
+	if quake != null:
+		quake.n.queue_free()
+		quake = null
+	if quake2 != null:
+		quake2.n.queue_free()
+		quake2 = null
+	fx_gen += 1
+	# was gerade gelöscht wird, nicht als „gehört zur Szene“ merken
+	rp.base = get_children().filter(func(n): return not n.is_queued_for_deletion())
 	_rp_follow_lbl()
 	state = "replay"
 	hud.resb.visible = false
@@ -4129,10 +4335,15 @@ func _replay_end() -> void:
 		return
 	if not vx.is_empty():
 		return
-	for k in ["shots", "mines", "walls"]:
+	for k in ["shots", "mines", "walls", "swalls"]:
 		for n in rp.get(k, []):
 			n.queue_free()
+	# eingefrorene Partikel (Pause/Spulen) wieder laufen lassen
+	for n in get_children():
+		if n is GPUParticles3D:
+			n.speed_scale = 1.0
 	rp = {}
+	fx_gen += 1
 	if not rpf.is_empty():
 		# Replay aus der Liste: zurück ins Menü
 		get_tree().reload_current_scene()
@@ -4147,18 +4358,21 @@ func _replay_end() -> void:
 	hud.rpphoto.visible = false
 	hud.flwrow.visible = false
 	hud.vxb.visible = false
-	mats.road.set_shader_parameter("qs", 0.0)
+	_rset("qs", 0.0)
+	_rset("qs2", 0.0)
 	hud.fire.visible = true
 	hud.en_bg.visible = true
 	hud.el.visible = true
 	hud.pg.visible = true
 	hud.plbox.visible = true
-	hud.top.text = rec[rec.size() - 1].pl
+	hud.top.text = rec_pl if rec_pl != "" else str(rec[rec.size() - 1].get("pl", ""))
 	for o in ships:
 		(o.node as Node3D).visible = not o.out
 
 
 func _replay(dt: float) -> void:
+	if rp.is_empty():
+		return
 	rp.t += dt
 	var F = rec
 	while rp.i < F.size() - 2 and F[rp.i + 1].t <= rp.t:
@@ -4211,23 +4425,31 @@ func _replay(dt: float) -> void:
 		var fr = T.frame(f0.w[i][0])
 		ps[i].global_transform = Transform3D(Basis(fr.rr, fr.fw, -fr.uu), fr.c + fr.rr * f0.w[i][1] + fr.uu * 0.25)
 	var pm = _pool("mines", f0.m.size(), func():
-		var sp = SphereMesh.new()
-		sp.radius = 0.12
-		sp.height = 0.24
-		return _glow_node(sp, Color(1, 0.15, 0.1), 6.0))
+		return _glow_node(_lowsphere(0.12, 12, 6), Color(1, 0.15, 0.1), 6.0))
 	for i in range(f0.m.size()):
 		pm[i].position = T.world(f0.m[i][0], f0.m[i][1], 0.12)
-	var pw = _pool("walls", f0.wl.size(), _wall_node)
-	for i in range(f0.wl.size()):
-		_wall_pose(pw[i], f0.wl[i][0], f0.wl[i][1], f0.wl[i][2])
+	# normale und Super-Wände getrennt (Super-Wände sehen anders aus)
+	var wn = []
+	var ws = []
+	for x in f0.wl:
+		if x.size() > 3 and x[3] == 1:
+			ws.append(x)
+		else:
+			wn.append(x)
+	var pw = _pool("walls", wn.size(), _wall_node)
+	for i in range(wn.size()):
+		_wall_pose(pw[i], wn[i][0], wn[i][1], wn[i][2])
+	var pws = _pool("swalls", ws.size(), _swall_node)
+	for i in range(ws.size()):
+		_wall_pose(pws[i], ws[i][0], ws[i][1], ws[i][2])
 	if f0.q != null:
-		mats.road.set_shader_parameter("qz", f0.q[0])
-		mats.road.set_shader_parameter("qs", f0.q[1])
+		_rset("qz", f0.q[0])
+		_rset("qs", f0.q[1])
 	else:
-		mats.road.set_shader_parameter("qs", 0.0)
+		_rset("qs", 0.0)
 	var q2 = f0.get("q2")
-	mats.road.set_shader_parameter("qz2", q2[0] if q2 != null else -1000.0)
-	mats.road.set_shader_parameter("qs2", q2[1] if q2 != null else 0.0)
+	_rset("qz2", q2[0] if q2 != null else -1000.0)
+	_rset("qs2", q2[1] if q2 != null else 0.0)
 	# Kamera-Regie wie im Fernsehen
 	rp.ct += dt
 	var cm = RP_CAMS[rp.ci]
@@ -4295,6 +4517,8 @@ func _rp_cam_pick(ci: int) -> void:
 		rp.ci = ci
 		rp.ct = 0.0
 		rp.sp = null
+	elif RP_CAMS[rp.ci][0] == "free":
+		_rp_next()   # AUTO: weg von der freien Kamera, sonst bliebe die Regie dort hängen
 	_rp_cam_style()
 
 
@@ -4361,10 +4585,10 @@ func _vx_begin() -> void:
 		return
 	# Replay von vorn, ohne Anzeige, ohne Ton
 	var fix = rp.get("fix", -1)
-	for k in ["shots", "mines", "walls"]:
+	for k in ["shots", "mines", "walls", "swalls"]:
 		for n in rp.get(k, []):
 			n.queue_free()
-	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": maxi(0, fix), "ct": 0.0, "sp": null, "sk": 1.0, "fix": fix}
+	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": maxi(0, fix), "ct": 0.0, "sp": null, "sk": 1.0, "fix": fix, "fyaw": 0.6, "fpitch": 0.45, "fdist": 7.0, "follow": 0}
 	hud.vxd.visible = false
 	hud.layer.visible = false
 	ui.fps.visible = false
@@ -4420,12 +4644,14 @@ func _vx_close() -> void:
 
 
 func _rp_next() -> void:
-	rp.ci = (rp.ci + 1) % RP_CAMS.size()
+	rp.ci = (rp.ci + 1) % (RP_CAMS.size() - 1)   # die freie Kamera gibt es nur per Knopf
 	rp.ct = 0.0
 	rp.sp = null
 
 
 func _rp_cam(dt: float) -> bool:
+	if rp.is_empty():
+		return false
 	var cm = RP_CAMS[rp.ci][0]
 	if cm == "chase":
 		return false
@@ -4514,6 +4740,11 @@ func _warm_step(delta: float) -> void:
 		_explode(zf, g.lat, true)
 		_explode(zf, g.lat + 0.6, false)
 		_gbomb(zf, g.lat - 0.6, -2)
+		_quake_make(zf + 4.0, 1.0, null)
+		var fa0 = fx_age
+		fx_age = 0.6 * float(fx.gb.time)
+		_gbomb(zf + 1.0, g.lat, -2)
+		fx_age = fa0
 		var w = _wall_node()
 		_wall_pose(w, zf, 1.0, 1.0)
 		var w2 = _wall_node(true)
@@ -4533,7 +4764,7 @@ func _warm_step(delta: float) -> void:
 		return
 	var g2: Dictionary = ships[0]
 	for n in get_children():
-		if not warm_before.has(n) and n != warm_cover and not tun_l.has(n):
+		if not warm_before.has(n) and n != warm_cover and not tun_l.has(n) and not nlights.has(n):
 			n.queue_free()
 	for e in zaps:
 		e.mi.queue_free()
@@ -4636,7 +4867,7 @@ func _kc_end() -> void:
 			o[key] = sv[key]
 		(o.node as Node3D).visible = not o.out
 		_shield_vis(o)
-	for k in ["shots", "mines", "walls"]:
+	for k in ["shots", "mines", "walls", "swalls"]:
 		for n in rp.get(k, []):
 			if is_instance_valid(n):
 				n.queue_free()
@@ -4661,7 +4892,9 @@ func _kc_end() -> void:
 		if is_instance_valid(n):
 			n.visible = true
 	if quake == null:
-		mats.road.set_shader_parameter("qs", 0.0)
+		_rset("qs", 0.0)
+	if quake2 == null:
+		_rset("qs2", 0.0)
 	hud.top.text = kc.top
 	kc = {}
 	state = "race"
@@ -4976,8 +5209,19 @@ func _notification(what: int) -> void:
 			get_tree().reload_current_scene()
 
 
+# Rundenkopien (hinter/unter/vor dir) zur Stelle z schieben – nur wenn sich die Runde ändert
+func _lap_pos(z: float) -> void:
+	var l0 = int(floor((z - 20.0) / T.LAP))
+	for i in range(laps.size()):
+		var p = Vector3(0, 0, (l0 - 1 + i) * T.LAP)
+		if laps[i].position != p:
+			laps[i].position = p
+
+
 func _process(delta: float) -> void:
 	var dt = minf(delta, 0.05)
+	if flash_rect != null and flash_rect.visible and flash_rect.color.a <= 0.003:
+		flash_rect.visible = false   # unsichtbare Vollbild-Fläche nicht jedes Bild zeichnen
 	t_state += dt
 	ui.fps.text = "%d fps" % Engine.get_frames_per_second()
 	_duck(delta / maxf(0.01, Engine.time_scale))
@@ -4996,6 +5240,8 @@ func _process(delta: float) -> void:
 		_replay_start()
 	if state == "menu":
 		menu_t += dt
+		_lap_pos(g.z)
+		_tunnel(dt)
 		_pose_all(dt)
 		var f = T.frame(g.z)
 		var S0: Vector3 = f.c + f.rr * g.lat + f.uu * 0.16
@@ -5013,9 +5259,7 @@ func _process(delta: float) -> void:
 	if state == "kill":
 		_kc_step(dt)
 		if state == "kill":
-			var lk = int(floor((g.z - 20.0) / T.LAP))
-			for i in range(3):
-				laps[i].position = Vector3(0, 0, (lk - 1 + i) * T.LAP)
+			_lap_pos(g.z)
 			_tunnel(dt)
 			_pose_all(dt)
 			_camera(dt)
@@ -5034,9 +5278,7 @@ func _process(delta: float) -> void:
 					_rp_rebuild_fx()
 				_rp_freeze(hold)
 		if state == "replay":
-			var lr = int(floor((_focus().z - 20.0) / T.LAP))
-			for i in range(3):
-				laps[i].position = Vector3(0, 0, (lr - 1 + i) * T.LAP)
+			_lap_pos(_focus().z)
 			_tunnel(dt)
 			_pose_all(dt)
 			_camera(dt)
@@ -5152,7 +5394,7 @@ func _process(delta: float) -> void:
 		t_state = 0.0
 		hud.res.text = ""   # die große rote Meldung und die Tabelle zeigen es schon
 		_show_resb()
-	elif racing and kc_pending.is_empty() and ships.slice(1).all(func(x): return x.out):
+	elif racing and kc_pending.is_empty() and _all_out():
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
@@ -5192,9 +5434,7 @@ func _process(delta: float) -> void:
 	_record(dt)
 	_kc_check()
 	# Rundenkopien mitwandern lassen
-	var l0 = int(floor((g.z - 20.0) / T.LAP))
-	for i in range(3):
-		laps[i].position = Vector3(0, 0, (l0 - 1 + i) * T.LAP)
+	_lap_pos(g.z)
 	_tunnel(dt)
 	_pose_all(dt)
 	_camera(dt)
@@ -5224,8 +5464,7 @@ func _lab_open() -> void:
 	for i in range(1, ships.size()):
 		ships[i].z = LZ - 120.0
 		(ships[i].node as Node3D).visible = false
-	for i in range(3):
-		laps[i].position = Vector3(0, 0, (i - 1) * T.LAP)
+	_lap_pos(20.0)
 	lab = {"rep": {}, "fine": 1.0, "tab": "boom", "auto": false, "at": 0.0, "yaw": 0.35, "pit": 0.22, "dist": 12.0, "tch": {}, "sv": -1.0, "view": 0}
 	var cl = CanvasLayer.new()
 	cl.layer = 6
@@ -5425,8 +5664,7 @@ func _lab_park() -> void:
 	g.air = false
 	g.h = 0.0
 	g.vy = 0.0
-	for i in range(3):
-		laps[i].position = Vector3(0, 0, (i - 1) * T.LAP)
+	_lap_pos(20.0)
 
 
 func _lab_close() -> void:
@@ -5723,9 +5961,7 @@ func _lab_step(dt: float) -> void:
 			if zl > tu[0] - 18.0 and zl < tu[1] + 3.0:
 				g.z += tu[1] + 4.0 - zl
 				lab.tz = g.z + 0.3
-		var l0 = int(floor((g.z - 20.0) / T.LAP))
-		for i in range(3):
-			laps[i].position = Vector3(0, 0, (l0 - 1 + i) * T.LAP)
+		_lap_pos(g.z)
 	_weapons(dt, false)
 	_tunnel(dt)
 	_pose_all(dt)
@@ -5761,8 +5997,25 @@ func _lab_step(dt: float) -> void:
 
 # Nur zum Testen am Rechner: godot -- --shot=Pfad,z  → setzt dich an die Stelle z und speichert ein Bild
 var shot_n = 0
+func _all_out() -> bool:
+	for i in range(1, ships.size()):
+		if not ships[i].out:
+			return false
+	return true
+
+
+var shot_s = "?"   # Testbild-Auftrag von der Kommandozeile (einmal gelesen)
+
+
 func _shot() -> void:
-	for a in OS.get_cmdline_user_args():
+	if shot_s == "?":
+		shot_s = ""
+		for a in OS.get_cmdline_user_args():
+			if a.begins_with("--shot="):
+				shot_s = a
+	if shot_s == "":
+		return
+	for a in [shot_s]:
 		if a.begins_with("--shot="):
 			var p = a.substr(7).split(",")
 			shot_n += 1
@@ -5867,16 +6120,22 @@ func _tunnel(dt: float) -> void:
 	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
 	wenv.ambient_light_energy = lerpf(0.35 * _newr("amb", 1.0), 0.02, tun_k)
 	wenv.fog_density = lerpf(0.012 * float(fx.env.fog), 0.0, tun_k)
-	wenv.fog_enabled = float(fx.env.fog) > 0.01
+	var fog_on = float(fx.env.fog) > 0.01
+	if wenv.fog_enabled != fog_on:
+		wenv.fog_enabled = fog_on
 	wenv.background_energy_multiplier = lerpf(1.0, 0.05, tun_k)
 	moon.light_energy = lerpf(0.45 * float(fx.env.moon) * _newr("moon", 1.0), 0.0, tun_k)
 	_lamps_cull()
 	_neon_lights()
 	# Explosions-Helligkeitsstoß abklingen lassen
 	expo_v = maxf(0.0, expo_v - dt * 2.2)
-	wenv.tonemap_exposure = 1.0 + expo_v
+	if wenv.tonemap_exposure != 1.0 + expo_v:
+		wenv.tonemap_exposure = 1.0 + expo_v
 	# im Tunnel sieht man den Mond nicht: Schattenberechnung sparen
-	moon.shadow_enabled = int(cfg.gfx) >= 1 and tun_k < 0.6 and float(fx.env.moon) > 0.01
+	# (nur bei Änderung setzen – jedes Setzen ordnet die Schatten neu zu)
+	var sh_on = int(cfg.gfx) >= 1 and tun_k < 0.6 and float(fx.env.moon) > 0.01
+	if moon.shadow_enabled != sh_on:
+		moon.shadow_enabled = sh_on
 	if tun_l.is_empty():
 		for i in range(4 if int(cfg.gfx) >= 2 else 2):
 			var l = OmniLight3D.new()
@@ -5945,17 +6204,22 @@ func _pose_all(dt: float) -> void:
 		var lt: OmniLight3D = nd.get_meta("light")
 		lt.light_energy = (1.4 + 3.0 * s.boost) * (1.0 + 1.2 * tun_k) * _newr("ship", 1.0)
 		var HX: Dictionary = fx.haze
-		for hm in nd.get_meta("haze"):
-			hm.set_shader_parameter("k", 0.55 + 0.9 * float(HX.boost) * minf(1.0, s.boost))
-			hm.set_shader_parameter("hs", float(HX.amp))
-			hm.set_shader_parameter("hv", float(HX.speed))
-			hm.set_shader_parameter("hf", float(HX.fine))
+		# Flimmern nur, wo man es sieht: weit entfernte Gegner brauchen es nicht
+		var hz_on = float(HX.amp) > 0.01 and nd.visible and (cam == null or cam.global_position.distance_squared_to(pos) < 900.0)
 		var hzn: Array = nd.get_meta("hazen")
-		for k in range(hzn.size()):
-			var hn: MeshInstance3D = hzn[k]
-			hn.scale = Vector3.ONE * (0.75 if k == 0 else 1.1) * float(HX.size)
-			hn.position.z = -0.75 - (0.28 if k == 0 else 0.85) * float(HX.len)
-			hn.visible = float(HX.amp) > 0.01
+		if hz_on:
+			for hm in nd.get_meta("haze"):
+				_sp(hm, "k", 0.55 + 0.9 * float(HX.boost) * minf(1.0, s.boost))
+				_sp(hm, "hs", float(HX.amp))
+				_sp(hm, "hv", float(HX.speed))
+				_sp(hm, "hf", float(HX.fine))
+			for k in range(hzn.size()):
+				var hn: MeshInstance3D = hzn[k]
+				hn.scale = Vector3.ONE * (0.75 if k == 0 else 1.1) * float(HX.size)
+				hn.position.z = -0.75 - (0.28 if k == 0 else 0.85) * float(HX.len)
+		for hn in hzn:
+			if hn.visible != hz_on:
+				hn.visible = hz_on
 		lt.omni_range = 4.0 + 4.0 * tun_k
 		lt.light_color = Color(0.6, 0.4, 1.0).lerp(Color(0.3, 0.8, 1.0), clampf(s.boost, 0.0, 1.0))
 
