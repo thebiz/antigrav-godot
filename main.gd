@@ -13,6 +13,12 @@ const SHIPS = [
 	["res://ships/assegai/scene.gltf", "Assegai", false, "“WipeOut – Assegai” by Nobby76, CC BY 4.0"],
 	["res://ships/apex.glb", "Apex", false, "“Apex Wipeout Anti-grav Racer” by rafta, CC BY-NC 4.0"],
 	["res://ships/rhsx/scene.gltf", "RHS-X", true, "“RHS-X” by Hassan Bassassi, CC BY 4.0"]]
+# Düsen je Schiff (im Schiffsraum: x, Höhe, z, Radius) – nachgemessen an den Modellen
+const JETS = [
+	[[0.0, 0.148, -0.76, 0.05], [-0.09, 0.1, -0.74, 0.03], [0.09, 0.1, -0.74, 0.03]],
+	[[0.0, 0.133, -0.77, 0.05], [-0.09, 0.1, -0.74, 0.03], [0.09, 0.1, -0.74, 0.03]],
+	[[-0.08, 0.075, -0.75, 0.042], [0.08, 0.075, -0.75, 0.042]],
+	[[0.0, 0.11, -0.76, 0.05], [-0.184, 0.139, -0.72, 0.03], [0.184, 0.139, -0.72, 0.03]]]
 const CFG_PATH = "user://settings.cfg"
 
 # Lenkung wie in der HTML-Version (von John abgestimmt)
@@ -590,7 +596,9 @@ const FXS = {
 		["hue", "Color", -0.5, 0.5, 0.0]],
 	"orbs": [["shue", "Super orbs color", -0.5, 0.5, 0.0], ["sglow", "Super orbs glow", 0.0, 10.0, 1.0], ["size", "Size", 0.2, 6.0, 1.0], ["radius", "Orbit radius", 0.3, 5.0, 1.0], ["speed", "Orbit speed", 0.1, 6.0, 1.0], ["trail", "Trail length", 0.0, 6.0, 1.0],
 		["glow", "Glow", 0.0, 10.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
-	"haze": [["amp", "Shimmer", 0.0, 10.0, 1.0], ["fine", "Fineness", 0.3, 6.0, 1.0], ["speed", "Speed", 0.0, 8.0, 1.0], ["size", "Size", 0.2, 6.0, 1.0],
+	"haze": [["jglow", "Plasma glow", 0.0, 4.0, 1.0], ["jlen", "Plasma length", 0.2, 4.0, 1.0], ["jwid", "Plasma width", 0.3, 3.0, 1.0], ["jboost", "Plasma with boost", 0.0, 4.0, 1.0],
+		["jdia", "Shock rings", 0.0, 3.0, 1.0], ["jhue", "Plasma color", -0.5, 0.5, 0.0],
+		["amp", "Heat shimmer", 0.0, 10.0, 1.0], ["fine", "Fineness", 0.3, 6.0, 1.0], ["speed", "Speed", 0.0, 8.0, 1.0], ["size", "Size", 0.2, 6.0, 1.0],
 		["len", "Length", 0.2, 6.0, 1.0], ["boost", "Extra with boost", 0.0, 8.0, 1.0]],
 	"pillar": [["speed", "Ring speed", 0.0, 6.0, 1.0], ["size", "Ring size", 0.3, 5.0, 1.0], ["glow", "Ring glow", 0.0, 10.0, 1.0], ["squash", "Rubber squash", 0.0, 6.0, 1.0],
 		["soft", "Soft bounce", 0.0, 2.0, 1.0], ["beam", "Pillar light", 0.0, 10.0, 1.0]],
@@ -610,7 +618,7 @@ const FXS = {
 		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
 		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
 }
-const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Haze"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["sound", "Sound"]]
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["sound", "Sound"]]
 var fx = {}
 
 
@@ -1037,7 +1045,7 @@ func _wet_apply() -> void:
 		return
 	if road_wet == null:
 		road_wet = _shader_mat(WET_CODE)
-		road_wet.render_priority = -2   # vor allem anderen Durchsichtigen (Funken, Rauch, Flimmern liegen darüber)
+		road_wet.render_priority = -1   # nach dem Hitzeflimmern, vor allem anderen Durchsichtigen (Funken, Rauch)
 		for k in ["qz", "qs", "qz2", "qs2"]:
 			var v = mats.road.get_shader_parameter(k)
 			if v != null:
@@ -2069,6 +2077,30 @@ func _ship_node(idx: int) -> Node3D:
 	lt.position = Vector3(0, 0.15, -0.95)
 	root.add_child(lt)
 	root.set_meta("jets", jets)
+	for j in jets:
+		(j as Node3D).visible = false   # die Boost-Flammen des Modells ersetzt der Plasmastrahl
+	# Plasmastrahl aus jeder Düse: läuft immer (Triebwerk an), wird mit dem Tempo länger und beim Boost groß
+	var jm = _shader_mat(JET_CODE)
+	var gm = _shader_mat(JETGLOW_CODE)
+	var jn = []
+	for jd in JETS[idx]:
+		var cone = MeshInstance3D.new()
+		cone.mesh = _jet_mesh()
+		cone.material_override = jm
+		cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(cone)
+		var gl = MeshInstance3D.new()
+		var gq = QuadMesh.new()
+		gq.size = Vector2.ONE
+		gl.mesh = gq
+		gl.material_override = gm
+		gl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		gl.position = Vector3(jd[0], jd[1], jd[2] - 0.01)
+		gl.scale = Vector3.ONE * jd[3] * 6.0
+		root.add_child(gl)
+		jn.append([cone, jd])
+	root.set_meta("pj", jn)
+	root.set_meta("pjm", [jm, gm])
 	# Hitzeflimmern: zwei kleine Flächen direkt hinter der Düse, im Raum verankert.
 	# Sie verzerren nur, was dahinter liegt; steht das Schiff davor (Blick von vorn), bleibt es scharf.
 	var hz = []
@@ -2081,7 +2113,7 @@ func _ship_node(idx: int) -> Node3D:
 		var mat = _shader_mat(HAZE_CODE)
 		# vor allen anderen durchsichtigen Dingen zeichnen: das Flimmern liest das Bild ohne Durchsichtiges –
 		# sonst würde es die Düsenflammen und Funken dahinter einfach überdecken
-		mat.render_priority = -1
+		mat.render_priority = -2   # auch vor der Nass-Spiegelung der Fahrbahn (die liegt sonst als Fleck im Flimmern)
 		hm.material_override = mat
 		hm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var zr = -1.5 * 0.5 - (0.28 if k == 0 else 0.85)
@@ -2097,11 +2129,60 @@ func _ship_node(idx: int) -> Node3D:
 	return root
 
 
+# Plasmastrahl: heller blauweißer Kern, violetter Rand, wandernde Schockringe, schnelles Flackern
+const JET_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform vec3 jc=vec3(.55,.38,1.);uniform vec3 jc2=vec3(.78,.93,1.);
+uniform float jk=1.;uniform float jd=1.;uniform float jl=.5;
+varying float v;
+void vertex(){v=.5-VERTEX.y;}
+void fragment(){
+	float fr=abs(dot(NORMAL,VIEW));
+	float core=fr*fr;
+	float fade=exp(-v*2.)*smoothstep(1.,.7,v)*smoothstep(0.,.04,v);
+	float ph=v*jl*30.-TIME*42.;
+	float dia=1.+jd*1.1*pow(.5+.5*cos(ph),10.)*(1.-v);
+	float fl=.86+.14*sin(TIME*83.+v*11.);
+	vec3 c=mix(jc,jc2,core*core);
+	ALBEDO=c*(core*1.7+.12)*fade*dia*fl*jk;
+}"""
+# Düsenglühen: weicher Lichtfleck direkt an der Düse (sieht man von hinten immer)
+const JETGLOW_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform vec3 jc=vec3(.55,.38,1.);uniform float jk=1.;
+void vertex(){
+	float s=length(MODEL_MATRIX[0].xyz);
+	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(INV_VIEW_MATRIX[0]*s,INV_VIEW_MATRIX[1]*s,INV_VIEW_MATRIX[2]*s,MODEL_MATRIX[3]);
+}
+void fragment(){
+	float d=length(UV-.5)*2.;
+	float g=exp(-d*d*6.)*.7+exp(-d*d*45.)*1.6;
+	ALBEDO=mix(jc,vec3(1.),exp(-d*d*25.))*g*jk;
+}"""
+var jet_m: CylinderMesh
+
+
+func _jet_mesh() -> CylinderMesh:
+	if jet_m == null:
+		jet_m = CylinderMesh.new()
+		jet_m.top_radius = 1.0
+		jet_m.bottom_radius = 0.2
+		jet_m.height = 1.0
+		jet_m.radial_segments = 12
+		jet_m.rings = 3
+		jet_m.cap_top = false
+		jet_m.cap_bottom = false
+	return jet_m
+
+
 const HAZE_CODE = """
 shader_type spatial;
 render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled,fog_disabled;
 uniform sampler2D scr:hint_screen_texture,filter_linear;
 uniform float k=.6;uniform float hs=1.;uniform float hv=1.;uniform float hf=1.;
+uniform vec3 shc=vec3(0.,-1000.,0.);uniform float shr=.5;
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
 	return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),f.x),f.y);}
@@ -2115,7 +2196,14 @@ void fragment(){
 	// feines Flimmern: hohe Frequenz, schnell aufsteigend, kleiner Ausschlag
 	vec2 p=UV*9.*hf+vec2(0.,TIME*7.*hv);
 	vec2 o=vec2(vn(p)-.5,vn(p*1.6+vec2(4.1,TIME*2.5*hv))-.5)+.5*vec2(vn(p*2.3+vec2(9.,0.))-.5,vn(p*2.3+vec2(2.,5.))-.5);
-	ALBEDO=texture(scr,SCREEN_UV+o*.0045*m*hs).rgb;
+	// liegt das eigene Schiff hinter diesem Pixel (Blick durch die Abgase aufs Heck), kaum verzerren:
+	// heiße Luft verbiegt vor allem, was weiter weg ist – das Schiff bleibt scharf
+	vec3 wq=(INV_VIEW_MATRIX*vec4(VERTEX,1.)).xyz;
+	vec3 ro=CAMERA_POSITION_WORLD;vec3 rd=normalize(wq-ro);vec3 oc=ro-shc;
+	float bq=dot(oc,rd);float cq=dot(oc,oc)-shr*shr;float hq=bq*bq-cq;
+	float hit=hq>0.&&(-bq-sqrt(max(hq,0.)))>length(wq-ro)?1.:0.;
+	m*=1.-.8*hit;
+	ALBEDO=texture(scr,SCREEN_UV+o*.009*m*hs).rgb;
 	ALPHA=smoothstep(0.,.25,m);
 }"""
 var shield_mat: ShaderMaterial
@@ -6877,30 +6965,59 @@ func _pose_all(dt: float) -> void:
 		nd.global_transform = Transform3D(Basis(x, up, dir), pos)
 		if absf(s.get("pit", 0.0)) > 0.0001:
 			nd.rotate_object_local(Vector3(1, 0, 0), -s.pit)   # Nase hoch beim Gasgeben
-		var jets: Array = nd.get_meta("jets")
-		for j in jets:
-			j.visible = s.boost > 0.25
-		var lt: OmniLight3D = nd.get_meta("light")
-		lt.light_energy = (1.4 + 3.0 * s.boost) * (1.0 + 1.2 * tun_k) * _newr("ship", 1.0)
 		var HX: Dictionary = fx.haze
+		# Plasmastrahl: Länge/Breite/Helligkeit nach Tempo und Boost
+		var spk = clampf(s.spd / maxf(1.0, base_spd), 0.0, 1.6)
+		var bo = clampf(s.boost, 0.0, 1.6) * float(HX.jboost)
+		var JL = (0.3 + 0.28 * spk + 0.95 * bo) * float(HX.jlen)
+		var JW = (1.0 + 0.4 * bo) * float(HX.jwid)
+		var pjm: Array = nd.get_meta("pjm")
+		var jc = _hs(Color(0.55, 0.38, 1.0), float(HX.jhue))
+		var jc2 = _hs(Color(0.78, 0.93, 1.0), float(HX.jhue))
+		if _noir():
+			jc = OR
+			jc2 = Color(1.0, 0.85, 0.6)
+		var jk = (0.85 + 0.35 * spk + 1.2 * bo) * float(HX.jglow)
+		_sp(pjm[0], "jk", jk)
+		_sp(pjm[0], "jl", JL)
+		_sp(pjm[0], "jd", float(HX.jdia))
+		_sp(pjm[0], "jc", _v3(jc))
+		_sp(pjm[0], "jc2", _v3(jc2))
+		_sp(pjm[1], "jk", minf(jk * 0.8, 2.5))
+		_sp(pjm[1], "jc", _v3(jc))
+		for pj in nd.get_meta("pj"):
+			var cone: MeshInstance3D = pj[0]
+			var jd: Array = pj[1]
+			var r: float = jd[3] * JW
+			# Kegelachse (y) zeigt nach vorn zur Düse, Spitze nach hinten
+			cone.transform = Transform3D(Basis(Vector3(r, 0, 0), Vector3(0, 0, JL), Vector3(0, -r, 0)), Vector3(jd[0], jd[1], jd[2] - JL * 0.5))
+			if cone.visible != (jk > 0.01):
+				cone.visible = jk > 0.01
+		var lt: OmniLight3D = nd.get_meta("light")
+		# das Licht kommt vom Plasmastrahl: spiegelt sich auf der Fahrbahn
+		lt.light_energy = (1.2 + 0.5 * spk + 3.0 * s.boost) * (1.0 + 1.2 * tun_k) * _newr("ship", 1.0) * minf(1.5, float(HX.jglow))
+		lt.position.z = -0.85 - JL * 0.35
 		# Flimmern nur, wo man es sieht: weit entfernte Gegner brauchen es nicht
 		var hz_on = float(HX.amp) > 0.01 and nd.visible and (cam == null or cam.global_position.distance_squared_to(pos) < 900.0)
 		var hzn: Array = nd.get_meta("hazen")
 		if hz_on:
+			var shc: Vector3 = nd.global_transform * Vector3(0, 0.12, 0.05)
 			for hm in nd.get_meta("haze"):
-				_sp(hm, "k", 0.55 + 0.9 * float(HX.boost) * minf(1.0, s.boost))
+				_sp(hm, "k", 0.55 + 0.35 * spk + 0.9 * float(HX.boost) * minf(1.0, s.boost))
 				_sp(hm, "hs", float(HX.amp))
 				_sp(hm, "hv", float(HX.speed))
 				_sp(hm, "hf", float(HX.fine))
+				hm.set_shader_parameter("shc", shc)
 			for k in range(hzn.size()):
 				var hn: MeshInstance3D = hzn[k]
 				hn.scale = Vector3.ONE * (0.75 if k == 0 else 1.1) * float(HX.size)
-				hn.position.z = -0.75 - (0.28 if k == 0 else 0.85) * float(HX.len)
+				# hinter dem Plasmastrahl, wo die heiße Luft ausströmt
+				hn.position.z = -0.76 - (0.25 + JL * 0.55 if k == 0 else 0.6 + JL) * float(HX.len)
 		for hn in hzn:
 			if hn.visible != hz_on:
 				hn.visible = hz_on
 		lt.omni_range = 4.0 + 4.0 * tun_k
-		lt.light_color = Color(0.6, 0.4, 1.0).lerp(Color(0.3, 0.8, 1.0), clampf(s.boost, 0.0, 1.0))
+		lt.light_color = jc.lerp(Color(0.3, 0.8, 1.0) if not _noir() else jc2, clampf(s.boost, 0.0, 1.0))
 
 
 # Kamera: hinter dem Gleiter, folgt der Nase gedämpft, bleibt beim Boost kurz zurück
