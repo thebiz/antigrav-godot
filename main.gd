@@ -315,7 +315,7 @@ void fragment(){
 	vec2 dd=uv-gc;dd.x*=asp;float r=length(dd)+1e-4;vec2 dir=dd/r;dir.x/=asp;
 	r/=max(gz,.05);   // Gesamtgröße des schwarzen Lochs
 	float pull=gs*.05/(r*r*30.+.12)*smoothstep(0.,.03,r);
-	float rip=gr>=0.?sin((r-gr)*60.)*exp(-pow((r-gr)*9.,2.))*.022*gk:0.;
+	float rip=gr>=0.?sin((r-gr)*60.)*exp(-pow(abs((r-gr)*9.),2.))*.022*gk:0.;
 	uv-=dir*(pull-rip)*min(gz,2.);
 	// Phasen-Glitch: Zeilen verrutschen, Farben laufen auseinander
 	float band=floor(uv.y*46.+floor(TIME*24.)*3.1);float go=(h21(vec2(band,floor(TIME*30.)))-.5)*.05*gl*step(.55,h21(vec2(band,1.7)));
@@ -333,8 +333,8 @@ void fragment(){
 	// schwarzer Kern und leuchtender Ring der Bombe
 	float gp=max(gs,0.);
 	col*=1.-smoothstep(.06*gp+.01,.0,r)*gp*gd;
-	col+=grc*exp(-pow((r-.075*gp)*55./grw,2.))*gp*1.6*grb;
-	if(gr>=0.)col+=vec3(.6,.45,1.)*exp(-pow((r-gr)*30.,2.))*gk*.8;
+	col+=grc*exp(-pow(abs((r-.075*gp)*55./grw),2.))*gp*1.6*grb;
+	if(gr>=0.)col+=vec3(.6,.45,1.)*exp(-pow(abs((r-gr)*30.),2.))*gk*.8;
 	// Speed-Linien: helle Streifen fliegen von der Mitte nach außen
 	float an=atan(cd.y,cd.x*asp);float lane=floor(an*70.);float hl=h21(vec2(lane,3.));
 	float sl=step(.93,hl)*smoothstep(.0,.15,fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl))*smoothstep(.5,.1,fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl));
@@ -516,6 +516,37 @@ func _save_cfg() -> void:
 
 
 # Glow: ab Godot 4.6 wird er vor der Farbumrechnung berechnet und ist auf dem Handy neu gebaut – dort braucht er andere Werte
+# Ab Godot 4.6 rechnet der Handy-Renderer Licht und Himmel anders: Ausgleichswerte (nur dort)
+const NEWR = {"sky": 0.4, "moon": 3.0, "ship": 1.5, "amb": 1.5}
+
+
+func _newr(k: String, d: float) -> float:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--nr" + k + "="):
+			return float(a.split("=")[1])
+	var vi = Engine.get_version_info()
+	if vi.major > 4 or vi.minor >= 6:
+		return NEWR.get(k, d)
+	return d
+
+
+# Streckenlampen: nur die nächsten paar vor der Kamera einschalten. Der Handy-Renderer nimmt pro Fläche nur
+# wenige Lichter – sonst verdrängen die Lampen das Licht der Schiffe (Abgasstrahl auf der Fahrbahn).
+func _lamps_cull() -> void:
+	if cam == null or float(fx.env.lamps) <= 0.01:
+		return
+	var cz = cam.global_position.z
+	var near = []
+	for b in lights_nodes:
+		var dz = (b as Node3D).global_position.z - cz
+		b.visible = false
+		if dz > -8.0 and dz < 70.0:
+			near.append([absf(dz - 10.0), b])
+	near.sort_custom(func(x, y): return x[0] < y[0])
+	for i in range(mini(6, near.size())):
+		near[i][1].visible = true
+
+
 func _glow_k() -> Dictionary:
 	var k = {"i": 1.0, "s": 1.0, "b": 0.08, "t": 1.0, "l6": 0.0, "l1": 0.0}
 	var vi = Engine.get_version_info()
@@ -573,7 +604,7 @@ var fog_c = Color()
 func _env_apply() -> void:
 	var E: Dictionary = fx.env
 	if sky_m != null:
-		sky_m.set_shader_parameter("sb", float(E.skyb))
+		sky_m.set_shader_parameter("sb", float(E.skyb) * _newr("sky", 1.0))
 		sky_m.set_shader_parameter("st", float(E.stars))
 		sky_m.set_shader_parameter("sl", float(E.skyl))
 		sky_m.set_shader_parameter("mn", float(E.moon))
@@ -952,7 +983,7 @@ float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
 // Bebenwelle: Kamm bei qz, davor ein kleiner Anlauf, dahinter ein Tal und Nachschwingen
 uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
 varying float wz;varying float qh;
-float qw(float d,float s){return s*(1.6*exp(-pow(d/2.6,2.))-.5*exp(-pow((d+6.)/2.6,2.))+.22*exp(-pow((d+12.)/2.4,2.)));}
+float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
 float quake(float z){return qw(z-qz,qs)+qw(qz2-z,qs2);}
 void vertex(){wz=(MODEL_MATRIX*vec4(VERTEX,1.)).z;qh=quake(wz);VERTEX+=NORMAL*qh;}
 void fragment(){
@@ -1419,7 +1450,7 @@ void fragment(){
 	vec2 uv=SCREEN_UV;
 	float line=step(.5,fract(FRAGCOORD.y*.25))*.10;
 	float vig=smoothstep(.45,.95,length((uv-.5)*vec2(.8,1.)));
-	float roll=smoothstep(.0,.02,abs(fract(uv.y-TIME*.12)-.5))*.0+exp(-pow((fract(uv.y-TIME*.12)-.5)*40.,2.))*.05;
+	float roll=smoothstep(.0,.02,abs(fract(uv.y-TIME*.12)-.5))*.0+exp(-pow(abs((fract(uv.y-TIME*.12)-.5)*40.),2.))*.05;
 	COLOR=vec4(vec3(roll),line+vig*.55);
 }""")
 	cl.add_child(sl)
@@ -3754,7 +3785,7 @@ void fragment(){
 	vec3 o=wc*gk;
 	vec3 c=o*(.06+.12*pow(n1(uv.x*26.+TIME*3.+sd),4.));
 	c+=o*edge*(.35+.6*fl)+o*cell;
-	c+=o*1.5*exp(-pow((fract(uv.y*.999-TIME*.8+sd)-.5)*9.,2.))*.35;
+	c+=o*1.5*exp(-pow(abs((fract(uv.y*.999-TIME*.8+sd)-.5)*9.),2.))*.35;
 	c+=(wc+vec3(0.,.15,.15))*gk*smoothstep(.07,0.,min(uv.y,1.-uv.y))*2.8;
 	c+=(wc+vec3(0.,.15,.15))*gk*smoothstep(.025,0.,min(uv.x,1.-uv.x))*2.2;
 	for(int i=0;i<4;i++){
@@ -5699,7 +5730,7 @@ func _shot() -> void:
 						lab.dist = float(p[6])
 				if shot_n == 80 and p[3] != "env":
 					_lab_fire()
-				var at = 60 + {"boom": 26, "mine": 26, "quake": 30, "gb": 36, "rak": 34, "wall": 40, "env": 30, "pillar": 70, "ship": 140}.get(p[3], 40)
+				var at = 60 + {"boom": 26, "mine": 26, "quake": 30, "gb": 36, "rak": 34, "wall": 40, "env": 30, "pillar": 70, "ship": 90}.get(p[3], 40)
 				if shot_n == at:
 					get_viewport().get_texture().get_image().save_png(p[0])
 					get_tree().quit()
@@ -5786,11 +5817,12 @@ func _tunnel(dt: float) -> void:
 	for tu in T.TUN:
 		k = maxf(k, clampf(minf(zl - tu[0] + 2.0, tu[1] - zl + 2.0) / 7.0, 0.0, 1.0))
 	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
-	wenv.ambient_light_energy = lerpf(0.35, 0.02, tun_k)
+	wenv.ambient_light_energy = lerpf(0.35 * _newr("amb", 1.0), 0.02, tun_k)
 	wenv.fog_density = lerpf(0.012 * float(fx.env.fog), 0.0, tun_k)
 	wenv.fog_enabled = float(fx.env.fog) > 0.01
 	wenv.background_energy_multiplier = lerpf(1.0, 0.05, tun_k)
-	moon.light_energy = lerpf(0.45 * float(fx.env.moon), 0.0, tun_k)
+	moon.light_energy = lerpf(0.45 * float(fx.env.moon) * _newr("moon", 1.0), 0.0, tun_k)
+	_lamps_cull()
 	# im Tunnel sieht man den Mond nicht: Schattenberechnung sparen
 	moon.shadow_enabled = int(cfg.gfx) >= 1 and tun_k < 0.6 and float(fx.env.moon) > 0.01
 	if tun_l.is_empty():
@@ -5859,7 +5891,7 @@ func _pose_all(dt: float) -> void:
 		for j in jets:
 			j.visible = s.boost > 0.25
 		var lt: OmniLight3D = nd.get_meta("light")
-		lt.light_energy = (1.4 + 3.0 * s.boost) * (1.0 + 1.2 * tun_k)
+		lt.light_energy = (1.4 + 3.0 * s.boost) * (1.0 + 1.2 * tun_k) * _newr("ship", 1.0)
 		var HX: Dictionary = fx.haze
 		for hm in nd.get_meta("haze"):
 			hm.set_shader_parameter("k", 0.55 + 0.9 * float(HX.boost) * minf(1.0, s.boost))
