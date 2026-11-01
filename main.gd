@@ -1898,7 +1898,64 @@ func _rp_seek(t: float) -> void:
 	while i < F.size() - 2 and F[i + 1].t <= rp.t:
 		i += 1
 	rp.i = i
-	rp.ei = i   # übersprungene Explosionen nicht nachträglich zünden
+	rp.ei = i
+	rp.dirty = true   # Effekte passend zur neuen Zeit neu aufbauen
+
+
+const FX_DUR = {"boom": 7.5, "gb": 2.0, "zap": 2.6}
+
+
+# alle Effekte so aufbauen, wie sie zur Replay-Zeit rp.t aussehen (Explosionen mittendrin, Rauch, schwarze Löcher …)
+func _rp_rebuild_fx() -> void:
+	var keep = rp.get("base", [])
+	var pools = []
+	for k in ["shots", "mines", "walls"]:
+		pools.append_array(rp.get(k, []))
+	for n in get_children():
+		if (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D) and not keep.has(n) and not pools.has(n) and not tun_l.has(n) and not n.has_meta("keep"):
+			n.queue_free()
+	for e in zaps:
+		e.mi.queue_free()
+		e.l.queue_free()
+	zaps.clear()
+	fxs.clear()
+	var F = rec
+	var j = rp.i
+	warm = true   # kein Ton, kein Blitz beim Aufbauen
+	fx_rebuild = true
+	live_bursts = 0
+	while j >= 0 and F[j].t >= rp.t - 8.0:
+		for ev in F[j].ev:
+			var age: float = rp.t - F[j].t
+			if age < 0.0 or age > FX_DUR.get(ev[0], 0.0):
+				continue
+			fx_age = age
+			match ev[0]:
+				"boom":
+					_explode(ev[1], ev[2], ev[3])
+				"gb":
+					_gbomb(ev[1], ev[2], -2)
+				"zap":
+					_zap_ship(ships[ev[1]])
+		j -= 1
+	_fx_update(0.0)
+	fx_age = 0.0
+	fx_rebuild = false
+	warm = false
+	shake = 0.0
+	rp.dirty = false
+	rp.rbt = Time.get_ticks_msec()
+	rp.fr = 2   # neue Partikel erst ein, zwei Bilder rechnen lassen (Vorlauf), dann einfrieren
+
+
+# angehalten oder beim Spulen: alle Partikel einfrieren
+func _rp_freeze(on: bool) -> void:
+	if rp.get("fr", 0) > 0:
+		rp.fr -= 1
+		on = false
+	for n in get_children():
+		if n is GPUParticles3D:
+			n.speed_scale = 0.0 if on else 1.0
 
 
 func _input(ev: InputEvent) -> void:
@@ -2160,12 +2217,30 @@ func _curve(pts: Array) -> CurveTexture:
 var live_bursts = 0
 
 
+# Alter, mit dem neue Effekte entstehen (im Replay beim Spulen: Effekt startet schon „mittendrin“)
+var fx_age = 0.0
+var fx_rebuild = false
+
+
+# später ausführen – oder sofort, wenn der Effekt schon älter ist als die Verzögerung
+func _later(d: float, f: Callable) -> void:
+	if fx_age >= d:
+		var old = fx_age
+		fx_age = fx_age - d
+		f.call()
+		fx_age = old
+	else:
+		get_tree().create_timer(d - fx_age).timeout.connect(f)
+
+
 func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vmax: float, spread: float, grav: Vector3, damp: float, smin: float, smax: float, ramp: GradientTexture1D, scurve: CurveTexture, align := false, spin := false, rad := 0.25) -> void:
+	if fx_age > life:
+		return
 	# Budget: je nach Grafikstufe und wie viel gerade schon los ist
 	var q = [0.45, 0.7, 1.0][clampi(int(cfg.gfx), 0, 2)]
-	if live_bursts > 10:
+	if live_bursts > 10 and not fx_rebuild:
 		q *= 0.5
-	if live_bursts > 22:
+	if live_bursts > 22 and not fx_rebuild:
 		return
 	amount = maxi(3, int(amount * q))
 	live_bursts += 1
@@ -2204,8 +2279,10 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 	p.visibility_aabb = AABB(Vector3(-12, -12, -12), Vector3(24, 24, 24))
 	p.position = pos
 	add_child(p)
+	if fx_age > 0.0:
+		p.preprocess = fx_age
 	p.emitting = true
-	get_tree().create_timer(life + 0.6).timeout.connect(p.queue_free)
+	get_tree().create_timer(life + 0.6 - fx_age).timeout.connect(p.queue_free)
 
 
 # Feuerball aus vielen wabernden Flammen: grell weiß-gelb → orange → dunkelrot, steigt etwas auf
@@ -2269,15 +2346,17 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	p.visibility_aabb = AABB(Vector3(-8, -8, -8), Vector3(16, 16, 16))
 	add_child(p)
+	if fx_age > 0.0:
+		p.preprocess = minf(fx_age, 0.55)
 	p.emitting = true
-	get_tree().create_timer(1.2).timeout.connect(p.queue_free)
+	get_tree().create_timer(maxf(0.1, 1.2 - fx_age)).timeout.connect(p.queue_free)
 	var lt = OmniLight3D.new()
 	lt.light_color = Color(0.65, 0.5, 1.0)
 	lt.omni_range = 12.0
 	lt.light_energy = 0.0
 	lt.position = pos
 	add_child(lt)
-	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": 0.0, "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit})
+	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": fx_age, "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit})
 	_snd("gbomb", 3.0, 1.0, pos)
 
 
@@ -2332,9 +2411,12 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		_fx_res()
 		var f = e.f
 		# Rückstoß: Funken und Lichtblitz nach außen, Ring über die Fahrbahn
+		var old_age = fx_age
+		fx_age = maxf(0.0, t - 0.55) if fx_rebuild else 0.0
 		_burst(e.pos, fxr.spark, 60, 1.0, 10.0, 22.0, 180.0, Vector3(0, -6, 0), 0.8, 0.8, 1.6,
 			_ramp([[0.0, Color(5, 4, 9, 1)], [0.6, Color(1.6, 1.0, 4.0, 1)], [1.0, Color(0.4, 0.2, 1.0, 0)]]), null, true, false, 0.3)
 		_burst(e.pos - f.uu * 0.4, fxr.debris, 12, 1.8, 5.0, 12.0, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.4, null, null, false, true, 0.3)
+		fx_age = old_age
 		var ring = MeshInstance3D.new()
 		ring.mesh = fxr.ring
 		var rm = _shader_mat(fxr.ring_code.replace("vec3(1.,.7,.4)", "vec3(.7,.5,1.)"))
@@ -2376,7 +2458,7 @@ func _explode(z: float, lat: float, big := false) -> void:
 	# Nachexplosionen: zwei, drei kleinere Feuerbälle rundherum, kurz versetzt
 	for j in range(2 if big else 1):
 		var off = f.rr * randf_range(-1.2, 1.2) + f.uu * randf_range(0.2, 1.4) + f.fw * randf_range(-1.0, 1.5)
-		get_tree().create_timer(0.08 + j * 0.11).timeout.connect(func(): _fire_ball(pos + off, k * 0.5))
+		_later(0.08 + j * 0.11, func(): _fire_ball(pos + off, k * 0.5))
 	# Feuerball: grell weiß-gelb → orange → dunkelrot
 	_fire_ball(pos, k)
 	# Rauch: steigt langsam auf, wird größer
@@ -2384,7 +2466,7 @@ func _explode(z: float, lat: float, big := false) -> void:
 	var smc = _curve([[0.0, 0.35], [0.25, 1.0], [1.0, 1.7]])
 	_burst(pos + f.uu * 0.5, fxr.smoke, int(10 * k), 8.0, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
 	# zweite, dichtere Wolke dicht über der Fahrbahn, hängt noch länger
-	get_tree().create_timer(0.25).timeout.connect(func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(6 * k), 10.0, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
+	_later(0.25, func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(6 * k), 10.0, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
 	# Funkenregen
 	_burst(pos, fxr.spark, int(45 * k), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
 		_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.2)
@@ -2407,7 +2489,7 @@ func _explode(z: float, lat: float, big := false) -> void:
 	lt.light_energy = 38.0
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
-	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": 0.0, "big": big, "f": f, "lat": lat, "rg": rg0})
+	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0})
 	_snd("boom", 4.0 if big else 2.0, randf_range(0.85, 1.0), pos)
 	_snd("boom", 2.0, 0.55, pos)   # tiefer Wumms darunter
 	# Kamera rüttelt, je näher, desto stärker
@@ -2576,8 +2658,10 @@ func _orbs_update(dt: float, live: bool) -> void:
 				sp2.rings = 6
 				var tn = _glow_node(sp2, Color(c.r * 1.5, c.g * 1.5, c.b * 1.5), 2.5, 0.45 * (1.0 - k * 0.15))
 				(tn.material_override as StandardMaterial3D).blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+				tn.set_meta("keep", true)
 				tr.append(tn)
 			mi.set_meta("tr", tr)
+			mi.set_meta("keep", true)
 			orb_n.append(mi)
 	var nd: Node3D = g.node
 	var tt = Time.get_ticks_msec() / 1000.0
@@ -2950,7 +3034,7 @@ func _zap_ship(o: Dictionary) -> void:
 	l.omni_range = 4.5
 	l.position = Vector3(0, 0.3, 0)
 	nd.add_child(l)
-	zaps.append({"o": o, "t": 0.0, "mi": mi, "l": l, "rt": 0.0})
+	zaps.append({"o": o, "t": fx_age, "mi": mi, "l": l, "rt": 0.0})
 
 
 func _zap_update(dt: float) -> void:
@@ -3103,6 +3187,20 @@ func _replay_start() -> void:
 		"fyaw": 0.6, "fpitch": 0.45, "fdist": 7.0, "follow": 0}
 	hud.rppause.text = "II"
 	rtouch = {}
+	# Effekte aus dem laufenden Rennen weg – im Replay entstehen sie aus der Aufzeichnung
+	for n in get_children():
+		if n is GPUParticles3D:
+			n.queue_free()
+	for e in fxs:
+		for k in ["ring", "l", "core", "sw"]:
+			if e.has(k) and e[k] != null and is_instance_valid(e[k]):
+				e[k].queue_free()
+	fxs.clear()
+	for e in zaps:
+		e.mi.queue_free()
+		e.l.queue_free()
+	zaps.clear()
+	rp.base = get_children()
 	_rp_follow_lbl()
 	state = "replay"
 	hud.resb.visible = false
@@ -4026,7 +4124,12 @@ func _process(delta: float) -> void:
 			dt = 1.0 / VX_FPS
 			_replay(dt)
 		elif vx.is_empty():
-			_replay(0.0 if (rp.get("paused", false) or rp.get("scrub", false)) else dt)
+			var hold = rp.get("paused", false) or rp.get("scrub", false)
+			_replay(0.0 if hold else dt)
+			if not rp.is_empty():
+				if rp.get("dirty", false) and Time.get_ticks_msec() - rp.get("rbt", 0) > 70:
+					_rp_rebuild_fx()
+				_rp_freeze(hold)
 		if state == "replay":
 			var lr = int(floor((_focus().z - 20.0) / T.LAP))
 			for i in range(3):
@@ -4209,7 +4312,7 @@ func _shot() -> void:
 				for i in range(1, 4):
 					ships[i].z = float(p[1]) + 2.0 + i * 2.5
 			if shot_n == 40 and p.size() > 3:
-				if p[3].begins_with("boom"):
+				if p[3].begins_with("boom") or p[3] == "repb":
 					_explode(ships[0].z + 6.0, 0.0, true)
 				elif p[3].begins_with("gb"):
 					_gbomb(ships[0].z + 9.0, 0.0)
@@ -4232,7 +4335,15 @@ func _shot() -> void:
 				else:
 					for k in range(int(p[3].substr(3))):
 						_rp_next()
-			if shot_n == ({"armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
+			if p.size() > 3 and p[3] == "repb" and shot_n == 74:
+				var te = 0.0
+				for fr in rec:
+					for ev in fr.ev:
+						if ev[0] == "boom":
+							te = fr.t
+				_rp_seek(te + 0.35)
+				rp.paused = true
+			if shot_n == ({"repb": 84, "repf": 85, "armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				if p.size() > 3 and p[3] == "long":
 					print(_perf_text())
