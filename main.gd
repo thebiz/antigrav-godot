@@ -2587,7 +2587,12 @@ func _flash(c: Color, a: float) -> void:
 		flash_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		flash_rect.color = Color(0, 0, 0, 0)
 		cl.add_child(flash_rect)
-	flash_rect.color = Color(c.r, c.g, c.b, maxf(flash_rect.color.a, a))
+	# starker Blitz: von der Effektfarbe ins grelle Weiß (sonst bleibt ein voller Blitz nur orange)
+	var w = clampf((a - 0.35) / 0.45, 0.0, 1.0)
+	var cc = c.lerp(Color(1, 1, 1), w * w)
+	if flash_rect.color.a > a:
+		cc = Color(flash_rect.color.r, flash_rect.color.g, flash_rect.color.b).lerp(cc, a / maxf(0.001, flash_rect.color.a))
+	flash_rect.color = Color(cc.r, cc.g, cc.b, minf(1.0, maxf(flash_rect.color.a, a)))
 
 var shake = 0.0
 
@@ -5730,7 +5735,7 @@ func _shot() -> void:
 						lab.dist = float(p[6])
 				if shot_n == 80 and p[3] != "env":
 					_lab_fire()
-				var at = 60 + {"boom": 26, "mine": 26, "quake": 30, "gb": 36, "rak": 34, "wall": 40, "env": 30, "pillar": 70, "ship": 90}.get(p[3], 40)
+				var at = 60 + {"boom": 30, "mine": 26, "quake": 30, "gb": 36, "rak": 34, "wall": 40, "env": 30, "pillar": 70, "ship": 90}.get(p[3], 40)
 				if shot_n == at:
 					get_viewport().get_texture().get_image().save_png(p[0])
 					get_tree().quit()
