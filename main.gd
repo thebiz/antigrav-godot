@@ -1464,6 +1464,31 @@ func _hud() -> void:
 	sv.pressed.connect(_rp_save)
 	cl.add_child(sv)
 	hud.rpsave = sv
+	# Fahrer wählen, dem die Kamera folgt
+	var fr = HBoxContainer.new()
+	fr.anchor_left = 0.5
+	fr.anchor_right = 0.5
+	fr.offset_left = -170
+	fr.offset_right = 170
+	fr.offset_top = 215
+	fr.offset_bottom = 295
+	fr.alignment = BoxContainer.ALIGNMENT_CENTER
+	fr.add_theme_constant_override("separation", 10)
+	fr.visible = false
+	cl.add_child(fr)
+	hud.flwrow = fr
+	var fl = _btn("◀")
+	fl.custom_minimum_size = Vector2(80, 76)
+	fl.pressed.connect(func(): _rp_follow(-1))
+	fr.add_child(fl)
+	var fn = _lbl("YOU", 30)
+	fn.custom_minimum_size = Vector2(150, 0)
+	fr.add_child(fn)
+	hud.flw = fn
+	var frb = _btn("▶")
+	frb.custom_minimum_size = Vector2(80, 76)
+	frb.pressed.connect(func(): _rp_follow(1))
+	fr.add_child(frb)
 	# Foto: nur das reine Bild, ohne Knöpfe, in die Galerie (Bilder › AntiGrav)
 	var ph = _btn("PHOTO", true)
 	ph.add_theme_font_size_override("font_size", 24)
@@ -3075,9 +3100,10 @@ func _replay_start() -> void:
 	if rec.size() < 10 or state == "replay":
 		return
 	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0, "fix": -1, "paused": false, "scrub": false,
-		"fyaw": 0.6, "fpitch": 0.45, "fdist": 7.0}
+		"fyaw": 0.6, "fpitch": 0.45, "fdist": 7.0, "follow": 0}
 	hud.rppause.text = "II"
 	rtouch = {}
+	_rp_follow_lbl()
 	state = "replay"
 	hud.resb.visible = false
 	hud.res.visible = false
@@ -3086,6 +3112,7 @@ func _replay_start() -> void:
 	hud.rpsave.visible = rpf.is_empty()
 	hud.rpphoto.visible = true
 	hud.rpphoto.text = "PHOTO"
+	hud.flwrow.visible = true
 	hud.board.visible = false
 	hud.rdim.visible = false
 	hud.vxb.visible = false   # Video-Export vorerst aus (zu langsam); Baustein bleibt für später im Code
@@ -3132,6 +3159,7 @@ func _replay_end() -> void:
 	hud.camrow.visible = false
 	hud.rpsave.visible = false
 	hud.rpphoto.visible = false
+	hud.flwrow.visible = false
 	hud.vxb.visible = false
 	mats.road.set_shader_parameter("qs", 0.0)
 	hud.fire.visible = true
@@ -3180,7 +3208,7 @@ func _replay(dt: float) -> void:
 		o.roll = lerpf(a[4], b[4], u)
 		o.boost = lerpf(a[5], b[5], u)
 		o.spd = lerpf(a[6], b[6], u)
-		(o.node as Node3D).visible = a[7] == 1 and not (k == 0 and RP_CAMS[rp.ci][0] == "cock")
+		(o.node as Node3D).visible = a[7] == 1 and not (k == rp.get("follow", 0) and RP_CAMS[rp.ci][0] == "cock")
 		o.shield = a[8]
 		_shield_vis(o)
 	var g: Dictionary = ships[0]
@@ -3215,11 +3243,11 @@ func _replay(dt: float) -> void:
 	var cm = RP_CAMS[rp.ci]
 	if rp.get("fix", -1) >= 0:
 		# feste Kamera: Streckenkamera nur neu aufstellen, wenn der Gleiter vorbei ist
-		if cm[0] == "side" and ((rp.sp != null and g.z > rp.sp + 9.0 and rp.ct > 2.5) or rp.ct > cm[2] * 1.6):
+		if cm[0] == "side" and ((rp.sp != null and _focus().z > rp.sp + 9.0 and rp.ct > 2.5) or rp.ct > cm[2] * 1.6):
 			rp.sp = null
 			rp.ct = 0.0
 	elif cm[0] == "side":
-		if (rp.sp != null and g.z > rp.sp + 9.0 and rp.ct > 2.5) or rp.ct > cm[2] * 1.6:
+		if (rp.sp != null and _focus().z > rp.sp + 9.0 and rp.ct > 2.5) or rp.ct > cm[2] * 1.6:
 			_rp_next()
 	elif rp.ct > cm[2]:
 		_rp_next()
@@ -3246,6 +3274,27 @@ func _rp_photo() -> void:
 	_snd("pick", -6.0, 1.6)
 	hud.rpphoto.text = "SAVED ✓" if ok else "ERROR"
 	get_tree().create_timer(1.5).timeout.connect(func(): hud.rpphoto.text = "PHOTO")
+
+
+# wem die Kamera folgt: im Replay der gewählte Fahrer, sonst du
+func _focus() -> Dictionary:
+	if state == "replay" and not rp.is_empty():
+		return ships[clampi(int(rp.get("follow", 0)), 0, ships.size() - 1)]
+	return ships[0]
+
+
+func _rp_follow(d: int) -> void:
+	if rp.is_empty():
+		return
+	rp.follow = posmod(int(rp.get("follow", 0)) + d, ships.size())
+	rp.sp = null
+	rp.ct = 0.0
+	_rp_follow_lbl()
+
+
+func _rp_follow_lbl() -> void:
+	var k = int(rp.get("follow", 0))
+	hud.flw.text = "YOU" if k == 0 else NAMES[k].to_upper()
 
 
 func _rp_cam_pick(ci: int) -> void:
@@ -3390,7 +3439,7 @@ func _rp_cam(dt: float) -> bool:
 	var cm = RP_CAMS[rp.ci][0]
 	if cm == "chase":
 		return false
-	var g: Dictionary = ships[0]
+	var g: Dictionary = _focus()
 	var f = T.frame(g.z)
 	var S0: Vector3 = f.c + f.rr * g.lat + f.uu * (0.16 + g.h)
 	if cm == "free":
@@ -3979,7 +4028,7 @@ func _process(delta: float) -> void:
 		elif vx.is_empty():
 			_replay(0.0 if (rp.get("paused", false) or rp.get("scrub", false)) else dt)
 		if state == "replay":
-			var lr = int(floor((g.z - 20.0) / T.LAP))
+			var lr = int(floor((_focus().z - 20.0) / T.LAP))
 			for i in range(3):
 				laps[i].position = Vector3(0, 0, (lr - 1 + i) * T.LAP)
 			_tunnel(dt)
@@ -4178,8 +4227,11 @@ func _shot() -> void:
 			if p.size() > 3 and p[3].begins_with("rep") and shot_n == 70:
 				state = "done"
 				_replay_start()
-				for k in range(int(p[3].substr(3))):
-					_rp_next()
+				if p[3] == "repf":
+					_rp_follow(2)
+				else:
+					for k in range(int(p[3].substr(3))):
+						_rp_next()
 			if shot_n == ({"armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				if p.size() > 3 and p[3] == "long":
@@ -4198,7 +4250,7 @@ var tun_l = []
 
 # Im Tunnel: Umgebungslicht, Himmel und Nebel weg; Lichter wandern mit den Magenta-Ringen vorbei
 func _tunnel(dt: float) -> void:
-	var g: Dictionary = ships[0]
+	var g: Dictionary = _focus()
 	var zl = T.lz(g.z)
 	var k = 0.0
 	for tu in T.TUN:
@@ -4272,7 +4324,7 @@ func _camera(dt: float) -> void:
 		return
 	if state == "kill" and _kc_cam():
 		return
-	var g: Dictionary = ships[0]
+	var g: Dictionary = _focus()
 	var f = T.frame(g.z)
 	var S0: Vector3 = f.c + f.rr * g.lat + f.uu * (0.16 + g.h)
 	cam_psi += (g.psi - cam_psi) * (1.0 - exp(-dt / 0.25))
