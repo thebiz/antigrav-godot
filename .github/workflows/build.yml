@@ -67,10 +67,14 @@ jobs:
           touch android/build/.gdignore
           ls android/build
           grep -n "srcDirs\|java.srcDir" android/build/build.gradle || true
-          mkdir -p android/build/src/com/antigrav
-          cp android_src/com/antigrav/VideoExport.java android/build/src/com/antigrav/
-          sed -i 's#</application>#    <meta-data android:name="org.godotengine.plugin.v2.VideoExport" android:value="com.antigrav.VideoExport"/>\n    </application>#' android/build/AndroidManifest.xml
-          grep -n "VideoExport" android/build/AndroidManifest.xml
+          # ab Godot 4.4 liegt die Vorlage im Standard-Aufbau (src/main/java, src/main/AndroidManifest.xml)
+          JD=android/build/src/main/java; [ -d "$JD" ] || JD=android/build/src
+          MF=android/build/src/main/AndroidManifest.xml; [ -f "$MF" ] || MF=android/build/AndroidManifest.xml
+          find android/build/src -maxdepth 3 | head -20
+          mkdir -p $JD/com/antigrav
+          cp android_src/com/antigrav/VideoExport.java $JD/com/antigrav/
+          sed -i 's#</application>#    <meta-data android:name="org.godotengine.plugin.v2.VideoExport" android:value="com.antigrav.VideoExport"/>\n    </application>#' $MF
+          grep -n "VideoExport" $MF
 
       - name: APK bauen
         # signiert mit dem öffentlichen Standard-Testschlüssel (kein Geheimnis), immer derselbe – siehe Schritt „key“
