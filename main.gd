@@ -1381,9 +1381,20 @@ func _hud() -> void:
 	cl.add_child(cr)
 	hud.camrow = cr
 	hud.cambtn = []
-	for it in [["AUTO", -1], ["CHASE", 0], ["TRACK", 1], ["COCKPIT", 2], ["AERIAL", 4], ["FRONT", 5]]:
+	# Pause / weiter
+	var pz = _btn("II")
+	pz.add_theme_font_size_override("font_size", 22)
+	pz.custom_minimum_size = Vector2(76, 76)
+	pz.pressed.connect(func():
+		if rp.is_empty():
+			return
+		rp.paused = not rp.get("paused", false)
+		pz.text = "▶" if rp.paused else "II")
+	cr.add_child(pz)
+	hud.rppause = pz
+	for it in [["AUTO", -1], ["CHASE", 0], ["TRACK", 1], ["COCKPIT", 2], ["AERIAL", 4], ["FRONT", 5], ["FREE", 6]]:
 		var b = _btn(it[0])
-		b.add_theme_font_size_override("font_size", 17)
+		b.add_theme_font_size_override("font_size", 15)
 		b.custom_minimum_size = Vector2(0, 76)
 		b.clip_text = true
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1757,7 +1768,56 @@ func _start() -> void:
 	hud.layer.visible = true
 
 
+var rtouch = {}
+
+
+# Replay-Gesten: ein Finger wischen = spulen (läuft nach dem Loslassen weiter), zwei Finger = freie Kamera drehen und zoomen
+func _rp_input(ev: InputEvent) -> void:
+	if ev is InputEventScreenTouch:
+		if ev.pressed:
+			rtouch[ev.index] = ev.position
+		else:
+			rtouch.erase(ev.index)
+		if rtouch.size() != 1:
+			rp.scrub = false
+		if rtouch.size() < 2:
+			rp.erase("pinch")
+	elif ev is InputEventScreenDrag:
+		if not rtouch.has(ev.index):
+			return
+		rtouch[ev.index] = ev.position
+		var w = maxf(1.0, get_viewport().get_visible_rect().size.x)
+		if rtouch.size() == 1:
+			# über die ganze Bildschirmbreite wischen = 8 Sekunden
+			if absf(ev.relative.x) > 0.0:
+				rp.scrub = true
+				_rp_seek(rp.t + ev.relative.x / w * 8.0)
+		elif rtouch.size() >= 2 and RP_CAMS[rp.ci][0] == "free":
+			var k = rtouch.keys()
+			var a: Vector2 = rtouch[k[0]]
+			var b: Vector2 = rtouch[k[1]]
+			var d = a.distance_to(b)
+			if rp.has("pinch") and rp.pinch > 1.0:
+				rp.fdist = clampf(rp.fdist * rp.pinch / maxf(1.0, d), 2.0, 40.0)
+			rp.pinch = d
+			# beide Finger melden sich einzeln: Hälfte der Bewegung je Finger
+			rp.fyaw -= ev.relative.x / w * PI * 0.5
+			rp.fpitch = clampf(rp.fpitch + ev.relative.y / w * PI * 0.5, -0.15, 1.45)
+
+
+func _rp_seek(t: float) -> void:
+	var F = rec
+	rp.t = clampf(t, F[0].t, F[F.size() - 1].t)
+	var i = 0
+	while i < F.size() - 2 and F[i + 1].t <= rp.t:
+		i += 1
+	rp.i = i
+	rp.ei = i   # übersprungene Explosionen nicht nachträglich zünden
+
+
 func _input(ev: InputEvent) -> void:
+	if state == "replay" and vx.is_empty() and not rp.is_empty():
+		_rp_input(ev)
 	if ev is InputEventScreenTouch:
 		if ev.pressed:
 			if state == "kill":
@@ -2903,7 +2963,7 @@ var rec_ev = []
 var rec_clk = 0.0
 var rec_acc = 0.0
 var rp = {}
-const RP_CAMS = [["chase", "Chase", 6.0], ["side", "Trackside", 7.0], ["cock", "Cockpit", 6.0], ["side", "Trackside", 7.0], ["heli", "Aerial", 6.0], ["front", "Front", 5.0]]
+const RP_CAMS = [["chase", "Chase", 6.0], ["side", "Trackside", 7.0], ["cock", "Cockpit", 6.0], ["side", "Trackside", 7.0], ["heli", "Aerial", 6.0], ["front", "Front", 5.0], ["free", "Free", 9999.0]]
 
 
 func _rev(ev: Array) -> void:
@@ -2950,7 +3010,10 @@ func _pool(key: String, n: int, mk: Callable) -> Array:
 func _replay_start() -> void:
 	if rec.size() < 10 or state == "replay":
 		return
-	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0, "fix": -1}
+	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0, "fix": -1, "paused": false, "scrub": false,
+		"fyaw": 0.6, "fpitch": 0.45, "fdist": 7.0}
+	hud.rppause.text = "II"
+	rtouch = {}
 	state = "replay"
 	hud.resb.visible = false
 	hud.res.visible = false
@@ -3241,6 +3304,14 @@ func _rp_cam(dt: float) -> bool:
 	var g: Dictionary = ships[0]
 	var f = T.frame(g.z)
 	var S0: Vector3 = f.c + f.rr * g.lat + f.uu * (0.16 + g.h)
+	if cm == "free":
+		# frei drehbare Kamera um deinen Gleiter (zwei Finger: drehen, auseinander/zusammen: zoomen)
+		var back: Vector3 = (-f.fw).rotated(Vector3.UP, rp.fyaw)
+		var dir: Vector3 = (back * cos(rp.fpitch) + Vector3.UP * sin(rp.fpitch)).normalized()
+		cam.global_position = S0 + dir * rp.fdist
+		cam.look_at(S0 + Vector3.UP * 0.2, Vector3.UP)
+		cam.fov = 55.0
+		return true
 	var nd: Node3D = g.node
 	var SF: Vector3 = nd.global_transform.basis.z.normalized()
 	var SU: Vector3 = nd.global_transform.basis.y.normalized()
@@ -3767,7 +3838,7 @@ func _process(delta: float) -> void:
 			dt = 1.0 / VX_FPS
 			_replay(dt)
 		elif vx.is_empty():
-			_replay(dt)
+			_replay(0.0 if (rp.get("paused", false) or rp.get("scrub", false)) else dt)
 		if state == "replay":
 			var lr = int(floor((g.z - 20.0) / T.LAP))
 			for i in range(3):
