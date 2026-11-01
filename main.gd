@@ -4,6 +4,7 @@ extends Node3D
 
 # gespeichertes Replay, das nach dem Neuladen der Szene abgespielt werden soll (bleibt über reload_current_scene erhalten)
 static var pending_rp = ""
+static var restart = false   # „Race again“: nach dem Neuladen direkt losfahren
 
 const T = preload("res://track.gd")
 # Gleiter: Datei, Name, Nase zeigt im Modell nach hinten (wird umgedreht), Herkunft
@@ -1452,6 +1453,35 @@ func _hud() -> void:
 	var cl = CanvasLayer.new()
 	add_child(cl)
 	hud.layer = cl
+	# Lenkzonen: weicher weißer Schein vom linken und rechten Rand nach innen (keine Knöpfe, nur Licht)
+	var sg = GradientTexture2D.new()
+	sg.fill = GradientTexture2D.FILL_RADIAL
+	sg.fill_from = Vector2(0.0, 0.5)
+	sg.fill_to = Vector2(1.0, 0.5)
+	var sgr = Gradient.new()
+	sgr.set_color(0, Color(1, 1, 1, 0.5))
+	sgr.set_color(1, Color(1, 1, 1, 0.0))
+	sgr.add_point(0.15, Color(1, 1, 1, 0.26))
+	sgr.add_point(0.32, Color(1, 1, 1, 0.08))
+	sgr.add_point(0.48, Color(1, 1, 1, 0.0))
+	sg.gradient = sgr
+	sg.width = 128
+	sg.height = 256
+	hud.sglow = []
+	for sd in [0, 1]:
+		var tr = TextureRect.new()
+		tr.texture = sg
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_SCALE
+		tr.flip_h = sd == 1
+		tr.anchor_left = 0.0 if sd == 0 else 0.4
+		tr.anchor_right = 0.6 if sd == 0 else 1.0
+		tr.anchor_top = 0.0
+		tr.anchor_bottom = 1.0
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tr.modulate.a = 0.0
+		cl.add_child(tr)
+		hud.sglow.append(tr)
 	var mk = func(sz: int, al: int) -> Label:
 		var l = Label.new()
 		l.add_theme_font_size_override("font_size", sz)
@@ -1623,7 +1653,7 @@ func _hud() -> void:
 	bx.offset_left = -230
 	bx.offset_right = 230
 	bx.offset_top = 0
-	bx.offset_bottom = 260
+	bx.offset_bottom = 380
 	bx.add_theme_constant_override("separation", 22)
 	bx.visible = false
 	cl.add_child(bx)
@@ -1631,9 +1661,15 @@ func _hud() -> void:
 	b1.pressed.connect(_replay_start)
 	bx.add_child(b1)
 	var b2 = _btn("RACE AGAIN")
-	b2.pressed.connect(func(): get_tree().reload_current_scene())
+	b2.pressed.connect(func():
+		restart = true
+		get_tree().reload_current_scene())
 	bx.add_child(b2)
+	var b3 = _btn("MENU")
+	b3.pressed.connect(func(): get_tree().reload_current_scene())
+	bx.add_child(b3)
 	hud.resb = bx
+	hud.resbtn = [b1, b2, b3]
 	# Ergebnistafel: alle vier Fahrer – erst Zeiten, dann abwechselnd ausgeteilter Schaden
 	var bd = VBoxContainer.new()
 	bd.anchor_left = 0.08
@@ -1799,6 +1835,52 @@ func _hud() -> void:
 
 
 # ---------------------------------------------------------------- Menü: Gleiterwahl, Start, Einstellungen (Tempo, Grafik)
+# Lenkzonen-Schein: beim Start kurz pulsieren (zeigt, wo gelenkt wird), beim Lenken leuchtet die gedrückte Seite auf
+var sg_a = [0.0, 0.0]
+
+
+func _steer_glow(dt: float, steer: float) -> void:
+	var intro = 0.0
+	if state == "intro":
+		intro = clampf(t_state / 1.0, 0.0, 1.0) * 0.55
+	elif state == "count":
+		intro = 0.3 + 0.25 * (0.5 + 0.5 * sin(t_state * TAU * 1.2))
+	elif state == "race" and t_state < 1.2:
+		intro = 0.6 * (1.0 - t_state / 1.2)
+	for sd in [0, 1]:
+		var on = (steer < 0.0 and sd == 0) or (steer > 0.0 and sd == 1)
+		var tg = maxf(intro, (0.25 + 0.45 * absf(steer)) if on and state == "race" and ships[0].auto <= 0.0 else 0.0)
+		sg_a[sd] += (tg - sg_a[sd]) * (1.0 - exp(-dt / (0.06 if tg > sg_a[sd] else 0.25)))
+		hud.sglow[sd].modulate.a = sg_a[sd]
+
+
+# Ergebnis-Knöpfe zeigen – aber erst nach kurzer Pause und erst, wenn kein Finger mehr auf dem Bildschirm liegt.
+# So löst ein Finger, der noch vom Lenken liegt, nichts aus: man muss neu antippen.
+var resb_t = 0.0
+var resb_armed = false
+var fingers = {}
+
+
+func _show_resb() -> void:
+	if not hud.resb.visible:
+		resb_t = 0.0
+		resb_armed = false
+	hud.resb.visible = true
+	_resb_arm(0.0)
+
+
+func _resb_arm(dt: float) -> void:
+	if not hud.resb.visible:
+		return
+	resb_t += dt
+	if not resb_armed and resb_t > 1.3 and fingers.is_empty():
+		resb_armed = true
+	var a = clampf((resb_t - 1.3) / 0.35, 0.0, 1.0) if resb_armed else 0.0
+	hud.resb.modulate.a = a
+	for b in hud.resbtn:
+		(b as Control).mouse_filter = Control.MOUSE_FILTER_STOP if resb_armed else Control.MOUSE_FILTER_IGNORE
+
+
 func _style(bg: Color, br: Color) -> StyleBoxFlat:
 	var sb = StyleBoxFlat.new()
 	sb.bg_color = bg
@@ -1893,14 +1975,23 @@ func _menu() -> void:
 	var go = _btn("START RACE", true)
 	go.pressed.connect(_start)
 	box.add_child(go)
-	var bs = _btn("Settings")
-	box.add_child(bs)
 	var brl = _btn("Replays")
 	brl.pressed.connect(func(): _show_replays(true))
 	box.add_child(brl)
+	var srow = HBoxContainer.new()
+	srow.add_theme_constant_override("separation", 16)
+	box.add_child(srow)
+	var bs = _btn("Settings")
+	bs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	srow.add_child(bs)
 	var blab = _btn("FX Lab")
+	blab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	blab.pressed.connect(_lab_open)
-	box.add_child(blab)
+	srow.add_child(blab)
+	var bq = _btn("Quit")
+	bq.modulate = Color(1, 1, 1, 0.75)
+	bq.pressed.connect(func(): get_tree().quit())
+	box.add_child(bq)
 	ui.credit = _lbl("", 18)
 	ui.credit.modulate = Color(1, 1, 1, 0.4)
 	ui.credit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -2221,6 +2312,11 @@ func _rp_freeze(on: bool) -> void:
 
 
 func _input(ev: InputEvent) -> void:
+	if ev is InputEventScreenTouch:
+		if ev.pressed:
+			fingers[ev.index] = true
+		else:
+			fingers.erase(ev.index)
 	if state == "lab":
 		_lab_input(ev)
 		return
@@ -3826,7 +3922,7 @@ func _replay_end() -> void:
 		return
 	state = "done"
 	t_state = 5.0
-	hud.resb.visible = true
+	_show_resb()
 	hud.res.visible = true
 	hud.rpx.visible = false
 	hud.camrow.visible = false
@@ -4672,6 +4768,9 @@ func _process(delta: float) -> void:
 	var g: Dictionary = ships[0]
 	if warm_t >= 0.0:
 		_warm_step(delta)
+	if state == "menu" and restart and warm_t < 0.0 and rpf.is_empty():
+		restart = false
+		_start()
 	if state == "menu" and not rpf.is_empty() and warm_t < 0.0:
 		rec = rpf.rec
 		ui.root.visible = false
@@ -4757,6 +4856,7 @@ func _process(delta: float) -> void:
 	if b != 0:
 		var x = minf(1.0, btn_t / RAMP)
 		steer = b * (START + (1.0 - START) * pow(x, SHAPE))
+	_steer_glow(dt, steer)
 	if state == "done":
 		steer = clampf(-g.lat * 0.6 - g.vpsi * 2.0, -1.0, 1.0)
 	var n = maxi(1, int(ceil(dt / 0.0125)))
@@ -4834,22 +4934,23 @@ func _process(delta: float) -> void:
 		state = "done"
 		t_state = 0.0
 		hud.res.text = ""   # die große rote Meldung und die Tabelle zeigen es schon
-		hud.resb.visible = true
+		_show_resb()
 	elif racing and kc_pending.is_empty() and ships.slice(1).all(func(x): return x.out):
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
 		_snd("win")
-		hud.resb.visible = true
+		_show_resb()
 		hud.res.text = "1st  ·  LAST ONE STANDING\n%s" % _fmt(race_t)
 	elif racing and g.z >= finish:
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
 		_snd("win")
-		hud.resb.visible = true
+		_show_resb()
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
 	_board_update(dt)
+	_resb_arm(dt)
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
 	if state != "done" or t_state < 0.1:
 		hud.top.text = _fmt(race_t)
