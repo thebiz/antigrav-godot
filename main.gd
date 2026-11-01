@@ -31,7 +31,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -88,6 +88,12 @@ func _ready() -> void:
 		CY = Color(0.9, 0.92, 0.95)
 		MG = OR
 		AM = OR
+	# Feld-Verteilung: fest (0) oder je Rennen neu gewürfelt; ein Replay aus der Datei bringt seine eigene mit
+	if not rpf.is_empty():
+		pad_seed = int(rpf.get("ps", 0))
+	else:
+		pad_seed = (randi() % 2000000000) + 1 if int(cfg.pads) == 1 else 0
+	_pads_gen()
 	_env()
 	_post()
 	_build_track()
@@ -840,14 +846,14 @@ func _build_track() -> void:
 	_strip("start", 19.5, 20.5, -TW, TW, 0.007, 0.007)
 	# Boost-Felder
 	for k in range(1, 21):
-		var zc = k * 35.0
-		if zc < 25.0 or zc > 715.0 or T.gap(zc + 1.4):
+		var zc = _bzp(k)
+		if zc < 25.0 or zc > 715.0 or T.gap(zc + 1.4) or T.gap(zc) or T.gap(zc + 3.0):
 			continue
-		var bx = T.bpx(k)
+		var bx = _bpx(k)
 		_strip("pad", zc, zc + 3.0, bx - 0.36, bx + 0.36, 0.008, 0.008)
 	# Waffenfelder: bunter Ring auf jedem zweiten Feld
 	for wk in range(0, 21, 2):
-		var zw = wk * 35.0 + 17.0
+		var zw = _wzp(wk)
 		if zw < 25.0 or zw > 715.0 or T.gap(zw + 1.0):
 			continue
 		var wx = _wpx(wk)
@@ -2043,13 +2049,20 @@ func _menu() -> void:
 		b.pressed.connect(func(): cfg.gfx = q; _refresh_ui(); _apply_cfg(); _save_cfg(); _rewarm())
 		gr.add_child(b)
 		ui.gfx.append(b)
-	sp.add_child(_lbl("Look", 32))
+	var twin = HBoxContainer.new()
+	twin.add_theme_constant_override("separation", 24)
+	sp.add_child(twin)
+	var lcol = VBoxContainer.new()
+	lcol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	twin.add_child(lcol)
+	lcol.add_child(_lbl("Look", 32))
 	var lr = HBoxContainer.new()
-	lr.add_theme_constant_override("separation", 12)
-	sp.add_child(lr)
+	lr.add_theme_constant_override("separation", 10)
+	lcol.add_child(lr)
 	ui.look = []
 	for q in range(2):
 		var b = _btn(["Color", "Noir"][q])
+		b.add_theme_font_size_override("font_size", 30)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.toggle_mode = true
 		b.pressed.connect(func():
@@ -2059,6 +2072,27 @@ func _menu() -> void:
 				get_tree().reload_current_scene())
 		lr.add_child(b)
 		ui.look.append(b)
+	# Boost- und Waffenfelder: feste Positionen oder bei jedem Rennen neu verteilt
+	var pcol = VBoxContainer.new()
+	pcol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	twin.add_child(pcol)
+	pcol.add_child(_lbl("Fields", 32))
+	var pr = HBoxContainer.new()
+	pr.add_theme_constant_override("separation", 10)
+	pcol.add_child(pr)
+	ui.pads = []
+	for q in range(2):
+		var b = _btn(["Fixed", "Random"][q])
+		b.add_theme_font_size_override("font_size", 30)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.toggle_mode = true
+		b.pressed.connect(func():
+			if int(cfg.pads) != q:
+				cfg.pads = q
+				_save_cfg()
+				get_tree().reload_current_scene())
+		pr.add_child(b)
+		ui.pads.append(b)
 	var back = _btn("Done", true)
 	back.pressed.connect(func(): _show_settings(false))
 	sp.add_child(back)
@@ -2179,6 +2213,11 @@ func _refresh_ui() -> void:
 		ui.gfx[q].add_theme_stylebox_override("normal", _style(Color(0.93, 0.41, 0.18) if on else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on else Color(1, 1, 1, 0.22)))
 		ui.gfx[q].add_theme_stylebox_override("pressed", ui.gfx[q].get_theme_stylebox("normal"))
 		ui.gfx[q].add_theme_stylebox_override("hover", ui.gfx[q].get_theme_stylebox("normal"))
+	for q in range(2):
+		var on3 = int(cfg.pads) == q
+		var st3 = _style(Color(0.93, 0.41, 0.18) if on3 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on3 else Color(1, 1, 1, 0.22))
+		for k in ["normal", "pressed", "hover"]:
+			ui.pads[q].add_theme_stylebox_override(k, st3)
 	for q in range(2):
 		var on2 = int(cfg.look) == q
 		var st2 = _style(Color(0.93, 0.41, 0.18) if on2 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on2 else Color(1, 1, 1, 0.22))
@@ -2357,7 +2396,71 @@ func _steer_input() -> int:
 
 
 # ---------------------------------------------------------------- Waffen und Energie
+# ---------------------------------------------------------------- Boost- und Waffenfelder: fest oder zufällig mit Regeln
+var pad_seed = 0
+var pb_lat = []
+var pb_off = []
+var pw_lat = []
+var pw_off = []
+
+
+func _pads_gen() -> void:
+	pb_lat.clear()
+	pb_off.clear()
+	pw_lat.clear()
+	pw_off.clear()
+	if pad_seed == 0:
+		return
+	var rng = RandomNumberGenerator.new()
+	rng.seed = pad_seed
+	var lim = 0.8   # nicht zu nah an den Rand
+	var prev_b = 99.0
+	for k in range(20):
+		# Boost-Feld: etwas vor/zurück, gern auf der Innenseite der kommenden Kurve, nie direkt hinter dem vorigen
+		pb_off.append(rng.randf_range(-5.0, 5.0))
+		var c = signf(T.d2px(k * 35.0 + 6.0))
+		var lat = 0.0
+		for _t in range(12):
+			lat = c * rng.randf_range(0.4, lim) if rng.randf() < 0.5 and c != 0.0 else rng.randf_range(-lim, lim)
+			if absf(lat - prev_b) >= 0.5:
+				break
+		pb_lat.append(lat)
+		prev_b = lat
+	var prev_w = 99.0
+	for k in range(20):
+		pw_off.append(rng.randf_range(-6.0, 6.0))
+		var lat = 0.0
+		for _t in range(12):
+			lat = rng.randf_range(-lim, lim)
+			# nicht genau hinter dem Boost-Feld davor und nicht in derselben Spur wie die vorige Waffensäule
+			if absf(lat - pb_lat[k]) >= 0.5 and absf(lat - prev_w) >= 0.4:
+				break
+		pw_lat.append(lat)
+		if k % 2 == 0:
+			prev_w = lat
+
+
+func _bpx(k: int) -> float:
+	return T.bpx(k) if pad_seed == 0 else pb_lat[posmod(k, 20)]
+
+
+func _bzp(k: int) -> float:
+	return k * 35.0 + (0.0 if pad_seed == 0 else pb_off[posmod(k, 20)])
+
+
+func _wzp(k: int) -> float:
+	return k * 35.0 + 17.0 + (0.0 if pad_seed == 0 else pw_off[posmod(k, 20)])
+
+
+# gibt es das Feld auf der Strecke wirklich? (nicht am Start, nicht über der Sprunglücke)
+func _pad_ok(z: float) -> bool:
+	var zl = fposmod(z - 20.0, 700.0) + 20.0
+	return zl >= 25.0 and zl <= 715.0 and not T.gap(zl + 1.0)
+
+
 func _wpx(k: int) -> float:
+	if pad_seed != 0:
+		return pw_lat[posmod(k, 20)]
 	return -0.55 * sin(posmod(k, 20) * 1.3 + 0.4) * T.TW / 1.6
 
 
@@ -3065,8 +3168,10 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 	if o.turbo > 0.0:
 		o.turbo -= dt
 		o.boost = maxf(o.boost, 1.5)
-	var wk = int(floor((o.z - 17.0) / 35.0))
-	var wz = (o.z - 17.0) / 35.0 - wk
+	var wk = int(round((o.z - 17.0) / 35.0))
+	var wz = (o.z - _wzp(wk)) / 35.0
+	if wz < 0.0 or not _pad_ok(_wzp(wk)):
+		wz = 9.0
 	if posmod(wk, 2) == 0 and wz < 0.08 and wk != o.wpK and o.wpn != "" and not o.get("sup", false):
 		o.wpK = wk
 		if randf() < 0.4:
@@ -3417,8 +3522,10 @@ func _weapons(dt: float, racing: bool) -> void:
 		hud.msg.text = ""
 	# Waffenfeld: jedes zweite Feld (alle 70 Einheiten)
 	var zz = g.z
-	var wk = int(floor((zz - 17.0) / 35.0))
-	var wz = (zz - 17.0) / 35.0 - wk
+	var wk = int(round((zz - 17.0) / 35.0))
+	var wz = (zz - _wzp(wk)) / 35.0
+	if wz < 0.0 or not _pad_ok(_wzp(wk)):
+		wz = 9.0
 	if racing and posmod(wk, 2) == 0 and wz < 0.05 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and (g.wpn == "" or not g.get("sup", false)):
 		g.wpK = wk
 		if g.wpn == "":
@@ -4102,7 +4209,7 @@ func _rp_save() -> void:
 	if fa == null:
 		hud.rpsave.text = "ERROR"
 		return
-	fa.store_var({"v": 1, "rec": rec, "sm": sm, "res": hud.res.text.replace("\n", " · "),
+	fa.store_var({"v": 1, "rec": rec, "sm": sm, "ps": pad_seed, "res": hud.res.text.replace("\n", " · "),
 		"date": "%02d.%02d.%04d  %02d:%02d" % [t.day, t.month, t.year, t.hour, t.minute]})
 	fa.close()
 	hud.rpsave.text = "SAVED ✓"
@@ -4719,9 +4826,9 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 			if is_p:
 				_snd("zap", -2.0, randf_range(0.9, 1.1))
 	# Boost-Feld
-	var k = int(floor(s.z / 35.0))
-	var fz = s.z / 35.0 - k
-	if fz < 0.08 and not s.air and absf(s.lat - T.bpx(k)) < 0.36 and k != s.padK and racing:
+	var k = int(round(s.z / 35.0))
+	var fz = (s.z - _bzp(k)) / 35.0
+	if fz >= 0.0 and fz < 0.08 and _pad_ok(_bzp(k)) and not s.air and absf(s.lat - _bpx(k)) < 0.36 and k != s.padK and racing:
 		s.padK = k
 		s.boost = 1.0
 		if is_p:
