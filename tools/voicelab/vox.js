@@ -147,12 +147,23 @@
 			mixInto(y, granular(xr, T, rp / rf * Math.pow(2, -0.22 / 12), 42), q.chorus * 0.5, Math.round(SR * 0.021));
 		}
 		var n = y.length, i;
-		// Flüstern: Rauschen, das der Lautstärke der Stimme folgt
+		// Hauchen/Flüstern: Atemgeräusch, das den Klang der Stimme trägt (Vocoder: Rauschen in 20 Bändern,
+		// jedes Band so laut wie die Stimme in diesem Band) – so bleibt die Stimme verständlich und wird nur hauchig
 		if (q.whisper > 0) {
-			var env = envelope(y, 25), nz = new Float32Array(n);
-			for (i = 0; i < n; i++) nz[i] = (rand() * 2 - 1) * env[i] * 3;
-			nz = biquad(biquad(nz, "hp", 700, 0.7), "lp", 7000, 0.7);
-			for (i = 0; i < n; i++) y[i] = y[i] * (1 - q.whisper * 0.85) + nz[i] * q.whisper * 1.6;
+			var nz = new Float32Array(n), br = new Float32Array(n), NB = 20, wf0 = 160, wf1 = 8000;
+			for (i = 0; i < n; i++) nz[i] = rand() * 2 - 1;
+			for (var b = 0; b < NB; b++) {
+				var fc = wf0 * Math.pow(wf1 / wf0, (b + 0.5) / NB);
+				var bs = biquad(biquad(y, "bp", fc, 2.6), "bp", fc, 2.6);
+				var be = envelope(bs, 28);
+				var bn = biquad(biquad(nz, "bp", fc, 2.6), "bp", fc, 2.6);
+				var tilt = Math.pow(fc / 1000, 0.3);   // Atem ist heller als die Stimme
+				for (i = 0; i < n; i++) br[i] += bn[i] * be[i] * tilt;
+			}
+			br = biquad(biquad(br, "hp", 300, 0.7), "lp", 8500, 0.7);
+			var pbw = peak(br), pyw = peak(y), ww = q.whisper;
+			var wet = Math.min(1, ww * 1.2) * 0.95, dry = 1 - Math.min(0.9, ww * 0.9);
+			for (i = 0; i < n; i++) y[i] = y[i] * dry + br[i] / pbw * pyw * wet;
 		}
 		// Roboter: Ringmodulation
 		if (q.ring > 0) for (i = 0; i < n; i++) y[i] = y[i] * (1 - q.ring) + y[i] * Math.sin(TAU * q.ringf * i / SR) * q.ring;
@@ -187,10 +198,12 @@
 		if (q.highcut < 15500) y = biquad(y, "lp", q.highcut, 0.7);
 		// Funk: Telefon-Band, etwas Rauschen und Biss
 		if (q.radio > 0) {
-			var r = biquad(biquad(y, "hp", 380, 0.8), "lp", 3200, 0.8), pr = peak(r);
+			var r = biquad(biquad(biquad(y, "hp", 420, 0.9), "lp", 2900, 0.9), "peak", 1700, 1.1, 5), pr = peak(r);
+			var py5 = peak(y), er = envelope(y, 14), per = peak(er);
 			for (i = 0; i < n; i++) {
-				var v = Math.tanh(r[i] / pr * 2.5) * 0.8 + (rand() * 2 - 1) * 0.025;
-				y[i] = y[i] * (1 - q.radio) + v * peak(y) * q.radio;
+				// Rauschen nur, solange gesprochen wird (wie ein offener Funkkanal), keine dauerhafte Störung
+				var v = Math.tanh(r[i] / pr * 2.2) * 0.8 + (rand() * 2 - 1) * 0.035 * Math.min(1, er[i] / per * 3);
+				y[i] = y[i] * (1 - q.radio) + v * py5 * q.radio;
 			}
 		}
 		// Echo
