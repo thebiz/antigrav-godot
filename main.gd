@@ -613,7 +613,7 @@ const FXS = {
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
 		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
-		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections (4.7)", 0.0, 6.0, 1.0],
+		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections", 0.0, 6.0, 1.0],
 		["gloss", "Road gloss", 0.0, 4.0, 2.0], ["wet", "Wet road", 0.0, 4.0, 1.0]],
 	"city": [["holo", "Holograms", 0.0, 4.0, 1.0], ["hsize", "Hologram size", 0.3, 3.0, 1.0], ["hflick", "Hologram glitch", 0.0, 4.0, 1.0], ["hhue", "Hologram color", -0.5, 0.5, 0.0],
 		["koi", "Koi fish", 0.0, 4.0, 1.0], ["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
@@ -715,7 +715,7 @@ func _newr(k: String, d: float) -> float:
 # Zwei lange Leuchtflächen auf Höhe der Neonbänder an den Leitplanken wandern mit dir mit. So spiegeln sich
 # Cyan und Magenta auf der nassen Fahrbahn und an den Schiffsflanken – wie bei echten Neonröhren.
 var nlights = []
-var has_al = ClassDB.class_exists("AreaLight3D")
+var has_al = false   # Flächenlichter kosteten am Handy 13 ms pro Bild – der Neonschein kommt jetzt aus dem Fahrbahn-Shader
 
 
 func _neon_lights() -> void:
@@ -843,6 +843,9 @@ func _env_apply() -> void:
 	var E: Dictionary = fx.env
 	if mats.has("road"):
 		_rset("rgl", float(E.gloss))
+		_rset("nk", float(E.nlight))
+		_rset("ncl", _v3(CY))
+		_rset("ncr", _v3(MG))
 	_wet_apply()
 	_city_apply()
 	if sky_m != null:
@@ -1324,7 +1327,8 @@ float h11(float x){return fract(sin(x*91.7)*4371.3);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
 // Bebenwelle: Kamm bei qz, davor ein kleiner Anlauf, dahinter ein Tal und Nachschwingen
 uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
-uniform float rgl=1.;   // Glanz der Fahrbahn (FX Lab): mehr = glatter, schärfere Spiegelungen
+uniform float rgl=1.;
+uniform vec3 ncl=vec3(0.,.78,1.);uniform vec3 ncr=vec3(1.,.06,.42);uniform float nk=1.;   // Neonschein der Leitplanken   // Glanz der Fahrbahn (FX Lab): mehr = glatter, schärfere Spiegelungen
 varying float wz;varying float qh;
 float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
 float quake(float z){return qw(z-qz,qs)+qw(qz2-z,qs2);}
@@ -1344,6 +1348,11 @@ void fragment(){
 	ALBEDO=base;METALLIC=.8;ROUGHNESS=clamp((.38+.1*br)/(.6+.4*rgl)+seam*.3+edge*.2,.04,1.);SPECULAR=.45;
 	float cr=max(qh,0.)/max(max(qs,qs2),.01);   // glühender Kamm, aufgerissene Fugen
 	EMISSION=(qc*pow(cr,1.5)*6.+qc*vec3(1.,.6,.62)*seam*cr*14.)*step(.01,qs+qs2)*qg;
+	// Spiegelung der Neonbänder auf der glatten Fahrbahn – im Shader gerechnet statt mit teuren Flächenlichtern
+	float dl=2.4-abs(x);
+	float frn=pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),2.);
+	float shn=(exp(-dl*1.6)*.25+exp(-dl*5.)*.75)*(.08+frn*1.8)*(1.-seam*.6)*(1.-edge*.5);
+	EMISSION+=(x<0.?ncl:ncr)*shn*nk*.22;
 }""", [["vec3(.75,.62,.08)", "vec3(.8,.3,.02)"]]))
 	mats["wall"] = _metal(Color(0.07, 0.075, 0.09), 0.22)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
@@ -2602,7 +2611,7 @@ func _hud() -> void:
 	b4.add_theme_font_size_override("font_size", 22)
 	b4.custom_minimum_size = Vector2(0, 64)
 	b4.pressed.connect(func():
-		DisplayServer.clipboard_set(_perf_text())
+		DisplayServer.clipboard_set(bench.get("txt", "") if state == "bench" else _perf_text())
 		b4.text = "REPORT COPIED ✓")
 	bx.add_child(b4)
 	bx.offset_bottom = 470
@@ -5971,7 +5980,7 @@ func _notification(what: int) -> void:
 # Gleiche Stelle, gleiche Kamera – nur ein Schalter ändert sich je Abschnitt. So sieht man genau, was die Grafikkarte kostet.
 var bench = {}
 const BENCH = [["base", "Everything on (your settings)"], ["msaa", "Edge smoothing (MSAA) off"], ["res75", "Resolution 75 %"], ["fsr", "Resolution 75 % + FSR sharpening"],
-	["shadow", "Moon shadows off"], ["glow", "Glow off"], ["post", "Screen filter off"], ["haze", "Heat shimmer off"], ["nlight", "Neon area lights off"],
+	["shadow", "Moon shadows off"], ["glow", "Glow off"], ["post", "Screen filter off"], ["haze", "Heat shimmer off"], ["nlight", "Neon reflections off"],
 	["lamps", "Track lamps off"], ["jets", "Plasma jets off"], ["city", "Holograms/signs/cars off"], ["sky", "Sky shader off"], ["wet", "Wet road off/on"], ["base2", "Everything on again"]]
 
 
@@ -6088,6 +6097,7 @@ func _bench_end() -> void:
 	for r in bench.res:
 		t += "%5.1f · %5.1f · %s  (%+.1f)\n" % [r[1], r[2], r[0], r[1] - b0]
 	DisplayServer.clipboard_set(t)
+	bench.txt = t
 	hud.mid.add_theme_font_size_override("font_size", 22)
 	hud.mid.text = "Performance test done – result copied.\nPaste it in the chat.\n\n" + t
 	_show_resb()
