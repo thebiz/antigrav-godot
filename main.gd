@@ -78,6 +78,7 @@ func _ready() -> void:
 	Engine.time_scale = 1.0
 	AudioServer.playback_speed_scale = 1.0
 	_load_cfg()
+	_fx_load()
 	if OS.get_cmdline_user_args().has("--noir"):
 		cfg.look = 1
 	if _noir():
@@ -99,6 +100,7 @@ func _ready() -> void:
 	_menu()
 	_sounds()
 	_apply_cfg()
+	_env_apply()
 
 
 # ---------------------------------------------------------------- Klänge aus dem alten Spiel (Dateien in sfx/)
@@ -373,6 +375,7 @@ func _post_update(dt: float) -> void:
 		gs = pow(t / 0.55, 1.6) * 1.2
 	elif t < 0.62:
 		gs = -1.2
+	bk *= best.get("lens", 1.0)
 	post.set_shader_parameter("gs", gs * bk)
 	post.set_shader_parameter("gr", (t - 0.55) * 1.1 if t >= 0.55 else -1.0)
 	post.set_shader_parameter("gk", bk * clampf(1.0 - (t - 0.55) / 0.8, 0.0, 1.0))
@@ -384,6 +387,80 @@ var post_spd = 0.0
 func asp_v(vp: Vector2) -> float:
 	return vp.y / maxf(1.0, vp.x)
 var gl_v = 0.0
+
+
+# ---------------------------------------------------------------- FX Lab: Regler für alle Effekte und die Umgebung (user://fx.json)
+const FX_PATH = "user://fx.json"
+# je Bereich: [Schlüssel, Anzeige, min, max, Standard]  (Farbregler heißen "hue…": -0.5…0.5 = einmal ums Farbrad)
+const FXS = {
+	"boom": [["size", "Size", 0.4, 2.5, 1.0], ["fire", "Fire", 0.0, 3.0, 1.0], ["after", "Extra fireballs", 0.0, 4.0, 1.0], ["smoke", "Smoke", 0.0, 3.0, 1.0],
+		["slife", "Smoke duration", 0.2, 2.0, 1.0], ["sparks", "Sparks", 0.0, 3.0, 1.0], ["debris", "Debris", 0.0, 3.0, 1.0], ["ring", "Shock ring", 0.0, 3.0, 1.0],
+		["light", "Light flash", 0.0, 3.0, 1.0], ["flash", "Screen flash", 0.0, 3.0, 1.0], ["shake", "Camera shake", 0.0, 3.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
+	"mine": [["size", "Size", 0.4, 3.0, 1.0], ["glow", "Glow", 0.0, 3.0, 1.0], ["blink", "Blink speed", 0.2, 3.0, 1.0], ["life", "Lifetime", 3.0, 60.0, 25.0],
+		["boom", "Explosion size", 0.3, 2.5, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
+	"quake": [["height", "Wave height", 0.2, 2.5, 1.0], ["speed", "Speed", 0.3, 2.5, 1.0], ["dur", "Range", 0.2, 2.0, 1.0], ["glow", "Glow", 0.0, 3.0, 1.0],
+		["sparks", "Sparks & debris", 0.0, 3.0, 1.0], ["shake", "Camera shake", 0.0, 3.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
+	"gb": [["size", "Pull radius", 0.4, 2.5, 1.0], ["time", "Duration", 0.4, 3.0, 1.0], ["core", "Core size", 0.3, 2.5, 1.0], ["sparks", "Sparks", 0.0, 3.0, 1.0],
+		["wave", "Shock ring", 0.0, 3.0, 1.0], ["light", "Light", 0.0, 3.0, 1.0], ["lens", "Space warp", 0.0, 3.0, 1.0], ["shake", "Camera shake", 0.0, 3.0, 1.0],
+		["hue", "Color", -0.5, 0.5, 0.0]],
+	"rak": [["size", "Size", 0.4, 3.0, 1.0], ["speed", "Speed", 0.3, 2.5, 1.0], ["light", "Light", 0.0, 3.0, 1.0], ["hue", "Color", -0.5, 0.5, 0.0]],
+	"wall": [["height", "Height", 0.4, 3.0, 1.0], ["dur", "Duration", 0.3, 3.0, 1.0], ["bolts", "Lightning", 0.0, 3.0, 1.0], ["glow", "Glow", 0.0, 3.0, 1.0],
+		["hue", "Color", -0.5, 0.5, 0.0]],
+	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 2.5, 1.0], ["bh", "Height", 0.5, 2.5, 1.0], ["bw", "Width", 0.3, 2.5, 1.0],
+		["bd", "Distance", 0.3, 2.5, 1.0], ["win", "Lit windows", 0.0, 2.0, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 3.0, 1.0],
+		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 2.5, 1.0], ["stars", "Stars", 0.0, 3.0, 1.0], ["skyl", "Skyline", 0.0, 2.0, 1.0],
+		["fog", "Fog density", 0.0, 4.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 2.0, 1.0], ["beams", "Light pillars", 0.0, 3.0, 1.0],
+		["lamps", "Track lights", 0.0, 3.0, 1.0]],
+}
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["env", "World"]]
+var fx = {}
+
+
+func _fx_load() -> void:
+	fx = {}
+	for gk in FXS:
+		fx[gk] = {}
+		for it in FXS[gk]:
+			fx[gk][it[0]] = it[4]
+	if not FileAccess.file_exists(FX_PATH):
+		return
+	var d = JSON.parse_string(FileAccess.get_file_as_string(FX_PATH))
+	if not (d is Dictionary):
+		return
+	for gk in FXS:
+		if d.get(gk) is Dictionary:
+			for it in FXS[gk]:
+				var v = d[gk].get(it[0])
+				if v is float or v is int:
+					fx[gk][it[0]] = clampf(float(v), it[2], it[3])
+
+
+func _fx_save() -> void:
+	var f = FileAccess.open(FX_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(fx))
+
+
+# Farbe ums Farbrad drehen, Helligkeit (auch über 1, HDR) bleibt
+func _hs(c: Color, h: float) -> Color:
+	if absf(h) < 0.001:
+		return c
+	var m = maxf(c.r, maxf(c.g, c.b))
+	if m <= 0.0:
+		return c
+	var n = Color(c.r / m, c.g / m, c.b / m)
+	var r = Color.from_hsv(fposmod(n.h + h, 1.0), n.s, n.v)
+	return Color(r.r * m, r.g * m, r.b * m, c.a)
+
+
+func _rh(cols: Array, h: float) -> Array:
+	if absf(h) < 0.001:
+		return cols
+	return cols.map(func(c): return [c[0], _hs(c[1], h)])
+
+
+func _v3(c: Color) -> Vector3:
+	return Vector3(c.r, c.g, c.b)
 
 
 # ---------------------------------------------------------------- Einstellungen (im Handy gespeichert)
@@ -421,33 +498,66 @@ func _apply_cfg() -> void:
 	for nm in neon_mats:
 		nm[0].emission_energy_multiplier = nm[1] * float(cfg.neon)
 	for b in lights_nodes:
-		b.light_energy = 2.2 * float(cfg.neon)
+		b.light_energy = 2.2 * float(cfg.neon) * float(fx.env.lamps)
+		b.visible = float(fx.env.lamps) > 0.01
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.001, float(cfg.vol))))
+
+
+var sky_m: ShaderMaterial
+var fog_c = Color()
+
+
+# Regler aus dem FX Lab (Bereich „World“) auf Himmel, Nebel, Häuser, Lichtsäulen und Lampen anwenden
+func _env_apply() -> void:
+	var E: Dictionary = fx.env
+	if sky_m != null:
+		sky_m.set_shader_parameter("sb", float(E.skyb))
+		sky_m.set_shader_parameter("st", float(E.stars))
+		sky_m.set_shader_parameter("sl", float(E.skyl))
+		sky_m.set_shader_parameter("mn", float(E.moon))
+		sky_m.set_shader_parameter("hu", float(E.hue_s))
+	if wenv != null:
+		wenv.fog_light_color = _hs(fog_c, float(E.hue_f))
+	if city_mat != null:
+		city_mat.set_shader_parameter("wl", float(E.win))
+		city_mat.set_shader_parameter("wh", float(E.hue_w))
+		city_mat.set_shader_parameter("eg", float(E.edge))
+	if beam_mat != null:
+		beam_mat.set_shader_parameter("bk", float(E.beams))
+	for b in beam_n:
+		b.visible = float(E.beams) > 0.01
+	if moon != null:
+		moon.visible = float(E.moon) > 0.01
+	if wenv != null and moon != null:
+		_apply_cfg()
 
 
 # ---------------------------------------------------------------- Umgebung: Himmel, Licht, Glühen, Spiegelungen, Nebel
 func _env() -> void:
 	var sky_mat = ShaderMaterial.new()
+	sky_m = sky_mat
 	sky_mat.shader = Shader.new()
 	sky_mat.shader.code = _nz("""
 shader_type sky;
+uniform float sb=1.;uniform float st=1.;uniform float sl=1.;uniform float mn=1.;uniform float hu=0.;
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+vec3 hr(vec3 c,float a){vec3 k=vec3(.57735);float ca=cos(a);return c*ca+cross(k,c)*sin(a)+k*dot(k,c)*(1.-ca);}
 void sky(){
 	vec3 d=EYEDIR;float h=d.y;float an=atan(d.x,d.z);
-	vec3 c=mix(vec3(.04,.02,.07),vec3(.002,.003,.012),smoothstep(0.,.5,h));
+	vec3 c=hr(mix(vec3(.04,.02,.07),vec3(.002,.003,.012),smoothstep(0.,.5,h)),hu*6.2832)*sb;
 	vec2 sp=vec2(an*90.,h*160.);vec2 ci=floor(sp);
-	c+=vec3(.8,.85,1.)*step(.986,h21(ci))*smoothstep(.03,.25,h)*(1.-step(.3,length(fract(sp)-.5)))*1.6;
+	c+=vec3(.8,.85,1.)*step(.986,h21(ci))*smoothstep(.03,.25,h)*(1.-step(.3,length(fract(sp)-.5)))*1.6*st;
 	vec3 md=normalize(vec3(.5,.32,.8));float mo=dot(d,md);
-	c+=vec3(.9,.92,1.)*smoothstep(.9994,.9997,mo)*4.+vec3(.25,.3,.5)*pow(max(0.,mo),60.)*.35;
+	c+=(vec3(.9,.92,1.)*smoothstep(.9994,.9997,mo)*4.+vec3(.25,.3,.5)*pow(max(0.,mo),60.)*.35)*mn;
 	// Skyline in zwei Tiefen mit Fenstern und Neonkanten
 	for(int k=0;k<2;k++){float fk=float(k);float s=55.-fk*20.;float bx=floor(an*s);
-		float bh=(.014+.05*pow(h21(vec2(bx,fk)),2.2))*(1.+fk*.7);
-		if(h<bh&&h>-.04){vec2 w=vec2(fract(an*s)*5.,h*s*6.);vec2 wi=floor(w);
+		float bh=(.014+.05*pow(h21(vec2(bx,fk)),2.2))*(1.+fk*.7)*sl;
+		if(h<bh&&h>-.04&&sl>.01){vec2 w=vec2(fract(an*s)*5.,h*s*6.);vec2 wi=floor(w);
 			float lit=step(.68,h21(wi+bx*1.3+fk*7.))*step(.25,fract(w.x))*step(.3,fract(w.y));
 			vec3 wc=h21(wi+3.1)>.8?vec3(.3,.8,1.):vec3(1.,.7,.45);
 			c=vec3(.004,.005,.01)*(1.+fk)+wc*lit*(.6-fk*.2);
 			if(h>bh-.0025)c+=(h21(vec2(bx,9.))>.5?vec3(0.,.78,1.):vec3(1.,.06,.42))*1.5;}}
-	c+=vec3(.5,.12,.45)*exp(-abs(h)*22.)*.22;
+	c+=hr(vec3(.5,.12,.45)*exp(-abs(h)*22.)*.22,hu*6.2832)*sb;
 	if(h<-.04)c=mix(c,vec3(.006,.005,.012),smoothstep(-.04,-.15,h));
 	COLOR=c;
 }
@@ -482,6 +592,7 @@ void sky(){
 	env.ssao_intensity = 1.6
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.045, 0.045, 0.05) if _noir() else Color(0.05, 0.03, 0.09)
+	fog_c = env.fog_light_color
 	env.fog_density = 0.012
 	env.fog_sky_affect = 0.0
 	env.adjustment_enabled = true
@@ -778,7 +889,7 @@ shader_type spatial;
 float h11(float x){return fract(sin(x*91.7)*4371.3);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
 // Bebenwelle: Kamm bei qz, davor ein kleiner Anlauf, dahinter ein Tal und Nachschwingen
-uniform float qz=-1000.;uniform float qs=0.;
+uniform float qz=-1000.;uniform float qs=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
 varying float wz;varying float qh;
 float quake(float z){float d=z-qz;return qs*(1.6*exp(-pow(d/2.6,2.))-.5*exp(-pow((d+6.)/2.6,2.))+.22*exp(-pow((d+12.)/2.4,2.)));}
 void vertex(){wz=(MODEL_MATRIX*vec4(VERTEX,1.)).z;qh=quake(wz);VERTEX+=NORMAL*qh;}
@@ -796,7 +907,7 @@ void fragment(){
 	base*=1.-seam*.7;
 	ALBEDO=base;METALLIC=.8;ROUGHNESS=.38+.1*br+seam*.3+edge*.2;SPECULAR=.45;
 	float cr=max(qh,0.)/max(qs,.01);   // glühender Kamm, aufgerissene Fugen
-	EMISSION=(vec3(1.,.42,.08)*pow(cr,1.5)*6.+vec3(1.,.25,.05)*seam*cr*14.)*step(.01,qs);
+	EMISSION=(qc*pow(cr,1.5)*6.+qc*vec3(1.,.6,.62)*seam*cr*14.)*step(.01,qs)*qg;
 }""", [["vec3(.75,.62,.08)", "vec3(.8,.3,.02)"]]))
 	mats["wall"] = _metal(Color(0.07, 0.075, 0.09), 0.22)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
@@ -858,9 +969,10 @@ void fragment(){vec2 q=floor(vec2(UV.x*12.,UV.y*2.));ALBEDO=vec3(mod(q.x+q.y,2.)
 			beam_mat = _shader_mat("""
 shader_type spatial;
 render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+uniform float bk=1.;
 void fragment(){
 	vec3 c=.5+.5*cos(6.2832*(UV.x+TIME*.3+vec3(0.,.33,.67)));
-	ALBEDO=c*.55*pow(UV.y,2.)*(.6+.4*sin(TIME*5.+UV.y*12.));
+	ALBEDO=c*.55*bk*pow(UV.y,2.)*(.6+.4*sin(TIME*5.+UV.y*12.));
 }""")
 			if _noir():
 				var bsh = Shader.new()
@@ -881,6 +993,7 @@ void fragment(){
 			var f = T.frame(wp[0])
 			bm.transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * wp[1] + f.uu * 1.1)
 			n.add_child(bm)
+			beam_n.append(bm)
 		laps.append(n)
 
 
@@ -889,6 +1002,7 @@ var lights = []
 var lights_nodes = []
 var wpads = []
 var beam_mat: ShaderMaterial
+var beam_n = []
 
 
 # Boost-Felder und Startlinie: UV aus der Lage im Streifen (x längs, y quer)
@@ -920,8 +1034,10 @@ func _fix_uv(st: SurfaceTool, key: String) -> void:
 func _build_city() -> void:
 	var box = BoxMesh.new()
 	box.size = Vector3(2, 2, 2)
-	box.material = _shader_mat(_nz("""
+	city_mat = _shader_mat(_nz("""
 shader_type spatial;
+uniform float wl=1.;uniform float wh=0.;uniform float eg=1.;
+vec3 hr(vec3 c,float a){vec3 k=vec3(.57735);float ca=cos(a);return c*ca+cross(k,c)*sin(a)+k*dot(k,c)*(1.-ca);}
 varying vec3 wp;varying vec3 wn;varying vec4 cd;
 void vertex(){wp=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;wn=normalize((MODEL_MATRIX*vec4(NORMAL,0.)).xyz);cd=INSTANCE_CUSTOM;}
 float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
@@ -931,38 +1047,53 @@ void fragment(){
 	float win=step(.22,gf.x)*step(gf.x,.78)*step(.3,gf.y)*step(gf.y,.82)*side;float hh=h21(gi+floor(cd.a*3.));
 	vec3 wc=hh>.93?vec3(.4,.85,1.):(hh>.86?vec3(1.,.4,.75):vec3(1.,.78,.5));
 	ALBEDO=vec3(.015,.017,.025);METALLIC=.7;ROUGHNESS=.18;
-	EMISSION=wc*win*step(.6,hh)*2.2+cd.rgb*smoothstep(cd.a-.8,cd.a-.3,wp.y)*step(wp.y,cd.a)*side*5.;
+	EMISSION=hr(wc,wh*6.2832)*win*step(1.-.4*wl,hh)*step(.01,wl)*2.2+cd.rgb*smoothstep(cd.a-.8,cd.a-.3,wp.y)*step(wp.y,cd.a)*side*5.*eg;
 }""", [["vec3(.4,.85,1.):(hh>.86?vec3(1.,.4,.75):vec3(1.,.78,.5))", "vec3(1.,.36,.03):(hh>.86?vec3(.9):vec3(.7))"]]))
+	box.material = city_mat
 	bld_mm = MultiMesh.new()
 	bld_mm.transform_format = MultiMesh.TRANSFORM_3D
 	bld_mm.use_custom_data = true
+	bld_mm.mesh = box
+	_city_fill()
+	for n in laps:
+		var mmi = MultiMeshInstance3D.new()
+		mmi.multimesh = bld_mm
+		mmi.extra_cull_margin = 60.0
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		n.add_child(mmi)
+
+
+var city_mat: ShaderMaterial
+
+
+# Häuser verteilen: Anzahl, Höhe, Breite, Abstand zur Strecke aus dem FX Lab (gleicher Zufall, damit die Stadt gleich bleibt)
+func _city_fill() -> void:
+	var E: Dictionary = fx.env
+	var dens = float(E.dens) if float(E.city) > 0.5 else 0.0
 	var items = []
 	var rng = RandomNumberGenerator.new()
 	rng.seed = 7
-	var k = 0
-	while k * 16 < 700:
-		var zc = 20.0 + k * 16.0 + 8.0
+	var stepz = 16.0 / maxf(0.05, dens)
+	var zc = 28.0
+	while dens > 0.02 and zc < 720.0:
 		var f = T.frame(zc)
 		for sd in [-1.0, 1.0]:
 			if rng.randf() < 0.3:
 				continue
-			var lat: float = sd * (T.TW + 11.0 + rng.randf() * 38.0)
-			var H = 22.0 + pow(rng.randf(), 1.6) * 80.0
-			var w = 3.0 + rng.randf() * 5.0
-			var d = 3.0 + rng.randf() * 5.0
+			var lat: float = sd * (T.TW + (11.0 + rng.randf() * 38.0) * float(E.bd))
+			var H = (22.0 + pow(rng.randf(), 1.6) * 80.0) * float(E.bh)
+			var w = (3.0 + rng.randf() * 5.0) * float(E.bw)
+			var d = (3.0 + rng.randf() * 5.0) * float(E.bw)
 			var pos = Vector3(f.c.x - lat, -42.0 + H / 2.0, zc + (rng.randf() - 0.5) * 6.0)
-			items.append([Transform3D(Basis.from_scale(Vector3(w / 2.0, H / 2.0, d / 2.0)), pos), _neo(rng.randf()), pos.y + H / 2.0])
-		k += 1
+			var c = _neo(rng.randf())
+			items.append([Transform3D(Basis.from_scale(Vector3(w / 2.0, H / 2.0, d / 2.0)), pos), c, pos.y + H / 2.0])
+		zc += stepz
+	bld_mm.instance_count = 0
 	bld_mm.instance_count = items.size()
 	for i in range(items.size()):
 		bld_mm.set_instance_transform(i, items[i][0])
 		var c: Color = items[i][1]
 		bld_mm.set_instance_custom_data(i, Color(c.r, c.g, c.b, items[i][2]))
-	for n in laps:
-		var mmi = MultiMeshInstance3D.new()
-		mmi.multimesh = bld_mm
-		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		n.add_child(mmi)
 
 
 # ---------------------------------------------------------------- Gleiter
@@ -1608,7 +1739,7 @@ func _menu() -> void:
 	box.anchor_right = 0.94
 	box.anchor_top = 1.0
 	box.anchor_bottom = 1.0
-	box.offset_top = -620
+	box.offset_top = -752
 	box.offset_bottom = -70
 	root.add_child(box)
 	ui.main = box
@@ -1639,6 +1770,9 @@ func _menu() -> void:
 	var brl = _btn("Replays")
 	brl.pressed.connect(func(): _show_replays(true))
 	box.add_child(brl)
+	var blab = _btn("FX Lab")
+	blab.pressed.connect(_lab_open)
+	box.add_child(blab)
 	ui.credit = _lbl("", 18)
 	ui.credit.modulate = Color(1, 1, 1, 0.4)
 	ui.credit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1932,7 +2066,7 @@ func _rp_rebuild_fx() -> void:
 			fx_age = age
 			match ev[0]:
 				"boom":
-					_explode(ev[1], ev[2], ev[3])
+					_explode(ev[1], ev[2], ev[3], ev[4] if ev.size() > 4 else 1.0)
 				"gb":
 					_gbomb(ev[1], ev[2], -2)
 				"zap":
@@ -1959,6 +2093,9 @@ func _rp_freeze(on: bool) -> void:
 
 
 func _input(ev: InputEvent) -> void:
+	if state == "lab":
+		_lab_input(ev)
+		return
 	if state == "replay" and vx.is_empty() and not rp.is_empty():
 		_rp_input(ev)
 	if ev is InputEventScreenTouch:
@@ -2179,8 +2316,8 @@ void fragment(){
 	fxr.ring_code = """
 shader_type spatial;
 render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
-uniform float u=0.;
-void fragment(){float r=length(UV-.5)*2.;float w=smoothstep(.12,0.,abs(r-.85))*(1.-u);ALBEDO=vec3(1.,.7,.4)*w*3.;}"""
+uniform float u=0.;uniform vec3 rc=vec3(1.,.7,.4);uniform float rk=1.;
+void fragment(){float r=length(UV-.5)*2.;float w=smoothstep(.12,0.,abs(r-.85))*(1.-u);ALBEDO=rc*w*3.*rk;}"""
 
 
 var tex_cache = {}
@@ -2288,9 +2425,11 @@ func _burst(pos: Vector3, mesh: Mesh, amount: int, life: float, vmin: float, vma
 
 
 # Feuerball aus vielen wabernden Flammen: grell weiß-gelb → orange → dunkelrot, steigt etwas auf
-func _fire_ball(pos: Vector3, k: float) -> void:
-	_burst(pos, fxr.fire, int(16 * k), 1.0, 2.0 * k, 5.5 * k, 180.0, Vector3(0, 1.6, 0), 4.0, 1.1 * k, 1.9 * k,
-		_ramp([[0.0, Color(12, 10, 7, 1)], [0.1, Color(9, 4.5, 1.2, 1)], [0.35, Color(4, 1.1, 0.15, 0.85)], [0.7, Color(1.0, 0.2, 0.04, 0.45)], [1.0, Color(0.1, 0.02, 0.01, 0)]]),
+func _fire_ball(pos: Vector3, k: float, am := 1.0, hu := 0.0) -> void:
+	if am < 0.01:
+		return
+	_burst(pos, fxr.fire, int(16 * k * am), 1.0, 2.0 * k, 5.5 * k, 180.0, Vector3(0, 1.6, 0), 4.0, 1.1 * k, 1.9 * k,
+		_ramp(_rh([[0.0, Color(12, 10, 7, 1)], [0.1, Color(9, 4.5, 1.2, 1)], [0.35, Color(4, 1.1, 0.15, 0.85)], [0.7, Color(1.0, 0.2, 0.04, 0.45)], [1.0, Color(0.1, 0.02, 0.01, 0)]], hu)),
 		_curve([[0.0, 0.5], [0.2, 1.25], [1.0, 1.6]]), false, false, 0.5 * k)
 
 
@@ -2301,6 +2440,9 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	_fx_res()
 	var f = T.frame(z)
 	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.6
+	var X: Dictionary = fx.gb
+	var hu = float(X.hue)
+	var gz = float(X.size)
 	var core = MeshInstance3D.new()
 	var sm = SphereMesh.new()
 	sm.radius = 1.0
@@ -2323,7 +2465,7 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	var rmt = StandardMaterial3D.new()
 	rmt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	rmt.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	rmt.albedo_color = Color(1.6, 1.2, 3.0)
+	rmt.albedo_color = _hs(Color(1.6, 1.2, 3.0), hu)
 	ring.material_override = rmt
 	ring.position = pos
 	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -2332,33 +2474,35 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1) -> void:
 	var p = GPUParticles3D.new()
 	var m = ParticleProcessMaterial.new()
 	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE_SURFACE
-	m.emission_sphere_radius = 4.5
-	m.radial_accel_min = -45.0
-	m.radial_accel_max = -30.0
+	m.emission_sphere_radius = 4.5 * gz
+	m.radial_accel_min = -45.0 * gz
+	m.radial_accel_max = -30.0 * gz
 	m.gravity = Vector3.ZERO
 	m.particle_flag_align_y = true
-	m.color_ramp = _ramp([[0.0, Color(0.6, 0.4, 2.5, 0)], [0.3, Color(1.5, 1.0, 4.0, 1)], [1.0, Color(3, 2.5, 5, 1)]])
+	m.color_ramp = _ramp(_rh([[0.0, Color(0.6, 0.4, 2.5, 0)], [0.3, Color(1.5, 1.0, 4.0, 1)], [1.0, Color(3, 2.5, 5, 1)]], hu))
 	p.process_material = m
 	p.draw_pass_1 = fxr.spark
-	p.amount = 50
+	p.amount = maxi(1, int(50 * float(X.sparks)))
+	p.visible = float(X.sparks) > 0.01
 	p.lifetime = 0.55
 	p.one_shot = true
 	p.explosiveness = 0.85
 	p.position = pos
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	p.visibility_aabb = AABB(Vector3(-8, -8, -8), Vector3(16, 16, 16))
+	p.visibility_aabb = AABB(Vector3(-8, -8, -8) * gz, Vector3(16, 16, 16) * gz)
 	add_child(p)
 	if fx_age > 0.0:
 		p.preprocess = minf(fx_age, 0.55)
 	p.emitting = true
 	get_tree().create_timer(maxf(0.1, 1.2 - fx_age)).timeout.connect(p.queue_free)
 	var lt = OmniLight3D.new()
-	lt.light_color = Color(0.65, 0.5, 1.0)
-	lt.omni_range = 12.0
+	lt.light_color = _hs(Color(0.65, 0.5, 1.0), hu)
+	lt.omni_range = 12.0 * sqrt(gz)
 	lt.light_energy = 0.0
 	lt.position = pos
 	add_child(lt)
-	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": fx_age, "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit})
+	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": fx_age, "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit,
+		"sz": gz, "ts": float(X.time), "cs": float(X.core) * sqrt(gz), "sp": float(X.sparks), "wv": float(X.wave), "lk": float(X.light), "lens": float(X.lens), "sh": float(X.shake), "hu": hu})
 	_snd("gbomb", 3.0, 1.0, pos)
 
 
@@ -2367,7 +2511,7 @@ func _gb_damage(e: Dictionary) -> void:
 		if o.out or o.idx == e.own:
 			continue
 		var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
-		var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
+		var kk = clampf(1.0 - dd / (GB_R * e.get("sz", 1.0)), 0.0, 1.0)
 		if kk > 0.0:
 			_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0), e.own, "rocket")
 			o.slow = minf(o.slow, 0.4)
@@ -2384,7 +2528,8 @@ func _glow_mat(c: Color, e: float) -> StandardMaterial3D:
 
 
 func _gb_update(e: Dictionary, dt: float) -> bool:
-	e.t += dt
+	e.t += dt / e.get("ts", 1.0)
+	var gz: float = e.get("sz", 1.0)
 	var t: float = e.t
 	var cr: MeshInstance3D = e.core
 	var rg: MeshInstance3D = e.ring
@@ -2394,16 +2539,16 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 			if o.out or o.idx == e.own or _prot(o):
 				continue
 			var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
-			var kk = clampf(1.0 - dd / GB_R, 0.0, 1.0)
+			var kk = clampf(1.0 - dd / (GB_R * gz), 0.0, 1.0)
 			if kk > 0.0:
 				o.lat += (e.lat - o.lat) * minf(1.0, dt * 5.0 * kk)
 				o.slow = minf(o.slow, 1.0 - 0.75 * kk)
 				o.vpsi *= 1.0 - minf(1.0, dt * 6.0 * kk)
 	if t < 0.55:
 		var u = t / 0.55
-		cr.scale = Vector3.ONE * (0.1 + 0.9 * pow(u, 1.5))
-		rg.scale = Vector3.ONE * (2.6 - 1.4 * u)
-		e.l.light_energy = 6.0 * u
+		cr.scale = Vector3.ONE * (0.1 + 0.9 * pow(u, 1.5)) * e.get("cs", 1.0)
+		rg.scale = Vector3.ONE * (2.6 - 1.4 * u) * e.get("cs", 1.0)
+		e.l.light_energy = 6.0 * u * e.get("lk", 1.0)
 	elif not e.snap:
 		e.snap = true
 		if e.own != -2:
@@ -2415,29 +2560,34 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 		# Rückstoß: Funken und Lichtblitz nach außen, Ring über die Fahrbahn
 		var old_age = fx_age
 		fx_age = maxf(0.0, t - 0.55) if fx_rebuild else 0.0
-		_burst(e.pos, fxr.spark, 60, 1.0, 10.0, 22.0, 180.0, Vector3(0, -6, 0), 0.8, 0.8, 1.6,
-			_ramp([[0.0, Color(5, 4, 9, 1)], [0.6, Color(1.6, 1.0, 4.0, 1)], [1.0, Color(0.4, 0.2, 1.0, 0)]]), null, true, false, 0.3)
-		_burst(e.pos - f.uu * 0.4, fxr.debris, 12, 1.8, 5.0, 12.0, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.4, null, null, false, true, 0.3)
+		var sp: float = e.get("sp", 1.0)
+		var hu: float = e.get("hu", 0.0)
+		if sp > 0.01:
+			_burst(e.pos, fxr.spark, int(60 * sp), 1.0, 10.0 * sqrt(gz), 22.0 * sqrt(gz), 180.0, Vector3(0, -6, 0), 0.8, 0.8, 1.6,
+				_ramp(_rh([[0.0, Color(5, 4, 9, 1)], [0.6, Color(1.6, 1.0, 4.0, 1)], [1.0, Color(0.4, 0.2, 1.0, 0)]], hu)), null, true, false, 0.3)
+			_burst(e.pos - f.uu * 0.4, fxr.debris, int(12 * sp), 1.8, 5.0, 12.0, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.4, null, null, false, true, 0.3)
 		fx_age = old_age
 		var ring = MeshInstance3D.new()
 		ring.mesh = fxr.ring
-		var rm = _shader_mat(fxr.ring_code.replace("vec3(1.,.7,.4)", "vec3(.7,.5,1.)"))
+		var rm = _shader_mat(fxr.ring_code)
+		rm.set_shader_parameter("rc", _v3(_hs(Color(0.7, 0.5, 1.0), hu)))
+		rm.set_shader_parameter("rk", e.get("wv", 1.0))
 		ring.material_override = rm
 		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(ring)
 		e.sw = ring
 		e.swm = rm
-		e.l.light_energy = 9.0
+		e.l.light_energy = 9.0 * e.get("lk", 1.0)
 		var d = (e.pos - cam.global_position).length()
 		var near = clampf(1.0 - d / 40.0, 0.0, 1.0)
-		shake = maxf(shake, 1.6 * near)
-		_flash(Color(0.75, 0.6, 1.0), 0.22 * near)
+		shake = maxf(shake, 1.6 * near * e.get("sh", 1.0))
+		_flash(_hs(Color(0.75, 0.6, 1.0), hu), 0.22 * near * minf(1.0, e.get("lk", 1.0)))
 	else:
 		var u = clampf((t - 0.55) / 0.7, 0.0, 1.0)
 		rg.visible = false
-		e.l.light_energy = 9.0 * pow(1.0 - u, 2.0)
+		e.l.light_energy = 9.0 * pow(1.0 - u, 2.0) * e.get("lk", 1.0)
 		var f = e.f
-		var sc = 0.6 + 9.0 * pow(u, 0.5)
+		var sc = (0.6 + 9.0 * pow(u, 0.5)) * gz
 		e.sw.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
 		e.swm.set_shader_parameter("u", u)
 		if u >= 1.0:
@@ -2450,55 +2600,69 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 	return false
 
 
-func _explode(z: float, lat: float, big := false) -> void:
+func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	_pev("boom" if not big else "BOOM")
-	_rev(["boom", z, lat, big])
+	_rev(["boom", z, lat, big, sc])
 	_fx_res()
-	var k = 2.2 if big else 1.5
+	var X: Dictionary = fx.boom
+	var hu = float(X.hue)
+	var sz = float(X.size) * sc
+	var k = (2.2 if big else 1.5) * sz
 	var f = T.frame(z)
 	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.35
 	# Nachexplosionen: zwei, drei kleinere Feuerbälle rundherum, kurz versetzt
-	for j in range(2 if big else 1):
-		var off = f.rr * randf_range(-1.2, 1.2) + f.uu * randf_range(0.2, 1.4) + f.fw * randf_range(-1.0, 1.5)
-		_later(0.08 + j * 0.11, func(): _fire_ball(pos + off, k * 0.5))
+	var fa = float(X.fire)
+	for j in range(int(round((2 if big else 1) * float(X.after)))):
+		var off = (f.rr * randf_range(-1.2, 1.2) + f.uu * randf_range(0.2, 1.4) + f.fw * randf_range(-1.0, 1.5)) * sz
+		_later(0.08 + j * 0.11, func(): _fire_ball(pos + off, k * 0.5, maxf(fa, 0.3), hu))
 	# Feuerball: grell weiß-gelb → orange → dunkelrot
-	_fire_ball(pos, k)
+	_fire_ball(pos, k, fa, hu)
 	# Rauch: steigt langsam auf, wird größer
-	var smr = _ramp([[0.0, Color(0.16, 0.14, 0.13, 0)], [0.04, Color(0.14, 0.12, 0.11, 0.9)], [0.35, Color(0.1, 0.1, 0.11, 0.7)], [1.0, Color(0.08, 0.08, 0.09, 0)]], false)
-	var smc = _curve([[0.0, 0.35], [0.25, 1.0], [1.0, 1.7]])
-	_burst(pos + f.uu * 0.5, fxr.smoke, int(10 * k), 8.0, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
-	# zweite, dichtere Wolke dicht über der Fahrbahn, hängt noch länger
-	_later(0.25, func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(6 * k), 10.0, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
+	var sm = float(X.smoke)
+	var sl = float(X.slife)
+	if sm > 0.01:
+		var smr = _ramp([[0.0, Color(0.16, 0.14, 0.13, 0)], [0.04, Color(0.14, 0.12, 0.11, 0.9)], [0.35, Color(0.1, 0.1, 0.11, 0.7)], [1.0, Color(0.08, 0.08, 0.09, 0)]], false)
+		var smc = _curve([[0.0, 0.35], [0.25, 1.0], [1.0, 1.7]])
+		_burst(pos + f.uu * 0.5, fxr.smoke, int(10 * k * sm), 8.0 * sl, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
+		# zweite, dichtere Wolke dicht über der Fahrbahn, hängt noch länger
+		_later(0.25, func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(6 * k * sm), 10.0 * sl, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
 	# Funkenregen
-	_burst(pos, fxr.spark, int(45 * k), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
-		_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.2)
+	if float(X.sparks) > 0.01:
+		_burst(pos, fxr.spark, int(45 * k * float(X.sparks)), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
+			_ramp(_rh([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]], hu)), null, true, false, 0.2)
 	# Trümmer: Stücke der Fahrbahn fliegen weg
-	_burst(pos - f.uu * 0.2, fxr.debris, int(12 * k), 2.0, 5.0 * k, 12.0 * k, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.6, null, null, false, true, 0.3)
+	if float(X.debris) > 0.01:
+		_burst(pos - f.uu * 0.2, fxr.debris, int(12 * k * float(X.debris)), 2.0, 5.0 * k, 12.0 * k, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.6, null, null, false, true, 0.3)
 	# Druckwelle auf der Fahrbahn
-	var ring = MeshInstance3D.new()
-	ring.mesh = fxr.ring
-	var rm = _shader_mat(fxr.ring_code)
-	ring.material_override = rm
-	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	ring.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * lat + f.uu * 0.03)
-	add_child(ring)
+	var ring = null
+	var rm = null
+	if float(X.ring) > 0.01:
+		ring = MeshInstance3D.new()
+		ring.mesh = fxr.ring
+		rm = _shader_mat(fxr.ring_code)
+		rm.set_shader_parameter("rc", _v3(_hs(Color(1.0, 0.7, 0.4), hu)))
+		rm.set_shader_parameter("rk", float(X.ring))
+		ring.material_override = rm
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ring.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * lat + f.uu * 0.03)
+		add_child(ring)
 	# Lichtblitz
 	var lt = OmniLight3D.new()
-	lt.light_color = Color(1.0, 0.92, 0.8)
+	lt.light_color = _hs(Color(1.0, 0.92, 0.8), hu)
 	var rg0 = (16.0 if int(cfg.gfx) >= 2 else 10.0) * k
 	lt.omni_range = rg0
 	lt.omni_attenuation = 0.7
-	lt.light_energy = 38.0
+	lt.light_energy = 38.0 * float(X.light)
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
-	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0})
+	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light), "hu": hu})
 	_snd("boom", 4.0 if big else 2.0, randf_range(0.85, 1.0), pos)
 	_snd("boom", 2.0, 0.55, pos)   # tiefer Wumms darunter
 	# Kamera rüttelt, je näher, desto stärker
 	var d = (pos - cam.global_position).length()
 	var near = clampf(1.0 - d / 35.0, 0.0, 1.0)
-	shake = maxf(shake, (2.0 if big else 1.3) * near)
-	_flash(Color(1.0, 0.7, 0.4), (0.55 if big else 0.35) * near)
+	shake = maxf(shake, (2.0 if big else 1.3) * near * float(X.shake))
+	_flash(_hs(Color(1.0, 0.7, 0.4), hu), (0.55 if big else 0.35) * near * float(X.flash))
 
 
 # Schaden: Schild schützt; leer = ausgeschieden; Meldung oben
@@ -2536,14 +2700,15 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "") -> void:
 
 
 func _add_shot(from: Dictionary, at_player := false, homing := false) -> void:
+	var X: Dictionary = fx.rak
 	var cap = CapsuleMesh.new()
-	cap.radius = 0.06
-	cap.height = 0.5
-	var mi = _glow_node(cap, Color(1.0, 0.6, 0.2), 8.0)
+	cap.radius = 0.06 * float(X.size)
+	cap.height = 0.5 * float(X.size)
+	var mi = _glow_node(cap, _hs(Color(1.0, 0.6, 0.2), float(X.hue)), 8.0)
 	var lt = OmniLight3D.new()
-	lt.light_color = Color(1.0, 0.55, 0.2)
-	lt.omni_range = 4.0
-	lt.light_energy = 3.0
+	lt.light_color = _hs(Color(1.0, 0.55, 0.2), float(X.hue))
+	lt.omni_range = 4.0 * sqrt(float(X.size))
+	lt.light_energy = 3.0 * float(X.light)
 	mi.add_child(lt)
 	var tg = null
 	if homing:
@@ -2563,12 +2728,13 @@ func _drop_mines(o: Dictionary) -> void:
 
 
 func _drop_one(o: Dictionary, k: int) -> void:
-	if o.out or not (state == "race" or state == "done"):
+	if o.out or not (state == "race" or state == "done" or state == "lab"):
 		return
+	var X: Dictionary = fx.mine
 	var sp = SphereMesh.new()
-	sp.radius = 0.12
-	sp.height = 0.24
-	var mi = _glow_node(sp, Color(1, 0.15, 0.1), 6.0)
+	sp.radius = 0.12 * float(X.size)
+	sp.height = 0.24 * float(X.size)
+	var mi = _glow_node(sp, _hs(Color(1, 0.15, 0.1), float(X.hue)), 6.0 * float(X.glow))
 	var z = o.z - 0.9
 	var lat = o.lat + (k - 1) * 0.22
 	mi.position = T.world(z, lat, 0.45)
@@ -2746,7 +2912,7 @@ func _fire() -> void:
 				m.gravity = Vector3(0, -14, 0)
 				if kind == 0:
 					m.particle_flag_align_y = true
-					m.color_ramp = _ramp([[0.0, Color(9, 5, 2, 1)], [1.0, Color(2, 0.4, 0.05, 0)]])
+					m.color_ramp = _ramp(_rh([[0.0, Color(9, 5, 2, 1)], [1.0, Color(2, 0.4, 0.05, 0)]], float(fx.quake.hue)))
 				else:
 					m.angular_velocity_min = -600.0
 					m.angular_velocity_max = 600.0
@@ -2755,23 +2921,28 @@ func _fire() -> void:
 					m.scale_max = 2.2
 				p.process_material = m
 				p.draw_pass_1 = fxr.spark if kind == 0 else fxr.debris
-				p.amount = 160 if kind == 0 else 60
+				p.amount = maxi(1, int((160 if kind == 0 else 60) * float(fx.quake.sparks)))
+				p.visible = float(fx.quake.sparks) > 0.01
 				p.lifetime = 0.9
 				p.local_coords = false
 				p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				p.visibility_aabb = AABB(Vector3(-20, -10, -20), Vector3(40, 30, 40))
 				crest.add_child(p)
 			var lt = OmniLight3D.new()
-			lt.light_color = Color(1.0, 0.45, 0.12)
+			lt.light_color = _hs(Color(1.0, 0.45, 0.12), float(fx.quake.hue))
 			lt.omni_range = 10.0
 			lt.light_energy = 8.0
 			lt.position = Vector3(0, 1.0, 0)
 			crest.add_child(lt)
+			if quake != null:
+				quake.n.queue_free()
 			quake = {"z": g.z + 3.0, "age": 0.0, "hit": [], "n": crest, "l": lt}
+			mats.road.set_shader_parameter("qc", _v3(_hs(Color(1.0, 0.42, 0.08), float(fx.quake.hue))))
+			mats.road.set_shader_parameter("qg", float(fx.quake.glow))
 			_snd("boom", 3.0, 0.6)
 			_snd("boom", 0.0, 0.8)
-			shake = maxf(shake, 1.5)
-			_flash(Color(1.0, 0.5, 0.15), 0.45)
+			shake = maxf(shake, 1.5 * float(fx.quake.shake))
+			_flash(_hs(Color(1.0, 0.5, 0.15), float(fx.quake.hue)), 0.45 * minf(1.0, float(fx.quake.glow)))
 		"wand":
 			var mi = _wall_node()
 			var z = g.z + 12.0
@@ -2839,7 +3010,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		if ln > o.enL and not o.out:
 			o.enL = ln
 			o.en = minf(1.0, o.en + 0.25)
-	var spd = base_spd * 2.8
+	var spd = base_spd * 2.8 * float(fx.rak.speed)
 	# Geschosse
 	for i in range(shots.size() - 1, -1, -1):
 		var sh = shots[i]
@@ -2874,7 +3045,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket")
 			_gbomb(sh.z, sh.lat, sh.own, hit.idx)
 			dead = true
-		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0:
+		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0 or (state == "lab" and sh.z > LZ + 18.0):
 			_gbomb(sh.z, clampf(sh.lat, -T.TW, T.TW), sh.own)
 			dead = true
 		else:
@@ -2896,7 +3067,8 @@ func _weapons(dt: float, racing: bool) -> void:
 	for i in range(mines.size() - 1, -1, -1):
 		var m = mines[i]
 		m.t += dt
-		(m.n as MeshInstance3D).visible = fmod(m.t, 0.5) < 0.35 or m.t < 0.3
+		var bl = float(fx.mine.blink)
+		(m.n as MeshInstance3D).visible = fmod(m.t, 0.5 / bl) < 0.35 / bl or m.t < 0.3
 		if m.t < 0.25:
 			# kurz herunterfallen und auf der Fahrbahn aufsetzen
 			var u = clampf(m.t / 0.18, 0.0, 1.0)
@@ -2911,9 +3083,11 @@ func _weapons(dt: float, racing: bool) -> void:
 		# Quake-Welle räumt Minen ab (egal von wem), Minen verschwinden nach 25 s von selbst
 		if not boom and quake != null and absf(m.z - quake.z) < 2.6:
 			boom = true
-		if boom or m.t > 25.0:
+		if state == "lab" and m.t > 1.8:
+			boom = true
+		if boom or m.t > float(fx.mine.life):
 			if boom:
-				_explode(m.z, m.lat)
+				_explode(m.z, m.lat, false, float(fx.mine.boom))
 			m.n.queue_free()
 			mines.remove_at(i)
 	# Wall: Gegner, die durchfliegen, werden 1 s gebremst und verlieren 10 %
@@ -2930,12 +3104,15 @@ func _weapons(dt: float, racing: bool) -> void:
 				_snd("zap", 2.0, 1.0, (o.node as Node3D).global_position)
 		w.hf = maxf(0.0, w.hf - dt * 2.5)
 		_wall_pose(w.n, w.z, w.age, w.hf)
-		if w.age > 5.3:
+		if w.age > 5.3 * float(fx.wall.dur):
 			w.n.queue_free()
 			walls.remove_at(i)
 	# Beben: rollt nach vorn, wirft Gegner hoch
 	if quake != null:
-		quake.z += base_spd * 3.2 * dt
+		var QX: Dictionary = fx.quake
+		var qd = float(QX.dur)
+		var qmax = (60.0 if state == "lab" else 560.0) * qd
+		quake.z += base_spd * 3.2 * float(QX.speed) * dt
 		quake.age += dt
 		for o in ships:
 			if o.idx != 0 and not o.out and not quake.hit.has(o.idx) and absf(o.z - quake.z) < 2.6:
@@ -2943,18 +3120,18 @@ func _weapons(dt: float, racing: bool) -> void:
 				_dmg(o, 0.2, 0, "quake")
 				if not o.out:
 					o.air = true
-					o.vy = 5.8
+					o.vy = 5.8 * sqrt(float(QX.height))
 					o.h = maxf(o.h, 0.6)
 					o.slow = 0.25
 		var f = T.frame(quake.z)
-		var qs = 1.3 * clampf(quake.age / 0.25, 0.0, 1.0) * clampf((16.0 - quake.age) / 1.5, 0.0, 1.0) * clampf((560.0 - (quake.z - g.z)) / 40.0, 0.0, 1.0)
+		var qs = 1.3 * float(QX.height) * clampf(quake.age / 0.25, 0.0, 1.0) * clampf((16.0 * qd - quake.age) / 1.5, 0.0, 1.0) * clampf((qmax - (quake.z - g.z)) / (12.0 if state == "lab" else 40.0), 0.0, 1.0)
 		quake.n.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * (qs * 1.6))
-		quake.l.light_energy = 8.0 * qs
+		quake.l.light_energy = 8.0 * qs * float(QX.glow)
 		quake.qs = qs
 		mats.road.set_shader_parameter("qz", quake.z)
 		mats.road.set_shader_parameter("qs", qs)
-		shake = maxf(shake, 0.35 * clampf(1.0 - (quake.z - g.z) / 40.0, 0.0, 1.0))
-		if quake.z - g.z > 560.0 or quake.age > 16.0:
+		shake = maxf(shake, 0.35 * clampf(1.0 - (quake.z - g.z) / 40.0, 0.0, 1.0) * float(QX.shake))
+		if quake.z - g.z > qmax or quake.age > 16.0 * qd:
 			quake.n.queue_free()
 			quake = null
 			mats.road.set_shader_parameter("qs", 0.0)
@@ -2972,6 +3149,9 @@ render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
 uniform float a=1.;
 uniform float hit=0.;
 uniform float sd=0.;
+uniform vec3 wc=vec3(1.,.5,.1);
+uniform float bk=1.;
+uniform float gk=1.;
 float h11(float x){return fract(sin(x*127.1)*43758.5453);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float n1(float x){float i=floor(x),f=fract(x);return mix(h11(i),h11(i+1.),f*f*(3.-2.*f));}
@@ -2983,19 +3163,19 @@ void fragment(){
 	float fl=step(.55,h21(id+floor(TIME*10.)+sd));
 	float edge=smoothstep(.4,.5,he);
 	float cell=fl*(1.-he*1.4)*.35;
-	vec3 o=vec3(1.,.5,.1);
+	vec3 o=wc*gk;
 	vec3 c=o*(.06+.12*pow(n1(uv.x*26.+TIME*3.+sd),4.));
 	c+=o*edge*(.35+.6*fl)+o*cell;
 	c+=o*1.5*exp(-pow((fract(uv.y*.999-TIME*.8+sd)-.5)*9.,2.))*.35;
-	c+=vec3(1.,.65,.25)*smoothstep(.07,0.,min(uv.y,1.-uv.y))*2.8;
-	c+=vec3(1.,.65,.25)*smoothstep(.025,0.,min(uv.x,1.-uv.x))*2.2;
+	c+=(wc+vec3(0.,.15,.15))*gk*smoothstep(.07,0.,min(uv.y,1.-uv.y))*2.8;
+	c+=(wc+vec3(0.,.15,.15))*gk*smoothstep(.025,0.,min(uv.x,1.-uv.x))*2.2;
 	for(int i=0;i<4;i++){
 		float fi=float(i);float tq=floor(TIME*(11.+fi*2.)+fi*3.7+sd*5.);
 		float on=step(.4-hit*.4,h11(tq*1.31+fi*9.1));
 		float y0=.15+.7*h11(tq+fi*2.3);
 		float pth=y0+(n1(uv.x*6.+tq*3.1)-.5)*.42+(n1(uv.x*21.+tq*5.7)-.5)*.14+(n1(uv.x*60.+tq)-.5)*.04;
 		float d=abs(uv.y-pth);
-		c+=(vec3(.75,.9,1.)*exp(-d*170.)*4.+vec3(.5,.6,1.)*exp(-d*28.)*.45)*on;
+		c+=(vec3(.75,.9,1.)*exp(-d*170.)*4.+vec3(.5,.6,1.)*exp(-d*28.)*.45)*on*bk;
 	}
 	ALBEDO=c*a*(1.+hit*2.5);
 }"""
@@ -3003,16 +3183,20 @@ void fragment(){
 
 func _wall_node() -> MeshInstance3D:
 	_pev("wall")
+	var X: Dictionary = fx.wall
 	var q = QuadMesh.new()
-	q.size = Vector2(T.TW * 2.0, 1.4)
+	q.size = Vector2(T.TW * 2.0, 1.4 * float(X.height))
 	var mi = MeshInstance3D.new()
 	mi.mesh = q
 	var m = _shader_mat(wall_code)
 	m.set_shader_parameter("sd", randf() * 10.0)
+	m.set_shader_parameter("wc", _v3(_hs(Color(1.0, 0.5, 0.1), float(X.hue))))
+	m.set_shader_parameter("bk", float(X.bolts))
+	m.set_shader_parameter("gk", float(X.glow))
 	mi.material_override = m
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var l = OmniLight3D.new()
-	l.light_color = Color(1.0, 0.55, 0.15)
+	l.light_color = _hs(Color(1.0, 0.55, 0.15), float(X.hue))
 	l.omni_range = 6.0
 	l.position = Vector3(0, -0.2, 0)
 	mi.add_child(l)
@@ -3023,13 +3207,14 @@ func _wall_node() -> MeshInstance3D:
 
 func _wall_pose(mi: MeshInstance3D, z: float, age: float, hf: float) -> void:
 	var f = T.frame(z)
-	mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * 0.72)
-	var a = clampf(minf(age / 0.3, (5.3 - age) / 0.4), 0.0, 1.0)
+	var X: Dictionary = fx.wall
+	mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * (0.72 * float(X.height)))
+	var a = clampf(minf(age / 0.3, (5.3 * float(X.dur) - age) / 0.4), 0.0, 1.0)
 	var m: ShaderMaterial = mi.material_override
 	m.set_shader_parameter("a", a)
 	m.set_shader_parameter("hit", hf)
 	var l: OmniLight3D = mi.get_meta("l")
-	l.light_energy = (2.2 + randf() * 1.2 + hf * 6.0) * a
+	l.light_energy = (2.2 * float(X.glow) + randf() * 1.2 * float(X.bolts) + hf * 6.0) * a
 
 
 # Blitze, die um ein Schiff zucken, nachdem es durch die Wand geflogen ist
@@ -3129,7 +3314,7 @@ func _fx_update(dt: float) -> void:
 			continue
 		e.t += dt
 		var u = clampf(e.t / (0.7 if e.big else 0.5), 0.0, 1.0)
-		var sc = (0.6 + (8.0 if e.big else 5.5) * pow(u, 0.5))
+		var sc = (0.6 + (8.0 if e.big else 5.5) * pow(u, 0.5)) * e.get("sz", 1.0)
 		var f = e.f
 		if e.ring != null:
 			e.ring.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
@@ -3140,8 +3325,8 @@ func _fx_update(dt: float) -> void:
 		# Licht: greller Blitz, dann langes oranges Nachglühen
 		var lt2: OmniLight3D = e.l
 		var tl = e.t
-		lt2.light_energy = 38.0 * exp(-tl * 7.0) + 7.0 * pow(clampf(1.0 - tl / 2.2, 0.0, 1.0), 1.6) * (1.0 + 0.15 * sin(tl * 37.0))
-		lt2.light_color = Color(1.0, 0.92, 0.8).lerp(Color(1.0, 0.4, 0.08), clampf(tl * 2.2, 0.0, 1.0))
+		lt2.light_energy = (38.0 * exp(-tl * 7.0) + 7.0 * pow(clampf(1.0 - tl / 2.2, 0.0, 1.0), 1.6) * (1.0 + 0.15 * sin(tl * 37.0))) * e.get("lk", 1.0)
+		lt2.light_color = _hs(Color(1.0, 0.92, 0.8).lerp(Color(1.0, 0.4, 0.08), clampf(tl * 2.2, 0.0, 1.0)), e.get("hu", 0.0))
 		lt2.omni_range = e.rg * (0.7 + 0.5 * exp(-tl * 3.0))
 		if tl >= 2.2:
 			lt2.queue_free()
@@ -3309,7 +3494,7 @@ func _replay(dt: float) -> void:
 		for ev in F[rp.ei].ev:
 			match ev[0]:
 				"boom":
-					_explode(ev[1], ev[2], ev[3])
+					_explode(ev[1], ev[2], ev[3], ev[4] if ev.size() > 4 else 1.0)
 				"gb":
 					_gbomb(ev[1], ev[2], -2)
 				"zap":
@@ -4104,6 +4289,8 @@ func _notification(what: int) -> void:
 			_replay_end()
 		elif state == "kill":
 			_kc_end()
+		elif state == "lab":
+			_lab_close()
 		else:
 			get_tree().reload_current_scene()
 
@@ -4135,6 +4322,9 @@ func _process(delta: float) -> void:
 		_sound_update(dt)
 		_post_update(dt)
 		_shot()
+		return
+	if state == "lab":
+		_lab_step(dt)
 		return
 	if state == "kill":
 		_kc_step(dt)
@@ -4255,7 +4445,7 @@ func _process(delta: float) -> void:
 	if racing and g.out:
 		state = "done"
 		t_state = 0.0
-		hud.res.text = "ELIMINATED"
+		hud.res.text = ""   # die große rote Meldung und die Tabelle zeigen es schon
 		hud.resb.visible = true
 	elif racing and kc_pending.is_empty() and ships.slice(1).all(func(x): return x.out):
 		state = "done"
@@ -4307,6 +4497,304 @@ func _process(delta: float) -> void:
 	_shot()
 
 
+# ---------------------------------------------------------------- FX Lab: Teststrecke für alle Effekte, mit Reglern
+const LZ = 40.0
+var lab = {}
+
+
+func _lab_open() -> void:
+	state = "lab"
+	t_state = 0.0
+	ui.root.visible = false
+	hud.layer.visible = false
+	var g: Dictionary = ships[0]
+	g.z = LZ
+	g.lat = 0.0
+	g.psi = 0.0
+	g.vpsi = 0.0
+	g.spd = 0.0
+	g.boost = 0.0
+	for i in range(1, ships.size()):
+		ships[i].z = LZ - 120.0
+		(ships[i].node as Node3D).visible = false
+	for i in range(3):
+		laps[i].position = Vector3(0, 0, (i - 1) * T.LAP)
+	lab = {"tab": "boom", "auto": false, "at": 0.0, "yaw": 0.35, "pit": 0.22, "dist": 12.0, "tch": {}, "sv": -1.0, "view": 0}
+	var cl = CanvasLayer.new()
+	cl.layer = 6
+	add_child(cl)
+	lab.cl = cl
+	var root = Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cl.add_child(root)
+	var tl = _lbl("FX LAB", 40)
+	tl.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	tl.offset_top = 50
+	tl.add_theme_color_override("font_color", Color(0.75, 0.95, 1.0))
+	root.add_child(tl)
+	var hint = _lbl("drag = rotate  ·  pinch = zoom", 20)
+	hint.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	hint.offset_top = 104
+	hint.modulate = Color(1, 1, 1, 0.5)
+	root.add_child(hint)
+	var bg = ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.62)
+	bg.anchor_right = 1.0
+	bg.anchor_top = 0.5
+	bg.anchor_bottom = 1.0
+	root.add_child(bg)
+	var vb = VBoxContainer.new()
+	vb.anchor_left = 0.04
+	vb.anchor_right = 0.96
+	vb.anchor_top = 0.5
+	vb.anchor_bottom = 1.0
+	vb.offset_top = 16
+	vb.offset_bottom = -28
+	vb.add_theme_constant_override("separation", 12)
+	root.add_child(vb)
+	var grid = GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	vb.add_child(grid)
+	lab.tabs = {}
+	for t in FXT:
+		var b = _btn(t[1])
+		b.add_theme_font_size_override("font_size", 26)
+		b.custom_minimum_size = Vector2(0, 70)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var key: String = t[0]
+		b.pressed.connect(func(): _lab_tab(key))
+		grid.add_child(b)
+		lab.tabs[key] = b
+	var row = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	vb.add_child(row)
+	var bf = _btn("FIRE", true)
+	bf.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bf.size_flags_stretch_ratio = 2.0
+	bf.custom_minimum_size = Vector2(0, 96)
+	bf.pressed.connect(_lab_fire)
+	row.add_child(bf)
+	lab.fire = bf
+	var ba = _btn("Auto")
+	ba.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ba.custom_minimum_size = Vector2(0, 96)
+	ba.add_theme_font_size_override("font_size", 30)
+	ba.pressed.connect(func():
+		lab.auto = not lab.auto
+		lab.at = 0.0
+		_lab_style())
+	row.add_child(ba)
+	lab.ab = ba
+	var bv = _btn("View")
+	bv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bv.custom_minimum_size = Vector2(0, 96)
+	bv.add_theme_font_size_override("font_size", 30)
+	bv.pressed.connect(_lab_view)
+	row.add_child(bv)
+	var sc = ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vb.add_child(sc)
+	var lst = VBoxContainer.new()
+	lst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lst.add_theme_constant_override("separation", 2)
+	sc.add_child(lst)
+	lab.lst = lst
+	lab.sc = sc
+	var row2 = HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 10)
+	vb.add_child(row2)
+	var br = _btn("Reset")
+	br.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	br.custom_minimum_size = Vector2(0, 84)
+	br.add_theme_font_size_override("font_size", 30)
+	br.pressed.connect(_lab_reset)
+	row2.add_child(br)
+	var bb = _btn("Done", true)
+	bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bb.custom_minimum_size = Vector2(0, 84)
+	bb.add_theme_font_size_override("font_size", 30)
+	bb.pressed.connect(_lab_close)
+	row2.add_child(bb)
+	_lab_tab("boom")
+
+
+func _lab_close() -> void:
+	_fx_save()
+	get_tree().reload_current_scene()
+
+
+func _lab_style() -> void:
+	for k in lab.tabs:
+		var on = k == lab.tab
+		var st = _style(Color(0.93, 0.41, 0.18) if on else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on else Color(1, 1, 1, 0.22))
+		st.content_margin_top = 8
+		st.content_margin_bottom = 8
+		for sk in ["normal", "pressed", "hover", "focus"]:
+			lab.tabs[k].add_theme_stylebox_override(sk, st)
+	var sa = _style(Color(0.2, 0.75, 0.45) if lab.auto else Color(1, 1, 1, 0.08), Color(0.6, 1, 0.75) if lab.auto else Color(1, 1, 1, 0.22))
+	for sk in ["normal", "pressed", "hover", "focus"]:
+		lab.ab.add_theme_stylebox_override(sk, sa)
+	lab.fire.disabled = lab.tab == "env"
+	lab.fire.modulate.a = 0.35 if lab.tab == "env" else 1.0
+
+
+func _lab_val(it: Array, v: float) -> String:
+	var k: String = it[0]
+	if k.begins_with("hue"):
+		return "%+d°" % int(round(v * 360.0))
+	if k == "life":
+		return "%d s" % int(round(v))
+	if k == "city":
+		return "On" if v > 0.5 else "Off"
+	return "%d %%" % int(round(v * 100.0))
+
+
+func _lab_tab(t: String) -> void:
+	lab.tab = t
+	for c in lab.lst.get_children():
+		c.queue_free()
+	for it in FXS[t]:
+		var key: String = it[0]
+		var lb = Label.new()
+		lb.add_theme_font_size_override("font_size", 26)
+		lb.custom_minimum_size = Vector2(0, 44)
+		lb.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		lab.lst.add_child(lb)
+		var hs = HSlider.new()
+		hs.min_value = it[2]
+		hs.max_value = it[3]
+		hs.step = 1.0 if key == "city" else (1.0 if key == "life" else 0.01)
+		hs.value = float(fx[t][key])
+		hs.custom_minimum_size = Vector2(0, 60)
+		hs.add_theme_icon_override("grabber", _dot(40))
+		hs.add_theme_icon_override("grabber_highlight", _dot(46))
+		var tsb = StyleBoxFlat.new()
+		tsb.bg_color = Color(1, 1, 1, 0.25)
+		tsb.content_margin_top = 6
+		tsb.content_margin_bottom = 6
+		tsb.set_corner_radius_all(6)
+		hs.add_theme_stylebox_override("slider", tsb)
+		var upd = func(v: float):
+			fx[t][key] = v
+			lb.text = "%s   %s" % [it[1], _lab_val(it, v)]
+			lab.sv = 0.6
+			if t == "env":
+				if key in ["city", "dens", "bh", "bw", "bd"]:
+					_city_fill()
+				_env_apply()
+		hs.value_changed.connect(upd)
+		lb.text = "%s   %s" % [it[1], _lab_val(it, hs.value)]
+		lab.lst.add_child(hs)
+	lab.sc.scroll_vertical = 0
+	_lab_style()
+
+
+func _lab_reset() -> void:
+	var t: String = lab.tab
+	for it in FXS[t]:
+		fx[t][it[0]] = it[4]
+	if t == "env":
+		_city_fill()
+		_env_apply()
+	lab.sv = 0.1
+	_lab_tab(t)
+
+
+func _lab_view() -> void:
+	lab.view = (lab.view + 1) % 4
+	var V = [[0.35, 0.22, 12.0], [1.45, 0.12, 11.0], [0.3, 0.7, 40.0], [-2.7, 0.18, 13.0]][lab.view]
+	lab.yaw = V[0]
+	lab.pit = V[1]
+	lab.dist = V[2]
+
+
+func _lab_fire() -> void:
+	var g: Dictionary = ships[0]
+	match lab.tab:
+		"boom":
+			_explode(LZ + 6.0, 0.0, true)
+		"mine":
+			_drop_mines(g)
+		"quake":
+			g.wpn = "beben"
+			_fire()
+		"gb":
+			_gbomb(LZ + 9.0, 0.0, 0)
+		"rak":
+			_add_shot(g)
+		"wall":
+			g.wpn = "wand"
+			_fire()
+
+
+func _lab_input(ev: InputEvent) -> void:
+	var top = get_viewport().get_visible_rect().size.y * 0.5
+	if ev is InputEventScreenTouch:
+		if ev.pressed and ev.position.y < top:
+			lab.tch[ev.index] = ev.position
+		elif not ev.pressed:
+			lab.tch.erase(ev.index)
+	elif ev is InputEventScreenDrag and lab.tch.has(ev.index):
+		if lab.tch.size() == 1:
+			lab.yaw -= ev.relative.x * 0.008
+			lab.pit = clampf(lab.pit + ev.relative.y * 0.006, -0.08, 1.45)
+		elif lab.tch.size() >= 2:
+			var other = -1
+			for k in lab.tch:
+				if k != ev.index:
+					other = k
+			var d0 = (lab.tch[ev.index] - lab.tch[other]).length()
+			var d1 = (ev.position - lab.tch[other]).length()
+			if d0 > 10.0 and d1 > 10.0:
+				lab.dist = clampf(lab.dist * d0 / d1, 4.0, 90.0)
+		lab.tch[ev.index] = ev.position
+	elif ev is InputEventMouseButton and ev.pressed:
+		if ev.button_index == MOUSE_BUTTON_WHEEL_UP:
+			lab.dist = maxf(4.0, lab.dist * 0.9)
+		elif ev.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			lab.dist = minf(90.0, lab.dist * 1.1)
+
+
+func _lab_step(dt: float) -> void:
+	if lab.auto and lab.tab != "env":
+		lab.at -= dt
+		if lab.at <= 0.0:
+			_lab_fire()
+			lab.at = {"quake": 4.0, "wall": 5.3 * float(fx.wall.dur) + 0.4, "mine": 3.2}.get(lab.tab, 3.0)
+	if lab.sv > 0.0:
+		lab.sv -= dt
+		if lab.sv <= 0.0:
+			_fx_save()
+	_weapons(dt, false)
+	_tunnel(dt)
+	_pose_all(dt)
+	# Kamera kreist um die Teststelle (unten ist das Regelfeld, darum Blickpunkt etwas tiefer)
+	var f = T.frame(LZ + 7.0)
+	var tg: Vector3 = f.c + f.uu * 0.8
+	var cp = cos(lab.pit)
+	var off: Vector3 = (-f.fw * cos(lab.yaw) + f.rr * sin(lab.yaw)) * cp + Vector3.UP * sin(lab.pit)
+	var ro: Vector3 = tg + off * lab.dist
+	ro.y = maxf(ro.y, tg.y - 0.5)
+	shake = maxf(0.0, shake - dt * 1.8)
+	if flash_rect != null and flash_rect.color.a > 0.0:
+		flash_rect.color.a = maxf(0.0, flash_rect.color.a - dt * 2.2)
+	if shake > 0.0:
+		var tt2 = Time.get_ticks_msec() / 1000.0
+		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * 0.09
+	cam.global_position = ro
+	cam.look_at(tg, Vector3.UP)
+	cam.fov = 62.0
+	# Teststelle in die obere Bildhälfte (unten liegt das Regelfeld): Kamera etwas nach unten neigen
+	cam.rotate_object_local(Vector3(1, 0, 0), -0.29)
+	_sound_update(dt)
+	_post_update(dt)
+	_shot()
+
+
 # Nur zum Testen am Rechner: godot -- --shot=Pfad,z  → setzt dich an die Stelle z und speichert ein Bild
 var shot_n = 0
 func _shot() -> void:
@@ -4314,6 +4802,21 @@ func _shot() -> void:
 		if a.begins_with("--shot="):
 			var p = a.substr(7).split(",")
 			shot_n += 1
+			if p.size() > 3 and p[2] == "lab":
+				if shot_n == 60:
+					_lab_open()
+					_lab_tab(p[3])
+					if p.size() > 4:
+						lab.yaw = float(p[4])
+						lab.pit = float(p[5])
+						lab.dist = float(p[6])
+				if shot_n == 80 and p[3] != "env":
+					_lab_fire()
+				var at = 60 + {"boom": 25, "mine": 75, "quake": 32, "gb": 38, "rak": 55, "wall": 50, "env": 30}.get(p[3], 40)
+				if shot_n == at:
+					get_viewport().get_texture().get_image().save_png(p[0])
+					get_tree().quit()
+				return
 			if not rpf.is_empty():
 				if shot_n == 40:
 					get_viewport().get_texture().get_image().save_png(p[0])
@@ -4397,11 +4900,12 @@ func _tunnel(dt: float) -> void:
 		k = maxf(k, clampf(minf(zl - tu[0] + 2.0, tu[1] - zl + 2.0) / 7.0, 0.0, 1.0))
 	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
 	wenv.ambient_light_energy = lerpf(0.35, 0.02, tun_k)
-	wenv.fog_density = lerpf(0.012, 0.0, tun_k)
+	wenv.fog_density = lerpf(0.012 * float(fx.env.fog), 0.0, tun_k)
+	wenv.fog_enabled = float(fx.env.fog) > 0.01
 	wenv.background_energy_multiplier = lerpf(1.0, 0.05, tun_k)
-	moon.light_energy = lerpf(0.45, 0.0, tun_k)
+	moon.light_energy = lerpf(0.45 * float(fx.env.moon), 0.0, tun_k)
 	# im Tunnel sieht man den Mond nicht: Schattenberechnung sparen
-	moon.shadow_enabled = int(cfg.gfx) >= 1 and tun_k < 0.6
+	moon.shadow_enabled = int(cfg.gfx) >= 1 and tun_k < 0.6 and float(fx.env.moon) > 0.01
 	if tun_l.is_empty():
 		for i in range(4 if int(cfg.gfx) >= 2 else 2):
 			var l = OmniLight3D.new()
