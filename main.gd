@@ -1029,21 +1029,24 @@ float quake(float z){return qw(z-qz,qs)+qw(qz2-z,qs2);}
 void vertex(){float wz=(MODEL_MATRIX*vec4(VERTEX,1.)).z;VERTEX+=NORMAL*(quake(wz)+.002);}
 void fragment(){
 	vec3 r=vec3(0.);float ws=0.;
-	// kleiner Zufallsversatz je Pixel: aus sichtbaren Stufen wird feines Rauschen (das Filmkorn deckt es zu)
-	vec3 p3=fract(vec3(FRAGCOORD.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);float jt=fract((p3.x+p3.y)*p3.z);
+	// kein Zufallsversatz mehr (der machte die Spiegelung körnig): stattdessen stärker geglättete Bildstufen,
+	// so verschwimmen die Stufen zu einem weichen Schein
+	float jt=.5;
 	// wenige, weite Schritte aus einer verkleinerten Bildstufe: weich wie vorher, aber ein Bruchteil der Rechenarbeit
 	for(int i=1;i<=7;i++){
 		float k=float(i);
 		if(k>wn)break;
 		vec2 q=SCREEN_UV-vec2(0.,(k-jt)*.015);
 		if(q.y<0.)break;
-		vec3 c=textureLod(scr,q,1.+k*.25).rgb;
+		float lv=2.2+k*.3;
+		vec3 c=textureLod(scr,q,lv).rgb;
+
 		float w=exp(-k*.32);
 		r+=(max(c-.45,vec3(0.))*1.4+c*.05)*w;ws+=w;
 	}
 	float fr=.3+.7*pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),3.);
 	float fd=exp(-length(VERTEX)*.018);
-	ALBEDO=min(r/max(ws,.001),vec3(4.))*.8*fr*fd*wk;
+	ALBEDO=min(r/max(ws,.001),vec3(4.))*1.05*fr*fd*wk;
 }"""
 
 
