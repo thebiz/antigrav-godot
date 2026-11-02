@@ -6358,17 +6358,50 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.h = 0.45
 		var tf = maxf(8.5 / maxf(1.0, fwd), 0.6)  # flacher, gut sichtbarer Sprung, kurze Flugzeit
 		s.vy = (2.0 * tf * tf - s.h) / tf
+	# über die Leitplanke hinaus geflogen: sofort mittig über der Strecke neu erscheinen (mit Glitch),
+	# aus etwa Force-field-Höhe fallen lassen, auf dem Antigrav-Polster abfedern – kostet nur gut eine Sekunde
+	if s.air and absf(s.lat) > T.TW + 0.15 and not s.out:
+		s.lat = 0.0
+		s.psi = 0.0
+		s.vpsi = 0.0
+		s.u = 0.0
+		s.h = 1.5
+		s.vy = 0.0
+		s.drop = 1
+		s.rsT = 0.45
+		s.slow = minf(s.slow, 0.55)
+		s.boost = 0.0
+		if is_p:
+			_snd("phase", 0.0, 1.3)
+			_flash(Color(0.5, 0.9, 1.0), 0.18)
+		_zap_ship(s)
+	if s.get("rsT", 0.0) > 0.0:
+		# Glitch beim Erscheinen: Schiff flackert ein paar Mal
+		s.rsT -= dt
+		var vis_on = s.rsT <= 0.0 or fmod(s.rsT, 0.09) > 0.035
+		if (s.node as Node3D).visible != vis_on:
+			(s.node as Node3D).visible = vis_on
 	if s.air:
-		s.vy -= 4.0 * dt
+		var drp = int(s.get("drop", 0))
+		s.vy -= (14.0 if drp > 0 else 4.0) * dt
 		s.h += s.vy * dt
 		if s.h <= 0.0 and not T.gap(s.z):
 			if is_p and s.vy < -1.2:
 				_snd("land")
-			s.h = 0.0
-			s.air = false
-			s.vy = 0.0
-			if not ap:
-				s.slow = minf(s.slow, 0.9)
+			if drp > 0 and drp < 3 and s.vy < -0.6:
+				# Antigrav-Polster federt: kleiner werdende Hüpfer
+				s.h = 0.0
+				s.vy = -s.vy * (0.42 if drp == 1 else 0.3)
+				s.drop = drp + 1
+				if is_p:
+					shake = maxf(shake, 0.35 / drp)
+			else:
+				s.h = 0.0
+				s.air = false
+				s.vy = 0.0
+				s.drop = 0
+				if not ap:
+					s.slow = minf(s.slow, 0.9)
 	# Leitplanke: weich parallel ausrichten, etwas bremsen
 	var ml = T.TW - 0.3
 	if absf(s.lat) > ml and not s.air:
@@ -7732,6 +7765,10 @@ func _shot() -> void:
 				elif p[3].begins_with("gb"):
 					_gbomb(ships[0].z + 9.0, 0.0)
 					ships[0].boost = 1.5
+				elif p[3].begins_with("rs"):
+					ships[0].air = true
+					ships[0].h = 0.6
+					ships[0].lat = T.TW + 0.4
 				elif p[3].begins_with("mega"):
 					ships[0].wpn = "rak"
 					ships[0].sup = true
@@ -7765,10 +7802,12 @@ func _shot() -> void:
 							te = fr.t
 				_rp_seek(te + 0.35)
 				rp.paused = true
-			if shot_n == ({"repb": 84, "repf": 85, "armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44, "mega1": 46, "mega2": 52}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"repb": 84, "repf": 85, "armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44, "mega1": 46, "mega2": 52, "rs1": 43, "rs2": 50, "rs3": 58}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				if p.size() > 3 and p[3] == "long":
 					print(_perf_text())
+				if p.size() > 3 and p[3].begins_with("rs"):
+					print("RS h=", ships[0].h, " lat=", ships[0].lat, " air=", ships[0].air, " drop=", ships[0].get("drop", 0), " vis=", ships[0].node.visible)
 				if p.size() > 3 and p[3].begins_with("mega"):
 					for o in ships:
 						print("MEGA idx=", o.idx, " en=", o.en, " out=", o.out, " z=", o.z)
