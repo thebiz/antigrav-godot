@@ -2955,7 +2955,21 @@ func _menu() -> void:
 	sp.visible = false
 	root.add_child(sp)
 	ui.setp = sp
-	sp.add_child(_lbl("SETTINGS", 40))
+	sp.add_theme_constant_override("separation", 8)
+	var top = HBoxContainer.new()
+	top.add_theme_constant_override("separation", 16)
+	var bk = _btn("‹ Back")
+	bk.add_theme_font_size_override("font_size", 30)
+	bk.custom_minimum_size = Vector2(170, 80)
+	bk.pressed.connect(func(): _show_settings(false))
+	top.add_child(bk)
+	var stl = _lbl("SETTINGS", 40)
+	stl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(stl)
+	var spc = Control.new()
+	spc.custom_minimum_size = Vector2(170, 0)
+	top.add_child(spc)
+	sp.add_child(top)
 	ui.sl = {}
 	for it in [["speed", 0.5, 4.0], ["ai", 0.7, 1.4], ["res", 0.5, 1.0], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0]]:
 		var k: String = it[0]
@@ -3356,6 +3370,10 @@ func _rp_freeze(on: bool) -> void:
 
 
 func _input(ev: InputEvent) -> void:
+	if ev is InputEventKey and ev.pressed and not ev.echo and (ev.keycode == KEY_BACK or ev.keycode == KEY_ESCAPE):
+		get_viewport().set_input_as_handled()
+		_go_back()
+		return
 	if ev is InputEventScreenTouch:
 		if ev.pressed:
 			fingers[ev.index] = true
@@ -5959,13 +5977,44 @@ func _ai_inp(o: Dictionary, t: float, dt: float) -> float:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		_go_back()
+
+
+var back_t = -10.0
+var back_q = -10.0
+
+
+func _toast(t: String) -> void:
+	var l = _lbl(t, 30)
+	l.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	l.offset_top = -260
+	l.offset_bottom = -200
+	l.offset_left = -360
+	l.offset_right = 360
+	var cl = CanvasLayer.new()
+	cl.layer = 30
+	cl.add_child(l)
+	add_child(cl)
+	get_tree().create_timer(2.0).timeout.connect(cl.queue_free)
+
+
+# Android-Zurück: Menüs schließen, aus Rennen/Labor ins Hauptmenü; im Hauptmenü erst beim zweiten Mal beenden
+func _go_back() -> void:
+	var now = Time.get_ticks_msec() / 1000.0
+	if now - back_t < 0.25:
+		return   # Taste und Systemmeldung kommen manchmal doppelt
+	back_t = now
+	if true:
 		if state == "menu":
 			if ui.setp.visible:
 				_show_settings(false)
-			elif ui.has("rpl"):
+			elif ui.has("rpl") and is_instance_valid(ui.rpl) and (ui.rpl as Control).visible:
 				_show_replays(false)
-			else:
+			elif now - back_q < 2.0:
 				get_tree().quit()
+			else:
+				back_q = now
+				_toast("Press back again to quit")
 		elif state == "replay":
 			_replay_end()
 		elif state == "kill":
