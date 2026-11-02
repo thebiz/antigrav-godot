@@ -7040,14 +7040,14 @@ func _process(delta: float) -> void:
 		_ai_weapons(o, dt, racing)
 		for k in range(n):
 			_phys(o, inp, false, hdt, racing)
-		# Gummiband: wer hinten liegt, holt auf; wer weit vorn ist, lässt etwas nach
+		# Gummiband, ganz sanft: wer hinten liegt, holt höchstens 8 % auf; wer weit vorn ist, lässt höchstens 4 % nach
 		var dz: float = o.z - g.z
 		var st: float = o.sk0
 		if racing:
 			if dz < -4.0:
-				st = o.sk0 * (1.0 + minf(0.24, (-dz - 4.0) * 0.0065))
+				st = o.sk0 * (1.0 + minf(0.08, (-dz - 4.0) * 0.0022))
 			elif dz > 18.0:
-				st = o.sk0 * (1.0 - minf(0.12, (dz - 18.0) * 0.004))
+				st = o.sk0 * (1.0 - minf(0.04, (dz - 18.0) * 0.0013))
 		o.sk += (st - o.sk) * (1.0 - exp(-dt / 1.8))
 		# Vorbeiflug-Zischen
 		var pd = o.get("pdz", dz)
