@@ -38,7 +38,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": ""}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -95,6 +95,8 @@ func _ready() -> void:
 		bench_req = true
 	if OS.get_cmdline_user_args().has("--records"):
 		_show_records.call_deferred(true)
+	if OS.get_cmdline_user_args().has("--namedemo"):
+		_name_entry.call_deferred([["lap", 31.42, 0], ["dmg", 2.4, 2]])
 	if _noir():
 		CY = Color(0.9, 0.92, 0.95)
 		MG = OR
@@ -2650,7 +2652,10 @@ func _hud() -> void:
 	cl.add_child(rdim)
 	hud.rdim = rdim
 	hud.res = mk.call(34, HORIZONTAL_ALIGNMENT_CENTER)
-	hud.res.anchor_right = 1.0
+	hud.res.anchor_left = 0.04
+	hud.res.anchor_right = 0.96
+	hud.res.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hud.res.grow_vertical = Control.GROW_DIRECTION_BEGIN   # mehr Zeilen wachsen nach oben, nicht in die Tabelle
 	hud.res.anchor_top = 0.36
 	hud.res.anchor_bottom = 0.36
 	# Knöpfe nach dem Rennen: Wiederholung oder neues Rennen
@@ -6155,6 +6160,9 @@ func _go_back() -> void:
 	if now - back_t < 0.25:
 		return   # Taste und Systemmeldung kommen manchmal doppelt
 	back_t = now
+	if ui.has("namep") and is_instance_valid(ui.namep):
+		ui.named.call()   # Zurück = Name übernehmen, Rekord geht nicht verloren
+		return
 	if true:
 		if state == "menu":
 			if ui.setp.visible:
@@ -6318,31 +6326,116 @@ func _rec_key() -> String:
 	return "speed%d" % int(round(float(cfg.speed) * 100.0))
 
 
+const REC_N = 5   # Plätze je Liste
+const REC_CATS = [["lap", "Fastest lap"], ["total", "Fastest race"], ["dmg", "Most damage"]]
+
+
+# Liste lesen: [[Wert, Name], …] – alte Einzelwerte werden übernommen
+func _rec_list(c: ConfigFile, k: String, cat: String) -> Array:
+	var v = c.get_value(k, cat, [])
+	if v is float or v is int:
+		return [[float(v), "—"]] if float(v) > 0.0 else []
+	return v if v is Array else []
+
+
+func _rec_better(cat: String, a: float, b: float) -> bool:
+	return a > b if cat == "dmg" else a < b
+
+
+func _rec_fmt(cat: String, v: float) -> String:
+	return ("%d %%" % int(round(v * 100.0))) if cat == "dmg" else _fmt(v)
+
+
+# Rennende: was schafft es in die Bestenliste? Dann Namen eintragen lassen (wie am Spielautomaten)
 func _records_end(finished: bool) -> void:
 	var g: Dictionary = ships[0]
+	var vals = {}
+	if float(g.get("bestlap", 0.0)) > 0.0:
+		vals.lap = float(g.bestlap)
+	if finished:
+		vals.total = race_t
+	if float(g.dealt) > 0.0:
+		vals.dmg = float(g.dealt)
 	var c = ConfigFile.new()
 	c.load(REC_PATH)
 	var k = _rec_key()
-	var news = []
-	var bl = float(g.get("bestlap", 0.0))
-	if bl > 0.0:
-		var old = float(c.get_value(k, "lap", 0.0))
-		if old == 0.0 or bl < old:
-			c.set_value(k, "lap", bl)
-			news.append("LAP " + _fmt(bl))
-	if finished:
-		var old2 = float(c.get_value(k, "total", 0.0))
-		if old2 == 0.0 or race_t < old2:
-			c.set_value(k, "total", race_t)
-			news.append("TIME " + _fmt(race_t))
-	var dm = float(g.dealt)
-	if dm > float(c.get_value(k, "dmg", 0.0)) and dm > 0.0:
-		c.set_value(k, "dmg", dm)
-		news.append("DAMAGE %d %%" % int(round(dm * 100.0)))
-	c.save(REC_PATH)
-	if not news.is_empty():
-		hud.res.text += ("\n" if hud.res.text != "" else "") + "NEW RECORD  ·  " + "  ·  ".join(PackedStringArray(news))
-		_snd("pick", 0.0, 1.5)
+	var hits = []
+	for cat in vals:
+		var lst = _rec_list(c, k, cat)
+		var rank = lst.size()
+		for i in range(lst.size()):
+			if _rec_better(cat, vals[cat], float(lst[i][0])):
+				rank = i
+				break
+		if rank < REC_N:
+			hits.append([cat, vals[cat], rank])
+	if hits.is_empty():
+		return
+	hud.res.text += "\nNEW RECORD!"
+	_snd("pick", 0.0, 1.5)
+	get_tree().create_timer(1.2).timeout.connect(func(): _name_entry(hits))
+
+
+func _name_entry(hits: Array) -> void:
+	var cl = CanvasLayer.new()
+	cl.layer = 14
+	add_child(cl)
+	var bg = ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.78)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP   # Knöpfe darunter sind gesperrt
+	cl.add_child(bg)
+	var vb = VBoxContainer.new()
+	vb.anchor_left = 0.08
+	vb.anchor_right = 0.92
+	vb.anchor_top = 0.08
+	vb.anchor_bottom = 0.6
+	vb.add_theme_constant_override("separation", 16)
+	cl.add_child(vb)
+	var t = _lbl("NEW RECORD", 52)
+	t.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+	vb.add_child(t)
+	for h in hits:
+		var nm = {"lap": "Fastest lap", "total": "Fastest race", "dmg": "Most damage"}[h[0]]
+		var l = _lbl("%s   %s   ·   #%d" % [nm, _rec_fmt(h[0], h[1]), int(h[2]) + 1], 30)
+		vb.add_child(l)
+	vb.add_child(_lbl("Your name:", 30))
+	var le = LineEdit.new()
+	le.text = str(cfg.get("pname", ""))
+	le.placeholder_text = "Name"
+	le.max_length = 14
+	le.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	le.add_theme_font_size_override("font_size", 44)
+	le.custom_minimum_size = Vector2(0, 100)
+	le.select_all_on_focus = true
+	vb.add_child(le)
+	var ok = _btn("SAVE", true)
+	vb.add_child(ok)
+	var done = func():
+		var nm2 = le.text.strip_edges()
+		if nm2 == "":
+			nm2 = "Player"
+		cfg.pname = nm2
+		_save_cfg()
+		var c = ConfigFile.new()
+		c.load(REC_PATH)
+		var k = _rec_key()
+		for h in hits:
+			var lst = _rec_list(c, k, h[0])
+			lst.append([h[1], nm2])
+			var cat: String = h[0]
+			lst.sort_custom(func(a, b): return _rec_better(cat, float(a[0]), float(b[0])))
+			if lst.size() > REC_N:
+				lst.resize(REC_N)
+			c.set_value(k, cat, lst)
+		c.save(REC_PATH)
+		DisplayServer.virtual_keyboard_hide()
+		cl.queue_free()
+	ui.namep = cl
+	ui.named = done
+	ok.pressed.connect(done)
+	le.text_submitted.connect(func(_t): done.call())
+	le.grab_focus.call_deferred()
 
 
 func _show_records(on: bool) -> void:
@@ -6357,36 +6450,60 @@ func _show_records(on: bool) -> void:
 	add_child(cl)
 	ui.recp = cl
 	var bg = ColorRect.new()
-	bg.color = Color(0, 0, 0, 0.82)
+	bg.color = Color(0, 0, 0, 0.88)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	cl.add_child(bg)
 	var vb = VBoxContainer.new()
-	vb.anchor_left = 0.08
-	vb.anchor_right = 0.92
-	vb.anchor_top = 0.18
-	vb.anchor_bottom = 0.9
-	vb.add_theme_constant_override("separation", 18)
+	vb.anchor_left = 0.06
+	vb.anchor_right = 0.94
+	vb.anchor_top = 0.06
+	vb.anchor_bottom = 0.94
+	vb.add_theme_constant_override("separation", 12)
 	cl.add_child(vb)
 	vb.add_child(_lbl("RECORDS", 48))
+	var sc = ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vb.add_child(sc)
+	var lst = VBoxContainer.new()
+	lst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lst.add_theme_constant_override("separation", 6)
+	sc.add_child(lst)
 	var c = ConfigFile.new()
 	c.load(REC_PATH)
 	var secs = Array(c.get_sections())
 	secs.sort_custom(func(a, b): return int(a.substr(5)) < int(b.substr(5)))
+	# aktuelle Tempo-Stufe zuerst
+	if secs.has(_rec_key()):
+		secs.erase(_rec_key())
+		secs.push_front(_rec_key())
 	if secs.is_empty():
-		vb.add_child(_lbl("No records yet – go race!", 28))
+		lst.add_child(_lbl("No records yet – go race!", 28))
 	for k in secs:
-		var t = "Speed %d %%\n" % int(k.substr(5))
-		var lp = float(c.get_value(k, "lap", 0.0))
-		var tt = float(c.get_value(k, "total", 0.0))
-		var dm = float(c.get_value(k, "dmg", 0.0))
-		t += "Fastest lap  %s\nFastest race  %s\nMost damage  %s" % [_fmt(lp) if lp > 0.0 else "–", _fmt(tt) if tt > 0.0 else "–", ("%d %%" % int(round(dm * 100.0))) if dm > 0.0 else "–"]
-		var l = _lbl(t, 28)
-		if k == _rec_key():
-			l.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
-		vb.add_child(l)
-	var b = _btn("Back", true)
-	b.pressed.connect(func(): _show_records(false))
-	vb.add_child(b)
+		var hd = _lbl("Speed %d %%" % int(k.substr(5)), 34)
+		hd.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4) if k == _rec_key() else Color(0.75, 0.85, 1.0))
+		lst.add_child(hd)
+		for ct in REC_CATS:
+			var rows = _rec_list(c, k, ct[0])
+			if rows.is_empty():
+				continue
+			var ch = _lbl(ct[1], 26)
+			ch.modulate = Color(1, 1, 1, 0.6)
+			lst.add_child(ch)
+			for i in range(rows.size()):
+				var row = HBoxContainer.new()
+				var a = _lbl("%d.  %s" % [i + 1, str(rows[i][1])], 28)
+				a.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+				a.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				row.add_child(a)
+				var b = _lbl(_rec_fmt(ct[0], float(rows[i][0])), 28)
+				b.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+				row.add_child(b)
+				lst.add_child(row)
+		lst.add_child(_lbl(" ", 16))
+	var bb = _btn("Back", true)
+	bb.pressed.connect(func(): _show_records(false))
+	vb.add_child(bb)
 
 
 # Sieg: großes, leuchtendes VICTORY, springt auf und pulsiert

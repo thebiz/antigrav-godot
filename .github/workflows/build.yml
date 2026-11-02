@@ -22,7 +22,7 @@ jobs:
           path: k/debug.keystore
           retention-days: 1
 
-  # zwei Fassungen: Godot 4.3 (bewährt) und Godot 4.7.2 (zum Testen)
+  # nur noch Godot 4.7.2 (die 4.3-Fassung wird nicht mehr gebaut)
   build:
     needs: key
     runs-on: ubuntu-latest
@@ -30,8 +30,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - godot: "4.3"
-            suffix: ""
           - godot: "4.7.2"
             suffix: "-godot47"
     container:
