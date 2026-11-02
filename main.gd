@@ -38,7 +38,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -78,7 +78,6 @@ var rpf = {}   # geladenes Replay aus einer Datei
 
 
 func _ready() -> void:
-	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 	if pending_rp != "":
 		var fa = FileAccess.open_compressed(pending_rp, FileAccess.READ, FileAccess.COMPRESSION_ZSTD)
 		if fa != null:
@@ -94,6 +93,8 @@ func _ready() -> void:
 		cfg.look = 1
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
+	if OS.get_cmdline_user_args().has("--records"):
+		_show_records.call_deferred(true)
 	if _noir():
 		CY = Color(0.9, 0.92, 0.95)
 		MG = OR
@@ -2685,6 +2686,7 @@ func _hud() -> void:
 		b4.text = "REPORT COPIED ✓")
 	bx.add_child(b4)
 	bx.offset_bottom = 470
+	hud.perfbtn = b4
 	hud.resb = bx
 	hud.resbtn = [b1, b2, b3, b4]
 	# Ergebnistafel: alle vier Fahrer – erst Zeiten, dann abwechselnd ausgeteilter Schaden
@@ -2879,6 +2881,8 @@ var fingers = {}
 
 
 func _show_resb() -> void:
+	if hud.has("perfbtn"):
+		hud.perfbtn.visible = int(cfg.perf) == 1 or state == "bench"
 	if not hud.resb.visible:
 		resb_t = 0.0
 		resb_armed = false
@@ -2992,9 +2996,17 @@ func _menu() -> void:
 	var go = _btn("START RACE", true)
 	go.pressed.connect(_start)
 	box.add_child(go)
+	var rrow = HBoxContainer.new()
+	rrow.add_theme_constant_override("separation", 16)
+	box.add_child(rrow)
 	var brl = _btn("Replays")
+	brl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	brl.pressed.connect(func(): _show_replays(true))
-	box.add_child(brl)
+	rrow.add_child(brl)
+	var brc = _btn("Records")
+	brc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	brc.pressed.connect(func(): _show_records(true))
+	rrow.add_child(brc)
 	var srow = HBoxContainer.new()
 	srow.add_theme_constant_override("separation", 16)
 	box.add_child(srow)
@@ -3124,7 +3136,8 @@ func _menu() -> void:
 	sp.add_child(twin2)
 	ui.fpsb = []
 	ui.capb = []
-	for grp in [["FPS display", ["Off", "On"], "fps", ui.fpsb], ["Frame rate", ["Max", "60"], "cap", ui.capb]]:
+	ui.perfb = []
+	for grp in [["FPS display", ["Off", "On"], "fps", ui.fpsb], ["Frame rate", ["Max", "60"], "cap", ui.capb], ["Perf. report", ["Off", "On"], "perf", ui.perfb]]:
 		var col = VBoxContainer.new()
 		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		twin2.add_child(col)
@@ -3272,7 +3285,7 @@ func _refresh_ui() -> void:
 		ui.gfx[q].add_theme_stylebox_override("pressed", ui.gfx[q].get_theme_stylebox("normal"))
 		ui.gfx[q].add_theme_stylebox_override("hover", ui.gfx[q].get_theme_stylebox("normal"))
 	for q in range(2):
-		for pair in [[ui.get("fpsb", []), "fps"], [ui.get("capb", []), "cap"]]:
+		for pair in [[ui.get("fpsb", []), "fps"], [ui.get("capb", []), "cap"], [ui.get("perfb", []), "perf"]]:
 			if q < pair[0].size():
 				var on4 = int(cfg[pair[1]]) == q
 				var st4 = _style(Color(0.93, 0.41, 0.18) if on4 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on4 else Color(1, 1, 1, 0.22))
@@ -5905,13 +5918,21 @@ func _board_update(dt: float) -> void:
 var pf = {"n": 0, "sum": 0.0, "hist": [0, 0, 0, 0, 0], "sec": [], "acc": 0.0, "an": 0, "aw": 0.0, "sp": [], "ev": {},
 	"gs": 0.0, "cs": 0.0, "ps": 0.0, "ag": 0.0, "ac": 0.0, "ap": 0.0}
 var gpu_ms = 0.0   # Grafikkarte: Zeit fürs letzte Bild (ms)
+var measuring = false
 var cpu_ms = 0.0   # Prozessor: Spiel-Logik + Zeichenbefehle (ms)
 var fps_t = 0.0
 
 
 # Zeitmessung von Grafikkarte und Prozessor (zeigt, wer bremst)
 func _measure(delta: float) -> void:
+	# nur messen, wenn FPS-Anzeige, Leistungsbericht oder Leistungstest es brauchen
+	var need = int(cfg.fps) == 1 or int(cfg.perf) == 1 or state == "bench"
 	var rid = get_viewport().get_viewport_rid()
+	if need != measuring:
+		measuring = need
+		RenderingServer.viewport_set_measure_render_time(rid, need)
+	if not need:
+		return
 	gpu_ms = RenderingServer.viewport_get_measured_render_time_gpu(rid)
 	cpu_ms = Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0 + RenderingServer.viewport_get_measured_render_time_cpu(rid) + RenderingServer.get_frame_setup_time_cpu()
 	fps_t -= delta
@@ -5957,7 +5978,7 @@ func _perf_ctx() -> String:
 
 
 func _perf(delta: float) -> void:
-	if state != "race":
+	if state != "race" or int(cfg.perf) != 1:
 		return
 	var ms = delta / maxf(0.01, Engine.time_scale) * 1000.0
 	pf.n += 1
@@ -6138,6 +6159,8 @@ func _go_back() -> void:
 		if state == "menu":
 			if ui.setp.visible:
 				_show_settings(false)
+			elif ui.has("recp") and is_instance_valid(ui.recp):
+				_show_records(false)
 			elif ui.has("rpl") and is_instance_valid(ui.rpl) and (ui.rpl as Control).visible:
 				_show_replays(false)
 			elif now - back_q < 2.0:
@@ -6285,6 +6308,85 @@ func _bench_end() -> void:
 		await get_tree().create_timer(0.5).timeout
 		get_viewport().get_texture().get_image().save_png("user://bench.png")
 		get_tree().quit()
+
+
+# ---------------------------------------------------------------- Bestenliste: schnellste Runde, schnellste Gesamtzeit, meister Schaden – je Tempo-Stufe
+const REC_PATH = "user://records.cfg"
+
+
+func _rec_key() -> String:
+	return "speed%d" % int(round(float(cfg.speed) * 100.0))
+
+
+func _records_end(finished: bool) -> void:
+	var g: Dictionary = ships[0]
+	var c = ConfigFile.new()
+	c.load(REC_PATH)
+	var k = _rec_key()
+	var news = []
+	var bl = float(g.get("bestlap", 0.0))
+	if bl > 0.0:
+		var old = float(c.get_value(k, "lap", 0.0))
+		if old == 0.0 or bl < old:
+			c.set_value(k, "lap", bl)
+			news.append("LAP " + _fmt(bl))
+	if finished:
+		var old2 = float(c.get_value(k, "total", 0.0))
+		if old2 == 0.0 or race_t < old2:
+			c.set_value(k, "total", race_t)
+			news.append("TIME " + _fmt(race_t))
+	var dm = float(g.dealt)
+	if dm > float(c.get_value(k, "dmg", 0.0)) and dm > 0.0:
+		c.set_value(k, "dmg", dm)
+		news.append("DAMAGE %d %%" % int(round(dm * 100.0)))
+	c.save(REC_PATH)
+	if not news.is_empty():
+		hud.res.text += ("\n" if hud.res.text != "" else "") + "NEW RECORD  ·  " + "  ·  ".join(PackedStringArray(news))
+		_snd("pick", 0.0, 1.5)
+
+
+func _show_records(on: bool) -> void:
+	if ui.has("recp"):
+		if is_instance_valid(ui.recp):
+			ui.recp.queue_free()
+		ui.erase("recp")
+	if not on:
+		return
+	var cl = CanvasLayer.new()
+	cl.layer = 12
+	add_child(cl)
+	ui.recp = cl
+	var bg = ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.82)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cl.add_child(bg)
+	var vb = VBoxContainer.new()
+	vb.anchor_left = 0.08
+	vb.anchor_right = 0.92
+	vb.anchor_top = 0.18
+	vb.anchor_bottom = 0.9
+	vb.add_theme_constant_override("separation", 18)
+	cl.add_child(vb)
+	vb.add_child(_lbl("RECORDS", 48))
+	var c = ConfigFile.new()
+	c.load(REC_PATH)
+	var secs = Array(c.get_sections())
+	secs.sort_custom(func(a, b): return int(a.substr(5)) < int(b.substr(5)))
+	if secs.is_empty():
+		vb.add_child(_lbl("No records yet – go race!", 28))
+	for k in secs:
+		var t = "Speed %d %%\n" % int(k.substr(5))
+		var lp = float(c.get_value(k, "lap", 0.0))
+		var tt = float(c.get_value(k, "total", 0.0))
+		var dm = float(c.get_value(k, "dmg", 0.0))
+		t += "Fastest lap  %s\nFastest race  %s\nMost damage  %s" % [_fmt(lp) if lp > 0.0 else "–", _fmt(tt) if tt > 0.0 else "–", ("%d %%" % int(round(dm * 100.0))) if dm > 0.0 else "–"]
+		var l = _lbl(t, 28)
+		if k == _rec_key():
+			l.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
+		vb.add_child(l)
+	var b = _btn("Back", true)
+	b.pressed.connect(func(): _show_records(false))
+	vb.add_child(b)
 
 
 # Sieg: großes, leuchtendes VICTORY, springt auf und pulsiert
@@ -6500,6 +6602,15 @@ func _process(delta: float) -> void:
 		var fin = T.ZST + T.LAPS * T.LAP
 		if o.z >= fin and o.fin == 0.0 and (racing or state == "done"):
 			o.fin = race_t
+	# Rundenzeiten (für die Bestenliste)
+	if racing:
+		var lk = int(floor((g.z - T.ZST) / T.LAP))
+		if lk >= 1 and lk > int(g.get("lapk", 0)):
+			var lt = race_t - float(g.get("lapT", 0.0))
+			g.lapk = lk
+			g.lapT = race_t
+			if lt > 1.0 and (g.get("bestlap", 0.0) == 0.0 or lt < g.bestlap):
+				g.bestlap = lt
 	# Ziel
 	var finish = T.ZST + T.LAPS * T.LAP
 	var place = 1
@@ -6513,6 +6624,7 @@ func _process(delta: float) -> void:
 		t_state = 0.0
 		hud.res.text = ""   # die große rote Meldung und die Tabelle zeigen es schon
 		_show_resb()
+		_records_end(false)
 	elif racing and kc_pending.is_empty() and _all_out():
 		state = "done"
 		t_state = 0.0
@@ -6521,6 +6633,7 @@ func _process(delta: float) -> void:
 		_show_resb()
 		hud.res.text = "1st  ·  LAST ONE STANDING\n%s" % _fmt(race_t)
 		_victory()
+		_records_end(false)
 	elif racing and g.z >= finish:
 		state = "done"
 		t_state = 0.0
@@ -6530,6 +6643,7 @@ func _process(delta: float) -> void:
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
 		if place == 1:
 			_victory()
+		_records_end(true)
 	_board_update(dt)
 	_resb_arm(dt)
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
