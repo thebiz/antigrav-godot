@@ -4824,7 +4824,9 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	lt.light_energy = 3.0 * float(X.light)
 	mi.add_child(lt)
 	var tg = null
-	if homing:
+	if homing and from.idx == 0 and dir > 0.0 and lk_k >= 1.0 and lk_tg != null and not lk_tg.out:
+		tg = lk_tg   # eingerastetes Ziel
+	elif homing:
 		var bd = 220.0
 		for o in ships:
 			if o.idx != from.idx and not o.out and (o.z - from.z) * dir > 0.0 and (o.z - from.z) * dir < bd:
@@ -5323,6 +5325,85 @@ func _bwaves_update(dt: float) -> void:
 			bwaves.remove_at(i)
 
 
+# Zielerfassung der Lenkrakete: Fadenkreuz wandert auf den Gegner vor dir, Piepsen wird schneller,
+# eingerastet = rotes Fadenkreuz und Dauerton
+var lk_tg = null
+var lk_k = 0.0
+var lk_bt = 0.0
+var lk_pos = Vector2.ZERO
+var lk_ui: Control
+const LK_T = 1.3     # Sekunden bis zum Einrasten
+const LK_R = 90.0    # Reichweite
+
+
+func _lock_update(dt: float, racing: bool) -> void:
+	var g: Dictionary = ships[0]
+	if lk_ui == null:
+		lk_ui = Control.new()
+		lk_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		lk_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+		lk_ui.draw.connect(_lock_draw)
+		(hud.fire as Control).get_parent().add_child(lk_ui)
+	var tg = null
+	# einmal erfasst, bleibt das Ziel, solange es vor dir und in Reichweite ist
+	if racing and g.wpn == "lenk" and not g.out and lk_tg != null and not lk_tg.out and lk_tg.z - g.z > 1.0 and lk_tg.z - g.z < LK_R * 1.2:
+		tg = lk_tg
+	elif racing and g.wpn == "lenk" and not g.out:
+		var bd = LK_R
+		for o in ships:
+			if o.idx != 0 and not o.out and o.z - g.z > 2.0 and o.z - g.z < bd:
+				bd = o.z - g.z
+				tg = o
+	if tg != lk_tg:
+		lk_tg = tg
+		lk_k = 0.0
+		lk_bt = 0.0
+	if tg == null:
+		if lk_ui.visible:
+			lk_ui.visible = false
+		return
+	lk_k = minf(1.0, lk_k + dt / LK_T)
+	var wp: Vector3 = (tg.node as Node3D).global_position
+	if cam.is_position_behind(wp):
+		lk_ui.visible = false
+		return
+	var sp = cam.unproject_position(wp)
+	lk_pos = sp if not lk_ui.visible else lk_pos.lerp(sp, 1.0 - exp(-dt / 0.05))
+	lk_ui.visible = true
+	lk_ui.queue_redraw()
+	# Piepsen: immer schneller, eingerastet ein schnelles Dauersirren
+	lk_bt -= dt
+	if lk_bt <= 0.0:
+		if lk_k >= 1.0:
+			_snd("beep", -9.0, 1.55)
+			lk_bt = 0.06
+		else:
+			_snd("beep", -12.0, 1.1 + lk_k * 0.25)
+			lk_bt = lerpf(0.42, 0.1, lk_k)
+
+
+func _lock_draw() -> void:
+	if lk_tg == null:
+		return
+	var vs = get_viewport().get_visible_rect().size
+	var u = vs.y / 1170.0
+	var on = lk_k >= 1.0
+	# vom großen Rahmen zum engen Fadenkreuz, dreht sich dabei
+	var r = lerpf(140.0, 34.0, pow(lk_k, 0.7)) * u
+	var col = Color(1.0, 0.15, 0.1) if on else Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.5, 0.15), lk_k)
+	var a0 = (1.0 - lk_k) * PI * 0.75
+	var w = 4.0 * u
+	for i in range(4):
+		var a = a0 + i * PI * 0.5
+		lk_ui.draw_arc(lk_pos, r, a + 0.25, a + PI * 0.5 - 0.25, 10, col, w, true)
+	for d in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+		lk_ui.draw_line(lk_pos + d * (r - 10.0 * u), lk_pos + d * (r + 14.0 * u), col, w, true)
+	if on:
+		lk_ui.draw_circle(lk_pos, 5.0 * u, col)
+		var f = ThemeDB.fallback_font
+		lk_ui.draw_string(f, lk_pos + Vector2(-60.0 * u, r + 46.0 * u), "LOCKED", HORIZONTAL_ALIGNMENT_CENTER, 120.0 * u, int(28 * u), col)
+
+
 func _weapons(dt: float, racing: bool) -> void:
 	var g: Dictionary = ships[0]
 	msg_t -= dt
@@ -5370,6 +5451,7 @@ func _weapons(dt: float, racing: bool) -> void:
 	hud.fire.text = (("MEGA\n" if g.get("mega", false) else "SUPER\n") if g.get("sup", false) and g.wpn != "" else "") + WN.get(g.wpn, "empty")
 	if g.auto > 0.0 and g.wpn == "":
 		hud.fire.text = ("SUPER\n" if g.get("sauto", false) else "") + "AUTO" + (" …" if g.get("ahold", false) else " %.1f" % g.auto)
+	_lock_update(dt, racing)
 	var armed = g.wpn != ""
 	hud.armed = armed
 	hud.fire.modulate = Color(1, 1, 1, 1.0 if armed or g.auto > 0.0 else 0.4)
@@ -8168,7 +8250,7 @@ func _shot() -> void:
 					for o in ships:
 						o.en = 1.0
 					fire_req = true
-				elif p[3] == "armed":
+				elif p[3].begins_with("armed"):
 					ships[0].wpn = "lenk"
 				elif p[3].begins_with("kill"):
 					for i in range(1, 4):
@@ -8194,7 +8276,7 @@ func _shot() -> void:
 							te = fr.t
 				_rp_seek(te + 0.35)
 				rp.paused = true
-			if shot_n == ({"repb": 84, "repf": 85, "armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44, "mega1": 46, "mega2": 52, "rs1": 43, "rs2": 50, "rs3": 58}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"repb": 84, "repf": 85, "armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44, "mega1": 46, "mega2": 52, "rs1": 43, "rs2": 50, "rs3": 58, "armed2": 130}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				if p.size() > 3 and p[3] == "long":
 					print(_perf_text())
