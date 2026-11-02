@@ -1036,17 +1036,17 @@ void fragment(){
 	for(int i=1;i<=7;i++){
 		float k=float(i);
 		if(k>wn)break;
-		vec2 q=SCREEN_UV-vec2(0.,(k-jt)*.015);
+		vec2 q=SCREEN_UV-vec2(0.,(k-jt)*.008);   // enge Abstände + starke Glättung: die Kopien fließen ineinander
 		if(q.y<0.)break;
-		float lv=2.2+k*.3;
+		float lv=3.+k*.4;
 		vec3 c=textureLod(scr,q,lv).rgb;
 
-		float w=exp(-k*.32);
+		float w=exp(-k*.18);
 		r+=(max(c-.45,vec3(0.))*1.4+c*.05)*w;ws+=w;
 	}
 	float fr=.3+.7*pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),3.);
 	float fd=exp(-length(VERTEX)*.018);
-	ALBEDO=min(r/max(ws,.001),vec3(4.))*1.05*fr*fd*wk;
+	ALBEDO=min(r/max(ws,.001),vec3(3.))*.75*fr*fd*wk;   // dezenter, weicher Glanz
 }"""
 
 
