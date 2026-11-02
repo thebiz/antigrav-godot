@@ -417,7 +417,7 @@ func _sound_update(dt: float) -> void:
 	loops.engine.volume_db = linear_to_db(0.02 + (0.5 + 0.35 * sp + 0.35 * g.boost if on else 0.12))
 	loops.idle.pitch_scale = clampf(0.75 + 0.45 * sp + 0.25 * g.boost, 0.3, 3.0)
 	loops.idle.volume_db = linear_to_db(0.32 if state != "menu" else 0.2)
-	var scr = on and absf(g.lat) >= T.TW - 0.31 and not g.air and g.spd > 1.0
+	var scr = on and absf(g.lat) >= T.TW - 0.31 and not g.air and g.spd > 1.0 and g.shield <= 0.0
 	var tv = 0.7 if scr else 0.0
 	scr_v += (tv - scr_v) * (1.0 - exp(-dt / (0.02 if scr else 0.08)))
 	loops.field.volume_db = linear_to_db(maxf(0.0005, scr_v))
@@ -2329,9 +2329,12 @@ func _shield_vis(o: Dictionary) -> void:
 		shn = _shield_for(nd)
 	if shn != null:
 		shn.visible = o.shield > 0.0 and (o.shield > 1.2 or fmod(o.shield, 0.25) < 0.15)
+		var shf = float(o.get("shf", 0.0))
+		if shf > 0.0:
+			o.shf = maxf(0.0, shf - get_process_delta_time() * 4.0)
 		if shn.visible:
 			var X: Dictionary = fx.shield
-			shn.scale = (shn.get_meta("bs") as Vector3) * float(X.size)
+			shn.scale = (shn.get_meta("bs") as Vector3) * float(X.size) * (1.0 + 0.18 * shf)
 			_sp(shield_mat, "sc", _v3(_hs(Color(0.12, 0.45, 1.0), float(X.hue))))
 			_sp(shield_mat, "sg", float(X.glow))
 			_sp(shield_mat, "sf", float(X.flicker))
@@ -3908,7 +3911,7 @@ func _fire_ball(pos: Vector3, k: float, am := 1.0, hu := 0.0) -> void:
 
 
 # Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
-func _gbomb(z: float, lat: float, own := -1, hit := -1, sc := 1.0) -> void:
+func _gbomb(z: float, lat: float, own := -1, hit := -1, sc := 1.0, sup := false) -> void:
 	_pev("hole")
 	_rev(["gb", z, lat, sc])
 	_fx_res()
@@ -3977,7 +3980,7 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1, sc := 1.0) -> void:
 	add_child(lt)
 	fxs.append({"gb": true, "pos": pos, "core": core, "ring": ring, "l": lt, "t": fx_age / maxf(0.05, float(X.time)), "f": f, "z": z, "lat": lat, "snap": false, "own": own, "hit": hit,
 		"sz": gz, "ps": gsc, "ts": float(X.time), "wt": float(X.wthick), "ws": float(X.wspeed), "wz": float(X.wsize), "whu": hu + float(X.whue), "gr": float(X.gring),
-		"rimw": float(X.rimw), "rimb": float(X.rimb), "rimh": hu + float(X.rimh), "dark": float(X.dark), "cs": float(X.core) * sqrt(float(X.size)) * gsc, "sp": float(X.sparks), "wv": float(X.wave), "lk": float(X.light), "lens": float(X.lens), "sh": float(X.shake), "hu": hu})
+		"rimw": float(X.rimw), "rimb": float(X.rimb), "rimh": hu + float(X.rimh), "dark": float(X.dark), "cs": float(X.core) * sqrt(float(X.size)) * gsc, "sp": float(X.sparks), "wv": float(X.wave), "lk": float(X.light), "lens": float(X.lens), "sh": float(X.shake), "hu": hu, "sup": sup})
 	_snd("gbomb", 3.0, 1.0, pos)
 
 
@@ -3988,7 +3991,7 @@ func _gb_damage(e: Dictionary) -> void:
 		var dd = Vector2(o.z - e.z, o.lat - e.lat).length()
 		var kk = clampf(1.0 - dd / (GB_R * e.get("sz", 1.0)), 0.0, 1.0)
 		if kk > 0.0:
-			_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0), e.own, "rocket")
+			_dmg(o, (0.45 * pow(kk, 1.2)) * (0.5 if o.idx == e.hit else 1.0), e.own, "rocket", e.get("sup", false))
 			if not _prot(o):   # mit Schild: kein Abbremsen
 				o.slow = minf(o.slow, 0.4)
 
@@ -4183,13 +4186,53 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 
 
 # Schaden: Schild schützt; leer = ausgeschieden; Meldung oben
+# Schild fängt etwas ab: kurzes Aufleuchten und ein dumpfes Schlucken
+func _shield_ping(o: Dictionary) -> void:
+	o.shf = 1.0
+	if race_t - o.get("shpT", -9.0) > 0.25:
+		o.shpT = race_t
+		_snd("shield", -6.0 if o.idx == 0 else 0.0, 1.9, null if o.idx == 0 else (o.node as Node3D).global_position)
+
+
+# Schild zerbricht: Funkenregen, Meldung, Schutz weg
+func _shield_break(o: Dictionary) -> void:
+	o.shield = 0.0
+	o.shh = 0
+	_shield_vis(o)
+	var pos: Vector3 = (o.node as Node3D).global_position + Vector3(0, 0.2, 0)
+	_fx_res()
+	_burst(pos, fxr.spark, 90, 0.8, 4.0, 10.0, 180.0, Vector3(0, -5, 0), 0.5, 0.6, 1.3,
+		_ramp([[0.0, Color(2, 5, 9, 1)], [1.0, Color(0.2, 0.5, 1, 0)]]), null, true, false, 0.4)
+	_snd("zap", 2.0, 0.7, null if o.idx == 0 else pos)
+	if o.idx == 0:
+		_msg("SHIELD BROKEN", Color(0.5, 0.75, 1.0))
+		shake = maxf(shake, 0.6)
+	else:
+		_msg("SHIELD BROKEN · %s" % NAMES[o.idx], Color(0.5, 0.75, 1.0))
+
+
 func _prot(o: Dictionary) -> bool:
 	return o.shield > 0.0 or o.orbs > 0.0 or (o.idx == 0 and o.auto > 0.0)
 
 
-func _dmg(o: Dictionary, a: float, src := -1, kind := "") -> void:
-	if o.out or state != "race" or _prot(o):
+func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
+	if o.out or state != "race":
 		return
+	if o.shield > 0.0:
+		# Schild: Superwaffen zerschlagen ihn sofort, Raketen beim zweiten Treffer; sonst schluckt er alles
+		if sup or kind == "rocket":
+			o.shh = int(o.get("shh", 0)) + (2 if sup else 1)
+			if o.shh >= 2:
+				_shield_break(o)
+			else:
+				_shield_ping(o)
+		else:
+			_shield_ping(o)
+		return
+	if _prot(o):
+		return
+	if sup:
+		a = maxf(a, o.en)   # Superwaffe: sofort erledigt
 	var before: float = o.en
 	o.en = maxf(0.0, o.en - a)
 	if src >= 0 and src < ships.size() and src != o.idx:
@@ -4216,7 +4259,7 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "") -> void:
 		_msg("HIT · %s %d %%" % [nm, int(round(o.en * 100.0))], Color(1, 0.75, 0.5))
 
 
-func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0, cl := false) -> void:
+func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0, cl := false, sp := false) -> void:
 	var X: Dictionary = fx.rak
 	var cap = CapsuleMesh.new()
 	cap.radius = 0.06 * float(X.size)
@@ -4234,22 +4277,28 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 			if o.idx != from.idx and not o.out and (o.z - from.z) * dir > 0.0 and (o.z - from.z) * dir < bd:
 				bd = (o.z - from.z) * dir
 				tg = o
-	shots.append({"z": from.z + 1.0 * dir, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) * dir if not at_player else 0.0, "n": mi, "own": from.idx, "dir": dir, "cl": cl})
-	if cl:
+	shots.append({"z": from.z + 1.0 * dir, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) * dir if not at_player else 0.0, "n": mi, "own": from.idx, "dir": dir, "cl": cl, "sup": sp or cl})
+	if cl or sp:
+		# Superwaffe: gold, größer, heller
 		(mi.material_override as StandardMaterial3D).albedo_color = Color(1.0, 0.78, 0.2)
 		(mi.material_override as StandardMaterial3D).emission = Color(1.0, 0.78, 0.2)
+		(mi.material_override as StandardMaterial3D).emission_energy_multiplier = 16.0
+		cap.radius *= 1.6
+		cap.height *= 1.6
+		lt.light_color = Color(1.0, 0.75, 0.25)
+		lt.light_energy *= 2.5
 	_snd("rak", -2.0, 1.0, (from.node as Node3D).global_position if from.idx != 0 else null)
 
 
 # Rakete geht hoch: normal ein schwarzes Loch, Super-Rakete (Streubombe) zerplatzt in fünf kleine über die ganze Breite
 func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
 	if not sh.get("cl", false):
-		_gbomb(z, lat, sh.own, hit)
+		_gbomb(z, lat, sh.own, hit, 1.0, sh.get("sup", false))
 		return
 	for i in range(5):
 		var la = lerpf(-T.TW * 0.8, T.TW * 0.8, i / 4.0)
 		var zz = z + 1.0 + randf() * 2.5
-		get_tree().create_timer(0.05 * i + 0.01).timeout.connect(func(): _gbomb(zz, la, sh.own, -1, 0.5))
+		get_tree().create_timer(0.05 * i + 0.01).timeout.connect(func(): _gbomb(zz, la, sh.own, -1, 0.5, true))
 	_snd("boom", 0.0, 1.3)
 
 
@@ -4272,7 +4321,7 @@ func _drop_one(o: Dictionary, k: int, lat_o := 999.0, back := 0.0) -> void:
 	var z = o.z - 0.9 - back
 	var lat = o.lat + (k - 1) * 0.22 if lat_o > 99.0 else lat_o
 	mi.position = T.world(z, lat, 0.45)
-	mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi, "own": o.idx})
+	mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi, "own": o.idx, "sup": lat_o < 99.0})
 	_snd("minedrop", -1.0 if o.idx == 0 else 2.0, randf_range(0.92, 1.08), (o.node as Node3D).global_position if o.idx != 0 else null)
 
 
@@ -4291,7 +4340,8 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 	var wwin = maxf(2.8, o.spd * dt * 1.3) / 35.0
 	if posmod(wk, 2) == 0 and wz < wwin and wk != o.wpK and o.wpn != "" and not o.get("sup", false):
 		o.wpK = wk
-		if randf() < 0.4:
+		o.wpc = int(o.get("wpc", 1)) + 1
+		if o.wpc >= 3:
 			o.sup = true
 	if posmod(wk, 2) == 0 and wz < wwin and wk != o.wpK and o.wpn == "":
 		o.wpK = wk
@@ -4301,6 +4351,7 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 				r -= w[1]
 				if r <= 0.0:
 					o.wpn = w[0]
+					o.wpc = 1
 					break
 			o.wT = randf_range(0.6, 2.5)
 	if o.wpn == "":
@@ -4312,6 +4363,7 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 	match o.wpn:
 		"schild":
 			o.shield = 6.0
+			o.shh = 0
 			if sup:
 				o.en = minf(1.0, o.en + 0.5)
 			o.wpn = ""
@@ -4330,9 +4382,9 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 		_:
 			for x in ships:
 				if x.idx != o.idx and not x.out and x.z - o.z > 3.0 and x.z - o.z < 30.0:
-					_add_shot(o, false, o.wpn == "lenk", 1.0, sup and o.wpn == "rak")
+					_add_shot(o, false, o.wpn == "lenk", 1.0, sup and o.wpn == "rak", sup)
 					if sup and o.wpn == "lenk":
-						_add_shot(o, false, true, -1.0)
+						_add_shot(o, false, true, -1.0, false, true)
 					o.wpn = ""
 					break
 	if o.wpn == "":
@@ -4443,7 +4495,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 					o.slow = minf(o.slow, 0.55)
 					o.lat += away * 0.35
 					o.vpsi += away * 0.15
-				_dmg(o, 0.3 if so else 0.15, 0, "orbs")
+				_dmg(o, 0.3 if so else 0.15, 0, "orbs", so)
 				_burst(mi.global_position, fxr.spark, 50, 0.6, 5.0, 11.0, 180.0, Vector3(0, -6, 0), 0.6, 0.6, 1.2,
 					_ramp([[0.0, Color(6, 6, 8, 1)], [1.0, Color(1, 0.5, 0.2, 0)]]), null, true, false, 0.1)
 				_snd("zap", 2.0, 1.4, op)
@@ -4465,9 +4517,9 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 		"rak":
 			_add_shot(g, false, false, 1.0, sup)
 		"lenk":
-			_add_shot(g, false, true)
+			_add_shot(g, false, true, 1.0, false, sup)
 			if sup:
-				_add_shot(g, false, true, -1.0)   # zweite Lenkrakete nach hinten zum Verfolger
+				_add_shot(g, false, true, -1.0, false, true)   # zweite Lenkrakete nach hinten zum Verfolger
 		"mine":
 			_drop_mines(g, sup)
 		"orbs":
@@ -4476,6 +4528,7 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			_snd("shield", 0.0, 1.0 if sup else 1.3)
 		"schild":
 			g.shield = 6.0
+			g.shh = 0
 			_snd("shield")
 			if sup:
 				g.en = minf(1.0, g.en + 0.5)
@@ -4489,8 +4542,10 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 				_backwave(g)
 		"beben":
 			quake = _quake_make(g.z + 3.0, 1.0, quake)
+			quake.sup = sup
 			if sup:
 				quake2 = _quake_make(g.z - 3.0, -1.0, quake2)
+				quake2.sup = true
 			_snd("boom", 3.0, 0.6)
 			_snd("boom", 0.0, 0.8)
 			shake = maxf(shake, 1.5 * float(fx.quake.shake))
@@ -4568,7 +4623,7 @@ func _quake_step(q, dt: float) -> Variant:
 	for o in ships:
 		if o.idx != 0 and not o.out and not q.hit.has(o.idx) and absf(o.z - q.z) < 2.6:
 			q.hit.append(o.idx)
-			_dmg(o, 0.2, 0, "quake")
+			_dmg(o, 0.2, 0, "quake", q.get("sup", false))
 			if not o.out and not _prot(o):   # mit Schild: wird nicht hochgeworfen
 				o.air = true
 				o.vy = 5.8 * sqrt(float(QX.height))
@@ -4622,7 +4677,7 @@ func _bwaves_update(dt: float) -> void:
 				if not _prot(o):
 					o.slow = minf(o.slow, 0.4)
 					o.slowT = 1.6
-				_dmg(o, 0.06, w.own, "wave")
+				_dmg(o, 0.06, w.own, "wave", true)
 				_zap_ship(o)
 		var mi: MeshInstance3D = w.n
 		var f = T.frame(w.z)
@@ -4650,23 +4705,28 @@ func _weapons(dt: float, racing: bool) -> void:
 		g.wpK = wk
 		if g.wpn == "":
 			g.wpn = _pick_w()
+			g.wpc = 1
 			_snd("pick", -4.0)
 			_snd("vo_" + g.wpn, 3.0)   # Ansage, was du eingesammelt hast
 			if g.wpn == "orbs" and g.orbs > 0.0:
 				g.sup = true
 				get_tree().create_timer(0.75).timeout.connect(func(): _snd("vo_super", 3.0))
 		else:
-			# Waffe noch nicht eingesetzt: mit etwas Glück gibt das Feld dieselbe noch einmal → Super-Waffe
-			var nw = g.wpn if randf() < 0.4 else _pick_w()
-			if nw == g.wpn:
+			# Waffe behalten und noch zwei Waffenfelder überfahren → deine Waffe wird zur Superwaffe
+			g.wpc = int(g.get("wpc", 1)) + 1
+			if g.wpc >= 3:
 				g.sup = true
 				_snd("pick", -2.0, 1.35)
 				_snd("vo_super", 3.0)
+				_flash(Color(1.0, 0.8, 0.3), 0.35)
+			else:
+				_snd("pick", -6.0, 1.2)
+				_msg("SUPER %d / 3" % g.wpc, Color(1.0, 0.82, 0.35))
 	if fire_req:
 		fire_req = false
 		if g.wpn != "" and racing:
 			_fire()
-	hud.fire.text = WN.get(g.wpn, "empty") + ("\n×2" if g.get("sup", false) and g.wpn != "" else "")
+	hud.fire.text = ("SUPER\n" if g.get("sup", false) and g.wpn != "" else "") + WN.get(g.wpn, "empty")
 	if g.auto > 0.0 and g.wpn == "":
 		hud.fire.text = ("SUPER\n" if g.get("sauto", false) else "") + "AUTO" + (" …" if g.get("ahold", false) else " %.1f" % g.auto)
 	var armed = g.wpn != ""
@@ -4739,7 +4799,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			if not _prot(hit):
 				hit.slow = minf(hit.slow, 0.35)
 				hit.vpsi += randf_range(-0.25, 0.25)
-			_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket")
+			_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 			_shot_boom(sh, sh.z, sh.lat, hit.idx)
 			dead = true
 		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0 or (sh.cl and sh.t > 0.42) or (state == "lab" and absf(sh.z - LZ) > 18.0):
@@ -4775,7 +4835,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			if o.idx != m.get("own", 0) and not o.out and absf(o.z - m.z) < 0.5 + o.spd * dt * 1.3 and absf(o.lat - m.lat) < 0.38:
 				if not _prot(o):
 					o.slow = minf(o.slow, 0.35)
-				_dmg(o, 0.2, m.get("own", 0), "mine")
+				_dmg(o, 0.2, m.get("own", 0), "mine", m.get("sup", false))
 				boom = true
 		# Quake-Welle räumt Minen ab (egal von wem), Minen verschwinden nach 25 s von selbst
 		if not boom and ((quake != null and absf(m.z - quake.z) < 2.6) or (quake2 != null and absf(m.z - quake2.z) < 2.6)):
@@ -4800,7 +4860,7 @@ func _weapons(dt: float, racing: bool) -> void:
 				if ws and not _prot(o):
 					o.slow = minf(o.slow, 0.35)
 				w.hf = 1.0
-				_dmg(o, 0.25 if ws else 0.1, 0, "wall")
+				_dmg(o, 0.25 if ws else 0.1, 0, "wall", ws)
 				_zap_ship(o)
 				_snd("zap", 2.0, 1.0, (o.node as Node3D).global_position)
 		w.hf = maxf(0.0, w.hf - dt * 2.5)
@@ -6013,7 +6073,12 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.lat = signf(s.lat) * ml
 		s.psi -= s.psi * minf(1.0, dt * 6.0)
 		s.vpsi -= s.vpsi * minf(1.0, dt * 6.0)
-		if race_t - s.hitT > 0.45 and racing:
+		if s.shield > 0.0 and racing:
+			# Schild schluckt den Stoß: kein Bremsen, kein Kratzen – nur kurzes Aufleuchten
+			if race_t - s.hitT > 0.45:
+				s.hitT = race_t
+				_shield_ping(s)
+		elif race_t - s.hitT > 0.45 and racing:
 			s.hitT = race_t
 			s.slow = minf(s.slow, 0.65)
 			if is_p:
