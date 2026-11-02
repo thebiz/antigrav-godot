@@ -963,6 +963,28 @@ func _metal(c: Color, rough: float = 0.3, metal: float = 0.85) -> StandardMateri
 	return m
 
 
+# Metall mit Textur: Farbe (Rauheit im Alpha) + Oberflächenstruktur; scale = Wiederholungen je Einheit
+func _tex_metal(nm: String, c: Color, scale: float, rough: float, metal: float = 0.85, glow := 0.0, gc := Color(0.4, 0.5, 0.7)) -> StandardMaterial3D:
+	var m = _metal(c, rough, metal)
+	var tc: Texture2D = load("res://tex/%s_cr.png" % nm)
+	m.albedo_texture = tc
+	m.roughness_texture = tc
+	m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_ALPHA
+	m.roughness = clampf(rough / 0.35, 0.2, 1.5)
+	m.normal_enabled = true
+	m.normal_texture = load("res://tex/%s_n.png" % nm)
+	m.normal_scale = 0.8
+	m.uv1_scale = Vector3(scale, scale, 1.0)
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	if glow > 0.0:
+		# schwacher Neon-Widerschein auf dem Metall – sonst bleibt die Textur in der Nacht unsichtbar
+		m.emission_enabled = true
+		m.emission = gc
+		m.emission_energy_multiplier = glow
+		m.emission_texture = tc
+	return m
+
+
 func _neon(c: Color, e: float = 5.0) -> StandardMaterial3D:
 	var m = StandardMaterial3D.new()
 	m.albedo_color = Color(0, 0, 0)
@@ -1192,7 +1214,12 @@ func _strip(key: String, z0: float, z1: float, la: float, lb: float, ha: float, 
 			n = n.normalized()
 			if n.dot(f.uu) < -0.2 or (absf(n.dot(f.uu)) <= 0.2 and n.dot(f.rr * signf(la + lb + 0.0001)) > 0.0):
 				n = -n
-			_quad(_st(key), prev[0], prev[1], p[1], p[0], n)
+			if key == "wall":
+				# Leitplanke: Texturkoordinaten längs (z) und quer (Höhe/Breite des Bandes)
+				var L = absf(lb - la) + absf(hb - ha)
+				_quad(_st(key), prev[0], prev[1], p[1], p[0], n, Vector2(z - 0.5, 0.0), Vector2(z - 0.5, L), Vector2(z, L), Vector2(z, 0.0))
+			else:
+				_quad(_st(key), prev[0], prev[1], p[1], p[0], n)
 		prev = p
 		z += 0.5
 	keep_wind = false
@@ -1316,7 +1343,10 @@ func _build_track() -> void:
 				ring.append([f.c + f.uu * 0.4 + (f.rr * sin(ph) + f.uu * cos(ph)) * R, -(f.rr * sin(ph) + f.uu * cos(ph))])
 			if pr.size() > 0:
 				for i in range(na):
-					_quad(_st("tube"), pr[i][0], ring[i][0], ring[i + 1][0], pr[i + 1][0], ring[i][1])
+					# Texturkoordinaten: längs der Röhre (z) und rundherum (Bogenlänge)
+					var v0 = R * (-am + 2.0 * am * i / na)
+					var v1 = R * (-am + 2.0 * am * (i + 1) / na)
+					_quad(_st("tube"), pr[i][0], ring[i][0], ring[i + 1][0], pr[i + 1][0], ring[i][1], Vector2(z2 - 1.0, v0), Vector2(z2, v0), Vector2(z2, v1), Vector2(z2 - 1.0, v1))
 			pr = ring
 			z2 += 1.0
 		var zt: float = tu[0] + 1.0
@@ -1378,9 +1408,10 @@ void fragment(){
 }""", [["vec3(.75,.62,.08)", "vec3(.8,.3,.02)"]]))
 	mats.road.set_shader_parameter("tcr", load("res://tex/road_cr.png"))
 	mats.road.set_shader_parameter("tn", load("res://tex/road_n.png"))
-	mats["wall"] = _metal(Color(0.07, 0.075, 0.09), 0.22)
+	# Leitplanken: zerkratzter Stahl „Metal 038“, Tunnel: „Metal Plates 006“ (beide ambientCG, CC0)
+	mats["wall"] = _tex_metal("rail", Color(0.36, 0.37, 0.4), 0.7, 0.22, 0.85, 0.07)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
-	mats["tube"] = _metal(Color(0.012, 0.012, 0.016), 0.28, 0.9)
+	mats["tube"] = _tex_metal("tube", Color(0.24, 0.24, 0.27), 0.5, 0.28, 0.9, 0.05, Color(0.35, 0.55, 0.6))
 	mats["neonL"] = _neon(CY, 5.0)
 	mats["neonR"] = _neon(MG, 5.0)
 	mats["ringC"] = _neon(CY, 7.0)
@@ -1419,6 +1450,8 @@ void fragment(){vec2 q=floor(vec2(UV.x*2.,UV.y*12.));ALBEDO=vec3(mod(q.x+q.y,2.)
 		if key == "pad" or key == "start" or key == "wpad":
 			st = _fix_uv(st, key)
 		st.index()
+		if key == "wall" or key == "tube":
+			st.generate_tangents()   # für die Oberflächenstruktur der Texturen
 		if not chunks.has(ci):
 			chunks[ci] = ArrayMesh.new()
 		var am: ArrayMesh = chunks[ci]
@@ -3418,7 +3451,7 @@ func _dot(r: int) -> ImageTexture:
 
 func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
-	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Road texture: ambientCG (CC0) · private use only"
+	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Textures: ambientCG (CC0) · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
 	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
 	ui.sl.res.text = "Resolution  %d %%" % int(round(float(cfg.res) * 100.0))
