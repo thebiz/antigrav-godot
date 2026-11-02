@@ -1018,7 +1018,7 @@ var road_wet: ShaderMaterial
 const WET_CODE = """
 shader_type spatial;
 render_mode unshaded,blend_add,depth_draw_never,shadows_disabled,fog_disabled;
-uniform sampler2D scr:hint_screen_texture,filter_linear;
+uniform sampler2D scr:hint_screen_texture,filter_linear_mipmap;
 uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;
 uniform float wk=1.;uniform float wn=12.;
 float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
@@ -1028,18 +1028,19 @@ void fragment(){
 	vec3 r=vec3(0.);float ws=0.;
 	// kleiner Zufallsversatz je Pixel: aus sichtbaren Stufen wird feines Rauschen (das Filmkorn deckt es zu)
 	vec3 p3=fract(vec3(FRAGCOORD.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);float jt=fract((p3.x+p3.y)*p3.z);
-	for(int i=1;i<=14;i++){
+	// wenige, weite Schritte aus einer verkleinerten Bildstufe: weich wie vorher, aber ein Bruchteil der Rechenarbeit
+	for(int i=1;i<=7;i++){
 		float k=float(i);
 		if(k>wn)break;
-		vec2 q=SCREEN_UV-vec2(0.,(k-jt)*.0075);
+		vec2 q=SCREEN_UV-vec2(0.,(k-jt)*.015);
 		if(q.y<0.)break;
-		vec3 c=texture(scr,q).rgb;
-		float w=exp(-k*.16);
+		vec3 c=textureLod(scr,q,1.+k*.25).rgb;
+		float w=exp(-k*.32);
 		r+=(max(c-.45,vec3(0.))*1.4+c*.05)*w;ws+=w;
 	}
 	float fr=.3+.7*pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),3.);
 	float fd=exp(-length(VERTEX)*.018);
-	ALBEDO=min(r/max(ws,.001),vec3(4.))*.6*fr*fd*wk;
+	ALBEDO=min(r/max(ws,.001),vec3(4.))*.8*fr*fd*wk;
 }"""
 
 
@@ -1059,7 +1060,7 @@ func _wet_apply() -> void:
 			if v != null:
 				road_wet.set_shader_parameter(k, v)
 	_sp(road_wet, "wk", wk)
-	_sp(road_wet, "wn", 12.0 if q >= 2 else 7.0)
+	_sp(road_wet, "wn", 6.0 if q >= 2 else 4.0)
 	mats.road.next_pass = road_wet
 
 
