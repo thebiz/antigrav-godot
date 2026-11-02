@@ -1335,6 +1335,10 @@ float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
 // Bebenwelle: Kamm bei qz, davor ein kleiner Anlauf, dahinter ein Tal und Nachschwingen
 uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
 uniform float rgl=1.;
+// Textur „Metal 046 B“ (ambientCG, CC0): Farbe + Rauheit (Alpha) und Oberflächenstruktur
+uniform sampler2D tcr:source_color,filter_linear_mipmap,repeat_enable;
+uniform sampler2D tn:hint_normal,filter_linear_mipmap,repeat_enable;
+uniform float tk=1.;uniform float ts=2.4;
 uniform vec3 ncl=vec3(0.,.78,1.);uniform vec3 ncr=vec3(1.,.06,.42);uniform float nk=1.;   // Neonschein der Leitplanken   // Glanz der Fahrbahn (FX Lab): mehr = glatter, schärfere Spiegelungen
 varying float wz;varying float qh;
 float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
@@ -1351,8 +1355,19 @@ void fragment(){
 	float edge=step(2.4-.42,abs(x))*step(abs(x),2.4-.34);
 	float hz=step(.5,fract(z*.5));
 	base=mix(base,mix(vec3(.75,.62,.08),vec3(.05),hz),edge);
+	vec2 tuv=vec2(x,z)/ts;
+	vec4 tc=texture(tcr,tuv);
+	base*=mix(vec3(1.),clamp(tc.rgb/.05,0.,3.5),.85*tk*(1.-edge));
 	base*=1.-seam*.7;
-	ALBEDO=base;METALLIC=.8;ROUGHNESS=clamp((.38+.1*br)/(.6+.4*rgl)+seam*.3+edge*.2,.04,1.);SPECULAR=.45;
+	// Struktur der Textur auf die Normale (Tangenten aus den Bildableitungen – die Fahrbahn hat keine eigenen)
+	vec3 nm=vec3(texture(tn,tuv).xy*2.-1.,0.);nm.z=sqrt(max(1.-dot(nm.xy,nm.xy),0.));   // komprimiert nur x/y
+	vec3 N=NORMAL;vec3 dp1=dFdx(VERTEX),dp2=dFdy(VERTEX);vec2 du1=dFdx(tuv),du2=dFdy(tuv);
+	vec3 d2=cross(dp2,N),d1=cross(N,dp1);
+	vec3 Tn=d2*du1.x+d1*du2.x,Bn=d2*du1.y+d1*du2.y;
+	float iv=inversesqrt(max(max(dot(Tn,Tn),dot(Bn,Bn)),1e-20));
+	NORMAL=normalize(N*max(nm.z,.2)+(Tn*nm.x+Bn*nm.y)*iv*.7*tk);
+	float rf=mix(1.,clamp(tc.a/.35,.4,2.2),.75*tk);
+	ALBEDO=base;METALLIC=.8;ROUGHNESS=clamp((.38+.1*br)/(.6+.4*rgl)*rf+seam*.3+edge*.2,.04,1.);SPECULAR=.45;
 	float cr=max(qh,0.)/max(max(qs,qs2),.01);   // glühender Kamm, aufgerissene Fugen
 	EMISSION=(qc*pow(cr,1.5)*6.+qc*vec3(1.,.6,.62)*seam*cr*14.)*step(.01,qs+qs2)*qg;
 	// Spiegelung der Neonbänder auf der glatten Fahrbahn – im Shader gerechnet statt mit teuren Flächenlichtern
@@ -1361,6 +1376,8 @@ void fragment(){
 	float shn=(exp(-dl*1.6)*.25+exp(-dl*5.)*.75)*(.08+frn*1.8)*(1.-seam*.6)*(1.-edge*.5);
 	EMISSION+=(x<0.?ncl:ncr)*shn*nk*.22;
 }""", [["vec3(.75,.62,.08)", "vec3(.8,.3,.02)"]]))
+	mats.road.set_shader_parameter("tcr", load("res://tex/road_cr.png"))
+	mats.road.set_shader_parameter("tn", load("res://tex/road_n.png"))
 	mats["wall"] = _metal(Color(0.07, 0.075, 0.09), 0.22)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
 	mats["tube"] = _metal(Color(0.012, 0.012, 0.016), 0.28, 0.9)
@@ -3401,7 +3418,7 @@ func _dot(r: int) -> ImageTexture:
 
 func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
-	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · private use only"
+	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Road texture: ambientCG (CC0) · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
 	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
 	ui.sl.res.text = "Resolution  %d %%" % int(round(float(cfg.res) * 100.0))
