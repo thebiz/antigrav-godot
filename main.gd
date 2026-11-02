@@ -605,6 +605,9 @@ const FXS = {
 		["hue", "Color (all)", -0.5, 0.5, 0.0]],
 	"rak": [["size", "Size", 0.2, 8.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["light", "Light", 0.0, 10.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
+	"lock": [["shape", "Shape", 0.0, 4.0, 0.0], ["size", "Size", 0.3, 4.0, 1.0], ["thick", "Line thickness", 0.2, 5.0, 1.0], ["glow", "Glow", 0.0, 10.0, 1.0],
+		["spin", "Rotation", 0.0, 6.0, 1.0], ["hue", "Color (tracking)", -0.5, 0.5, 0.0], ["lhue", "Color (locked)", -0.5, 0.5, 0.0],
+		["time", "Lock time", 0.2, 4.0, 1.0], ["vol", "Beep volume", 0.0, 3.0, 1.0], ["pitch", "Beep pitch", 0.5, 2.0, 1.0]],
 	"wall": [["height", "Height", 0.2, 8.0, 1.0], ["dur", "Duration", 0.2, 8.0, 1.0], ["bolts", "Lightning", 0.0, 8.0, 1.0], ["glow", "Glow", 0.0, 8.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
 	"shield": [["size", "Size", 0.5, 4.0, 1.0], ["glow", "Glow", 0.0, 10.0, 1.0], ["edge", "Edge sharpness", 0.2, 6.0, 1.0], ["flicker", "Flicker", 0.0, 8.0, 1.0],
@@ -633,7 +636,7 @@ const FXS = {
 		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
 		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
 }
-const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["sound", "Sound"]]
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["lock", "Lock"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["sound", "Sound"]]
 var fx = {}
 
 
@@ -5325,29 +5328,46 @@ func _bwaves_update(dt: float) -> void:
 			bwaves.remove_at(i)
 
 
-# Zielerfassung der Lenkrakete: Fadenkreuz wandert auf den Gegner vor dir, Piepsen wird schneller,
-# eingerastet = rotes Fadenkreuz und Dauerton
+# Zielerfassung der Lenkrakete: ein Neon-Zeichen in der 3D-Welt um den Gegner (leuchtet wie die Leitplanken),
+# zieht sich zusammen, Piepsen wird schneller, eingerastet = andere Farbe, Dauersirren, „LOCKED“.
+# Aussehen im FX Lab, Reiter „Lock“ (Form, Größe, Dicke, Leuchten, Drehung, Farben, Einrastzeit, Ton).
+const LK_SHAPES = ["Neon rings", "Brackets", "Diamond", "Crosshair", "Chevrons"]
+const LK_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,depth_test_disabled,shadows_disabled,fog_disabled;
+uniform vec3 c=vec3(1.,.7,.2);uniform float gl=1.;
+void fragment(){ALBEDO=c*(.6+gl*1.6)*(.85+.15*sin(TIME*20.));}
+"""
 var lk_tg = null
 var lk_k = 0.0
 var lk_bt = 0.0
-var lk_pos = Vector2.ZERO
-var lk_ui: Control
-const LK_T = 1.3     # Sekunden bis zum Einrasten
+var lk_t = 0.0
+var lk_n: MeshInstance3D
+var lk_im: ImmediateMesh
+var lk_mat: ShaderMaterial
+var lk_txt: Label
+const LK_T = 1.3     # Sekunden bis zum Einrasten (× Regler)
 const LK_R = 90.0    # Reichweite
 
 
 func _lock_update(dt: float, racing: bool) -> void:
 	var g: Dictionary = ships[0]
-	if lk_ui == null:
-		lk_ui = Control.new()
-		lk_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		lk_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
-		lk_ui.draw.connect(_lock_draw)
-		(hud.fire as Control).get_parent().add_child(lk_ui)
+	var demo = state == "lab" and lab.get("tab", "") == "lock"
+	if state == "lab":
+		var o1: Dictionary = ships[1]
+		if demo:
+			# Vorschau im FX Lab: ein Gegner steht vor dir, die Erfassung läuft immer wieder durch
+			o1.z = LZ + 9.0
+			o1.lat = 0.0
+			o1.out = false
+			(o1.node as Node3D).visible = true
+		elif absf(o1.z - (LZ + 9.0)) < 0.01:
+			o1.z = LZ - 120.0
 	var tg = null
-	# einmal erfasst, bleibt das Ziel, solange es vor dir und in Reichweite ist
-	if racing and g.wpn == "lenk" and not g.out and lk_tg != null and not lk_tg.out and lk_tg.z - g.z > 1.0 and lk_tg.z - g.z < LK_R * 1.2:
-		tg = lk_tg
+	if demo:
+		tg = ships[1]
+	elif racing and g.wpn == "lenk" and not g.out and lk_tg != null and not lk_tg.out and lk_tg.z - g.z > 1.0 and lk_tg.z - g.z < LK_R * 1.2:
+		tg = lk_tg   # einmal erfasst, bleibt das Ziel, solange es vor dir und in Reichweite ist
 	elif racing and g.wpn == "lenk" and not g.out:
 		var bd = LK_R
 		for o in ships:
@@ -5358,50 +5378,141 @@ func _lock_update(dt: float, racing: bool) -> void:
 		lk_tg = tg
 		lk_k = 0.0
 		lk_bt = 0.0
+		lk_t = 0.0
 	if tg == null:
-		if lk_ui.visible:
-			lk_ui.visible = false
+		if lk_n != null and lk_n.visible:
+			lk_n.visible = false
+			lk_txt.visible = false
 		return
-	lk_k = minf(1.0, lk_k + dt / LK_T)
-	var wp: Vector3 = (tg.node as Node3D).global_position
-	if cam.is_position_behind(wp):
-		lk_ui.visible = false
-		return
-	var sp = cam.unproject_position(wp)
-	lk_pos = sp if not lk_ui.visible else lk_pos.lerp(sp, 1.0 - exp(-dt / 0.05))
-	lk_ui.visible = true
-	lk_ui.queue_redraw()
+	var L: Dictionary = fx.lock
+	lk_t += dt
+	if demo and lk_t > 1.3 * float(L.time) + 1.6:
+		lk_t = 0.0   # Vorschau: von vorn
+	lk_k = clampf(lk_t / maxf(0.05, LK_T * float(L.time)), 0.0, 1.0)
+	_lock_vis(tg, dt)
 	# Piepsen: immer schneller, eingerastet ein schnelles Dauersirren
 	lk_bt -= dt
-	if lk_bt <= 0.0:
+	var vol = float(L.vol)
+	if lk_bt <= 0.0 and vol > 0.01:
+		var db = linear_to_db(vol)
 		if lk_k >= 1.0:
-			_snd("beep", -9.0, 1.55)
+			_snd("beep", db - 9.0, 1.55 * float(L.pitch))
 			lk_bt = 0.06
 		else:
-			_snd("beep", -12.0, 1.1 + lk_k * 0.25)
+			_snd("beep", db - 12.0, (1.1 + lk_k * 0.25) * float(L.pitch))
 			lk_bt = lerpf(0.42, 0.1, lk_k)
 
 
-func _lock_draw() -> void:
-	if lk_tg == null:
-		return
-	var vs = get_viewport().get_visible_rect().size
-	var u = vs.y / 1170.0
+func _lock_vis(tg: Dictionary, dt: float) -> void:
+	var L: Dictionary = fx.lock
+	if lk_n == null:
+		lk_im = ImmediateMesh.new()
+		lk_mat = _shader_mat(LK_CODE)
+		lk_n = MeshInstance3D.new()
+		lk_n.mesh = lk_im
+		lk_n.material_override = lk_mat
+		lk_n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		lk_n.extra_cull_margin = 8.0
+		add_child(lk_n)
+		lk_txt = Label.new()
+		lk_txt.add_theme_font_size_override("font_size", 30)
+		lk_txt.add_theme_constant_override("outline_size", 6)
+		lk_txt.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+		lk_txt.text = "LOCKED"
+		lk_txt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lk_txt.custom_minimum_size = Vector2(200, 0)
+		(hud.fire as Control).get_parent().add_child(lk_txt)
 	var on = lk_k >= 1.0
-	# vom großen Rahmen zum engen Fadenkreuz, dreht sich dabei
-	var r = lerpf(140.0, 34.0, pow(lk_k, 0.7)) * u
-	var col = Color(1.0, 0.15, 0.1) if on else Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.5, 0.15), lk_k)
-	var a0 = (1.0 - lk_k) * PI * 0.75
-	var w = 4.0 * u
-	for i in range(4):
-		var a = a0 + i * PI * 0.5
-		lk_ui.draw_arc(lk_pos, r, a + 0.25, a + PI * 0.5 - 0.25, 10, col, w, true)
-	for d in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
-		lk_ui.draw_line(lk_pos + d * (r - 10.0 * u), lk_pos + d * (r + 14.0 * u), col, w, true)
+	var col = _hs(Color(1.0, 0.1, 0.12), float(L.lhue)) if on else _hs(Color(1.0, 0.72, 0.2), float(L.hue))
+	var wp: Vector3 = (tg.node as Node3D).global_position + Vector3.UP * 0.12
+	var dist = cam.global_position.distance_to(wp)
+	# Größe in der Welt; weit weg etwas größer, damit es lesbar bleibt
+	var r = lerpf(2.4, 0.75, pow(lk_k, 0.7)) * 0.45 * float(L.size) * maxf(1.0, dist / 14.0)
 	if on:
-		lk_ui.draw_circle(lk_pos, 5.0 * u, col)
-		var f = ThemeDB.fallback_font
-		lk_ui.draw_string(f, lk_pos + Vector2(-60.0 * u, r + 46.0 * u), "LOCKED", HORIZONTAL_ALIGNMENT_CENTER, 120.0 * u, int(28 * u), col)
+		r *= 1.0 + 0.06 * sin(lk_t * 18.0)   # eingerastet: pulsiert
+	var w = 0.035 * float(L.thick) * maxf(1.0, dist / 14.0)
+	var rot = (lk_t * 1.6 + (1.0 - lk_k) * 2.4) * float(L.spin) * (0.25 if on else 1.0)
+	lk_n.visible = true
+	lk_n.global_transform = Transform3D(cam.global_transform.basis, wp)
+	lk_mat.set_shader_parameter("c", _v3(col))
+	lk_mat.set_shader_parameter("gl", float(L.glow) * (1.4 if on else 1.0))
+	lk_im.clear_surfaces()
+	lk_im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var sh = clampi(int(round(float(L.shape))), 0, LK_SHAPES.size() - 1)
+	match sh:
+		0:   # zwei gegenläufige, unterbrochene Neonringe; eingerastet geschlossen
+			var gp = 0.0 if on else 0.45
+			for i in range(3):
+				var a = rot + i * TAU / 3.0
+				_lk_arc(Vector2.ZERO, r, a + gp * 0.5, a + TAU / 3.0 - gp * 0.5, w)
+			for i in range(2):
+				var a = -rot * 1.5 + i * PI
+				_lk_arc(Vector2.ZERO, r * 0.62, a + gp * 0.4, a + PI - gp * 0.4, w * 0.8)
+		1:   # vier Eckklammern, drehen sich beim Zusammenziehen gerade
+			for i in range(4):
+				var a = rot * 0.3 + i * PI * 0.5 + PI * 0.25
+				var c = Vector2(cos(a), sin(a)) * r * 1.2
+				var d1 = Vector2(cos(a + PI * 0.75), sin(a + PI * 0.75)) * r * 0.55
+				var d2 = Vector2(cos(a - PI * 0.75), sin(a - PI * 0.75)) * r * 0.55
+				_lk_seg(c, c + d1, w)
+				_lk_seg(c, c + d2, w)
+		2:   # Raute, eingerastet mit zweiter, innerer Raute
+			for q in ([1.0, 0.55] if on else [1.0]):
+				var pts = []
+				for i in range(4):
+					var a = rot + i * PI * 0.5
+					pts.append(Vector2(cos(a), sin(a)) * r * 1.15 * q)
+				for i in range(4):
+					_lk_seg(pts[i], pts[(i + 1) % 4], w)
+		3:   # klassisches Fadenkreuz: Kreis und vier Striche
+			_lk_arc(Vector2.ZERO, r, 0.0, TAU, w)
+			for i in range(4):
+				var a = rot + i * PI * 0.5
+				var dv = Vector2(cos(a), sin(a))
+				_lk_seg(dv * r * 0.55, dv * r * 1.35, w)
+		4:   # drei Pfeilspitzen zeigen auf das Ziel
+			for i in range(3):
+				var a = rot + i * TAU / 3.0
+				var dv = Vector2(cos(a), sin(a))
+				var pv = Vector2(-dv.y, dv.x)
+				var tip = dv * r * 0.7
+				_lk_seg(tip, tip + dv * r * 0.5 + pv * r * 0.35, w)
+				_lk_seg(tip, tip + dv * r * 0.5 - pv * r * 0.35, w)
+	if on:
+		# Mittelpunkt
+		_lk_arc(Vector2.ZERO, w * 1.2, 0.0, TAU, w * 2.0)
+	lk_im.surface_end()
+	# Schriftzug unter dem Zeichen
+	var sp = cam.unproject_position(wp - cam.global_transform.basis.y * r * 1.5)
+	lk_txt.visible = on and not cam.is_position_behind(wp)
+	if lk_txt.visible:
+		lk_txt.position = sp - Vector2(100, 0)
+		lk_txt.add_theme_color_override("font_color", col.lightened(0.25))
+
+
+# Linie als schmales Band in der Ebene des Zeichens
+func _lk_seg(a: Vector2, b: Vector2, w: float) -> void:
+	var d = (b - a).normalized()
+	var n = Vector2(-d.y, d.x) * w * 0.5
+	var A = Vector3(a.x + n.x, a.y + n.y, 0)
+	var B = Vector3(b.x + n.x, b.y + n.y, 0)
+	var C = Vector3(b.x - n.x, b.y - n.y, 0)
+	var D = Vector3(a.x - n.x, a.y - n.y, 0)
+	for v in [A, B, C, A, C, D]:
+		lk_im.surface_add_vertex(v)
+
+
+func _lk_arc(c: Vector2, r: float, a0: float, a1: float, w: float) -> void:
+	var n = maxi(3, int(abs(a1 - a0) / 0.2))
+	for i in range(n):
+		var u0 = lerpf(a0, a1, float(i) / n)
+		var u1 = lerpf(a0, a1, float(i + 1) / n)
+		var p0i = c + Vector2(cos(u0), sin(u0)) * (r - w * 0.5)
+		var p0o = c + Vector2(cos(u0), sin(u0)) * (r + w * 0.5)
+		var p1i = c + Vector2(cos(u1), sin(u1)) * (r - w * 0.5)
+		var p1o = c + Vector2(cos(u1), sin(u1)) * (r + w * 0.5)
+		for v in [p0i, p0o, p1o, p0i, p1o, p1i]:
+			lk_im.surface_add_vertex(Vector3(v.x, v.y, 0))
 
 
 func _weapons(dt: float, racing: bool) -> void:
@@ -7841,6 +7952,10 @@ func _lab_val(it: Array, v: float) -> String:
 		return "%d s" % int(round(v))
 	if k == "city":
 		return "On" if v > 0.5 else "Off"
+	if k == "shape":
+		return LK_SHAPES[clampi(int(round(v)), 0, LK_SHAPES.size() - 1)]
+	if k == "time":
+		return "%.1f s" % (1.3 * v)
 	return "%d %%" % int(round(v * 100.0)) if v >= 0.995 or v == 0.0 else "%.1f %%" % (v * 100.0)
 
 
@@ -7876,7 +7991,7 @@ func _lab_tab(t: String) -> void:
 		var hs = HSlider.new()
 		hs.min_value = it[2]
 		hs.max_value = it[3]
-		hs.step = 1.0 if key == "city" else (1.0 if key == "life" else 0.001)
+		hs.step = 1.0 if key in ["city", "life", "shape"] else 0.001
 		hs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		hs.value = float(fx[t][key])
@@ -7914,7 +8029,7 @@ func _lab_tab(t: String) -> void:
 		var row = HBoxContainer.new()
 		row.add_theme_constant_override("separation", 10)
 		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var stp = 1.0 if key in ["city", "life"] else (0.005 if key.begins_with("hue") else 0.05)
+		var stp = 1.0 if key in ["city", "life", "shape"] else (0.005 if key.contains("hue") else 0.05)
 		for sd in [-1, 1]:
 			var pb = _btn("−" if sd < 0 else "+")
 			pb.custom_minimum_size = Vector2(68, 60)
