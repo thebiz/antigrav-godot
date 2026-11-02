@@ -1975,6 +1975,103 @@ func _holos_make() -> void:
 		holos.append(h)
 
 
+# Start-Mädel: großes Hologramm über der Strecke vor dem Feld – Arme hoch bei 3‑2‑1, bei GO runter, dann zack weg mit Glitch
+var starter = {}
+const ST_H = 15.0   # Größe in m
+
+
+func _starter_make() -> void:
+	var n: Node3D = load(HOLO_FIGS[0][0]).instantiate()
+	var mat = _shader_mat(HOLO_CODE)
+	_sp(mat, "sd", 7.7)
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).material_override = mat
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		(mi as MeshInstance3D).extra_cull_margin = 0.6
+	for ap in n.find_children("*", "AnimationPlayer", true, false):
+		(ap as AnimationPlayer).stop()
+		(ap as AnimationPlayer).active = false
+	var sk: Skeleton3D = n.find_children("*", "Skeleton3D", true, false)[0]
+	n.visible = false
+	add_child(n)
+	starter = {"n": n, "mat": mat, "sk": sk, "arms": []}
+	# Arme: Drehung im Skelettraum um die Blickachse; links hebt +, rechts gespiegelt
+	for b in [["mixamorig_LeftArm", 1.0], ["mixamorig_RightArm", -1.0]]:
+		var i = sk.find_bone(b[0])
+		if i < 0:
+			continue
+		var pg: Basis = sk.get_bone_global_rest(sk.get_bone_parent(i)).basis
+		starter.arms.append({"i": i, "s": b[1], "pg": pg, "bg": sk.get_bone_global_rest(i).basis})
+	var fa = []
+	for nm in ["mixamorig_LeftForeArm", "mixamorig_RightForeArm"]:
+		fa.append(sk.find_bone(nm))
+	starter.fa = fa
+
+
+# Winkel der Arme (Grad, 0 = waagrecht, + = hoch) und Glitch-Stärke über die Startphase
+func _starter_pose() -> Array:
+	var ang = -72.0
+	var gx = 0.0
+	var vis = true
+	if state == "intro":
+		gx = clampf(1.0 - t_state / 0.5, 0.0, 1.0) * 0.8   # flackert beim Erscheinen rein
+		ang = -72.0 + sin(t_state * 2.0) * 4.0
+	elif state == "count":
+		var c = 3 - int(floor(t_state))
+		var u = t_state - floor(t_state)
+		var tg = [-72.0, 80.0, 45.0, 10.0][clampi(c, 0, 3)]       # 3: waagrecht · 2: halb hoch · 1: ganz hoch
+		var pv = [-72.0, 80.0, 45.0, 10.0][clampi(c + 1, 0, 3)] if c < 3 else -72.0
+		ang = lerpf(pv, tg, 1.0 - pow(1.0 - clampf(u / 0.22, 0.0, 1.0), 3.0))
+		if c == 1:
+			ang += sin(u * 40.0) * 2.0 * u        # zittert vor Spannung
+		gx = 0.35 * clampf(1.0 - u / 0.15, 0.0, 1.0)
+	elif state == "race" and t_state < 0.75:
+		# GO: Arme runterreißen, kurz halten, dann heftiger Glitch und weg
+		ang = lerpf(80.0, -55.0, clampf(t_state / 0.1, 0.0, 1.0))
+		gx = 0.0 if t_state < 0.3 else clampf((t_state - 0.3) / 0.35, 0.0, 1.0) * 1.6
+		if t_state > 0.62:
+			vis = randf() < 0.35   # letzte Zuckungen
+	else:
+		vis = false
+	return [vis, ang, gx]
+
+
+func _starter_live() -> void:
+	if not ships.is_empty() and starter.is_empty() and city_root != null:
+		_starter_make()
+	if starter.is_empty():
+		return
+	var ps = _starter_pose()
+	var n: Node3D = starter.n
+	if state == "replay" or ships.is_empty():
+		ps[0] = false
+	if n.visible != ps[0]:
+		n.visible = ps[0]
+	if not ps[0]:
+		return
+	var f = T.frame(T.ZST + 34.0)
+	var fw: Vector3 = (f.fw * Vector3(1, 0, 1)).normalized()
+	n.global_transform = Transform3D(Basis.looking_at(fw, Vector3.UP).scaled(Vector3.ONE * (ST_H / float(HOLO_FIGS[0][1]))), f.c + Vector3.UP * -0.2)
+	var sk: Skeleton3D = starter.sk
+	for a in starter.arms:
+		var r = Basis(Vector3(0, 1, 0), deg_to_rad(float(ps[1])) * float(a.s))
+		sk.set_bone_pose_rotation(a.i, ((a.pg as Basis).inverse() * r * (a.bg as Basis)).get_rotation_quaternion())
+	var mat: ShaderMaterial = starter.mat
+	var hue = float(fx.city.hhue)
+	var c1 = _hs(Color(1.0, 0.3, 0.75), hue)
+	var c2 = _hs(Color(0.25, 0.85, 1.0), hue)
+	if _noir():
+		c1 = OR
+		c2 = Color(0.9, 0.9, 0.95)
+	_sp(mat, "c1", _v3(c1))
+	_sp(mat, "c2", _v3(c2))
+	_sp(mat, "hk", 1.3)
+	_sp(mat, "fl", float(fx.city.hflick))
+	_sp(mat, "gx", float(ps[2]))
+	_sp(mat, "by", f.c.y)
+	_sp(mat, "hh", ST_H)
+
+
 # Koi aus einem gebogenen Rumpf mit Schwanz-, Rücken- und Brustflossen (Länge 1, Kopf bei +z)
 var koi_m: ArrayMesh
 
@@ -7433,6 +7530,11 @@ func _shot() -> void:
 				_start()
 				if p[2] != "intro":
 					state = "race"
+			if shot_n >= 2 and p.size() > 2 and p[2].begins_with("st"):
+				var v = float(p[2].substr(2))   # Start-Mädel testen: Zeit ab Countdown-Beginn
+				state = "count" if v < 3.0 else "race"
+				t_state = v if v < 3.0 else v - 3.0
+				last_c = 3 - int(floor(v))
 			if shot_n == 3 and p.size() > 1 and float(p[1]) > 0.0:
 				ships[0].z = float(p[1])
 				for i in range(1, 4):
@@ -7503,6 +7605,7 @@ func _tunnel(dt: float) -> void:
 	_lamps_cull()
 	_neon_lights()
 	_city_live()
+	_starter_live()
 	# Explosions-Helligkeitsstoß abklingen lassen
 	expo_v = maxf(0.0, expo_v - dt * 2.2)
 	if wenv.tonemap_exposure != 1.0 + expo_v:
