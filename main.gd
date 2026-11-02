@@ -54,7 +54,7 @@ const WP_AI = [["lenk", 0.35], ["rak", 0.25], ["mine", 0.2], ["schild", 0.1], ["
 # eigene Farbe je Waffe, damit man sie im Augenwinkel unterscheiden kann
 const WC = {"rak": Color(1.0, 0.55, 0.12), "lenk": Color(1.0, 0.18, 0.22), "mine": Color(1.0, 0.86, 0.1), "orbs": Color(0.3, 0.6, 1.0),
 	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95)}
-const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "WALL", "orbs": "ORBS"}
+const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS"}
 var shots = []
 var mines = []
 var fxs = []
@@ -615,7 +615,7 @@ const FXS = {
 		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
 		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections", 0.0, 6.0, 1.0],
 		["gloss", "Road gloss", 0.0, 4.0, 2.0], ["wet", "Wet road", 0.0, 4.0, 1.0]],
-	"city": [["holo", "Holograms", 0.0, 4.0, 1.0], ["hsize", "Hologram size", 0.3, 3.0, 1.0], ["hflick", "Hologram glitch", 0.0, 4.0, 1.0], ["hhue", "Hologram color", -0.5, 0.5, 0.0],
+	"city": [["holo", "Holograms", 0.0, 4.0, 1.0], ["hsize", "Hologram size", 0.3, 3.0, 1.0], ["hflick", "Hologram glitch", 0.0, 12.0, 1.0], ["hhue", "Hologram color", -0.5, 0.5, 0.0],
 		["koi", "Koi fish", 0.0, 4.0, 1.0], ["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
 		["mega", "Mega towers", 0.0, 3.0, 1.0]],
 	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
@@ -623,7 +623,7 @@ const FXS = {
 		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
 		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
 }
-const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Wall"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["sound", "Sound"]]
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["sound", "Sound"]]
 var fx = {}
 
 
@@ -1677,23 +1677,35 @@ var car_mat: ShaderMaterial
 const HOLO_SPOTS = [[80.0, 1.0, "dancer"], [300.0, -1.0, "dancer"], [455.0, 1.0, "dancer"], [655.0, -1.0, "dancer"],
 	[128.0, -1.0, "koi"], [392.0, 1.0, "koi"], [615.0, -1.0, "koi"]]
 const DANCER_H = 1.66   # Größe der Figur im Modell (m)
+# Hologramm-Figuren: [Datei, Höhe im Modell, dreht sich (stehende Figur)]
+const HOLO_FIGS = [["res://holo/dancer.glb", 1.66, false], ["res://holo/fig_woman1.glb", 1.0, true], ["res://holo/fig_robot.glb", 1.0, true], ["res://holo/fig_woman2.glb", 1.0, true]]
+const HOLO_H = 45.0     # Höhe der Hologramme in der Stadt (m)
 
 const HOLO_CODE = """
 shader_type spatial;
-// Hologramm: nur leuchtende Ränder, feine Bildzeilen, ein heller Streifen wandert hoch, ab und zu eine Bildstörung
+// Hologramm: leuchtende Ränder, feine Bildzeilen, ein heller Streifen wandert hoch – und Bildstörungen:
+// waagrechte Streifen reißen zur Seite, Farben laufen auseinander, Zeilen fallen aus, die ganze Figur zittert
 render_mode unshaded,blend_add,cull_back,depth_draw_never,shadows_disabled,fog_disabled;
 uniform vec3 c1=vec3(1.,.3,.75);uniform vec3 c2=vec3(.25,.85,1.);
-uniform float hk=1.;uniform float fl=1.;uniform float sd=0.;uniform float by=0.;uniform float hh=40.;
-varying vec3 wp;varying float my;
+uniform float hk=1.;uniform float fl=1.;uniform float sd=0.;uniform float by=0.;uniform float hh=40.;uniform float gx=0.;
+varying vec3 wp;varying float my;varying float gb;
 float h11(float x){return fract(sin(x*127.1)*43758.5453);}
 void vertex(){
 	vec3 w=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;
 	my=clamp((w.y-by)/hh,0.,1.);
-	// Bildstörung: ein waagrechter Streifen verrutscht kurz zur Seite
-	float tk=floor(TIME*9.+sd*7.);
-	float on=step(1.-.08*fl,h11(tk+sd*3.1));
-	float band=step(abs(fract(my*2.5+h11(tk*1.7))-.5),.07);
-	vec3 off=vec3((h11(tk*3.1)-.5)*.06*hh*on*band,0.,0.);
+	float g=fl*.35+gx*4.;                                // Stärke: Regler + Wechsel-Störung
+	float tk=floor(TIME*(10.+gx*20.)+sd*7.);
+	vec3 off=vec3(0.);gb=0.;
+	for(int b=0;b<4;b++){
+		float fb=float(b);
+		float on=step(1.-min(.95,.05*g+gx*.9),h11(tk+fb*13.1+sd*3.1));
+		float ce=h11(tk*1.7+fb*5.3);float wd=.015+.1*h11(tk*2.3+fb*1.9);
+		float band=on*step(abs(my-ce),wd);
+		off.x+=band*(h11(tk*3.1+fb)-.5)*.35*hh*min(g,6.)/3.;
+		gb=max(gb,band);
+	}
+	off.x+=gx*(h11(floor(TIME*31.))-.5)*.12*hh;          // ganze Figur zittert beim Wechsel
+	off.y+=gx*(h11(floor(TIME*23.)+1.)-.5)*.04*hh;
 	VERTEX+=inverse(mat3(MODEL_MATRIX))*off;
 	wp=w+off;
 }
@@ -1703,9 +1715,13 @@ void fragment(){
 	float scan=.72+.28*sin(wp.y*10.-TIME*7.);
 	float sweep=exp(-pow(abs(fract(my*.7-TIME*.16)-.5)*12.,2.));
 	float fk=1.-min(fl,1.)*.6*step(.93,h11(floor(TIME*15.)+sd*5.));
+	// Zeilen fallen aus (mehr bei starker Störung)
+	float drop=step(fract(wp.y*.35+h11(floor(TIME*12.))*3.),.04*fl+.35*gx);
 	vec3 c=mix(c2,c1,my);
+	// in gestörten Streifen laufen die Farben auseinander
+	c=mix(c,vec3(c.b,c.r*.6+.4,c.g)*1.4,gb);
 	float fd=exp(-length(VERTEX)*.0012);
-	ALBEDO=c*((.2+rim*1.6)*scan+sweep*.7*(.3+rim))*fk*hk*fd;
+	ALBEDO=c*((.2+rim*1.6)*scan+sweep*.7*(.3+rim))*fk*hk*fd*(1.-drop*.9)*(1.+gx*1.2+gb*.8);
 }"""
 
 const KOI_CODE = """
@@ -1902,20 +1918,32 @@ func _holo_node(kind: String) -> Dictionary:
 	var h = {"kind": kind, "spot": -1.0e9}
 	var mat: ShaderMaterial
 	if kind == "dancer":
+		# Hologramm-Platz mit mehreren Figuren, die sich mit einer kräftigen Bildstörung abwechseln
 		mat = _shader_mat(HOLO_CODE)
-		var n: Node3D = load("res://holo/dancer.glb").instantiate()
-		for mi in n.find_children("*", "MeshInstance3D", true, false):
-			(mi as MeshInstance3D).material_override = mat
-			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			(mi as MeshInstance3D).extra_cull_margin = 0.6
-		var aps = n.find_children("*", "AnimationPlayer", true, false)
-		if not aps.is_empty():
-			var ap: AnimationPlayer = aps[0]
-			var nm = "SambaDance" if ap.has_animation("SambaDance") else ap.get_animation_list()[0]
-			ap.get_animation(nm).loop_mode = Animation.LOOP_LINEAR
-			ap.play(nm)
-			h.ap = ap
-		h.n = n
+		var root = Node3D.new()
+		h.figs = []
+		for fd in HOLO_FIGS:
+			var n: Node3D = load(fd[0]).instantiate()
+			for mi in n.find_children("*", "MeshInstance3D", true, false):
+				(mi as MeshInstance3D).material_override = mat
+				(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				(mi as MeshInstance3D).extra_cull_margin = 0.6
+			var fg = {"n": n, "h": fd[1], "spin": fd[2]}
+			var aps = n.find_children("*", "AnimationPlayer", true, false)
+			if not aps.is_empty():
+				var ap: AnimationPlayer = aps[0]
+				var nm = "SambaDance" if ap.has_animation("SambaDance") else ap.get_animation_list()[0]
+				ap.get_animation(nm).loop_mode = Animation.LOOP_LINEAR
+				ap.play(nm)
+				ap.active = false
+				fg.ap = ap
+			n.visible = false
+			root.add_child(n)
+			h.figs.append(fg)
+		h.fi = 0
+		h.swt = 0.0
+		h.gx = 0.0
+		h.n = root
 	else:
 		mat = _shader_mat(KOI_CODE)
 		var mi = MeshInstance3D.new()
@@ -1933,6 +1961,14 @@ func _holos_make() -> void:
 	for kind in ["dancer", "dancer", "koi", "koi"]:
 		var h = _holo_node(kind)
 		_sp(h.mat, "sd", float(holos.size()) * 1.37)
+		if kind == "dancer":
+			h.fi = (holos.size() * 2) % HOLO_FIGS.size()   # die zwei Plätze starten mit verschiedenen Figuren
+			h.swt = 4.0 * holos.size()
+			for a in OS.get_cmdline_user_args():
+				if a.begins_with("--holofig="):
+					h.fi = int(a.substr(10)) % HOLO_FIGS.size()
+				if a.begins_with("--holoswt="):
+					h.swt = float(a.substr(10))
 		holos.append(h)
 
 
@@ -2018,24 +2054,54 @@ func _city_live() -> void:
 		var nd: Node3D = h.n
 		if nd.visible != vis:
 			nd.visible = vis
-		if h.has("ap") and (h.ap as AnimationPlayer).active != vis:
-			(h.ap as AnimationPlayer).active = vis
 		if not vis:
+			if h.has("figs"):
+				for fg in h.figs:
+					if fg.has("ap") and (fg.ap as AnimationPlayer).active:
+						(fg.ap as AnimationPlayer).active = false
 			continue
 		var c: Array = lst[i]
 		var f = T.frame(c[1])
 		var mat: ShaderMaterial = h.mat
 		_sp(mat, "fl", float(C.hflick))
 		if kind == "dancer":
-			var sc = 27.0 * hs
-			if h.spot != c[1] or h.get("sc", 0.0) != sc:
+			var H = HOLO_H * hs
+			if h.spot != c[1] or h.get("H", 0.0) != H:
 				h.spot = c[1]
-				h.sc = sc
+				h.H = H
 				var p: Vector3 = f.c + f.rr * (c[2] * (T.TW + 22.0 + 8.0 * hs)) + Vector3.UP * (-14.0)
 				var dir: Vector3 = (f.c - f.fw * 40.0 - p) * Vector3(1, 0, 1)
-				nd.global_transform = Transform3D(Basis.looking_at(-dir.normalized(), Vector3.UP).scaled(Vector3.ONE * sc), p)
+				nd.global_transform = Transform3D(Basis.looking_at(-dir.normalized(), Vector3.UP), p)
 				_sp(mat, "by", p.y)
-				_sp(mat, "hh", DANCER_H * sc)
+				_sp(mat, "hh", H)
+			# alle paar Sekunden: kräftige Bildstörung, dabei wechselt die Figur
+			var dt2 = get_process_delta_time()
+			h.swt += dt2
+			var per = 9.0
+			var gx = 0.0
+			if h.swt > per - 0.3:
+				gx = clampf((h.swt - (per - 0.3)) / 0.3, 0.0, 1.0)
+			if h.swt > per:
+				h.swt = -0.4 * randf()
+				h.fi = (int(h.fi) + 1 + randi() % maxi(1, HOLO_FIGS.size() - 1)) % HOLO_FIGS.size()
+			if h.swt < 0.0:
+				gx = maxf(gx, clampf(-h.swt / 0.4 + 0.5, 0.0, 1.0))
+			if h.swt >= 0.0 and h.swt < 0.45:
+				gx = maxf(gx, 1.0 - h.swt / 0.45)
+			_sp(mat, "gx", gx)
+			for k in range(h.figs.size()):
+				var fg: Dictionary = h.figs[k]
+				var on = k == int(h.fi)
+				var fn: Node3D = fg.n
+				if fn.visible != on:
+					fn.visible = on
+				if fg.has("ap") and (fg.ap as AnimationPlayer).active != on:
+					(fg.ap as AnimationPlayer).active = on
+				if on:
+					var s0 = H / float(fg.h)
+					var yaw = tt * 0.35 if fg.spin else 0.0
+					var bob = sin(tt * 0.6 + float(k)) * 1.2 if fg.spin else 0.0
+					fn.transform = Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * s0), Vector3(0, bob, 0))
 			_sp(mat, "hk", hk)
 			_sp(mat, "c1", _v3(c1))
 			_sp(mat, "c2", _v3(c2))
@@ -3187,7 +3253,7 @@ func _dot(r: int) -> ImageTexture:
 
 func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
-	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Hologram dancer: Mixamo (Adobe) · private use only"
+	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
 	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
 	ui.sl.res.text = "Resolution  %d %%" % int(round(float(cfg.res) * 100.0))
@@ -6158,6 +6224,43 @@ func _bench_end() -> void:
 		get_tree().quit()
 
 
+# Sieg: großes, leuchtendes VICTORY, springt auf und pulsiert
+func _victory() -> void:
+	var cl = CanvasLayer.new()
+	cl.layer = 8
+	add_child(cl)
+	var l = Label.new()
+	l.text = "VICTORY"
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", 132)
+	var gold = OR if _noir() else Color(1.0, 0.86, 0.35)
+	l.add_theme_color_override("font_color", Color(1, 1, 1))
+	l.add_theme_color_override("font_outline_color", gold)
+	l.add_theme_constant_override("outline_size", 14)
+	l.add_theme_color_override("font_shadow_color", Color(gold.r, gold.g, gold.b, 0.6))
+	l.add_theme_constant_override("shadow_outline_size", 40)
+	l.add_theme_constant_override("shadow_offset_x", 0)
+	l.add_theme_constant_override("shadow_offset_y", 0)
+	l.anchor_right = 1.0
+	l.anchor_top = 0.2
+	l.anchor_bottom = 0.2
+	l.offset_top = -90
+	l.offset_bottom = 90
+	cl.add_child(l)
+	l.pivot_offset = Vector2(get_viewport().get_visible_rect().size.x * 0.5, 90)
+	l.scale = Vector2(0.2, 0.2)
+	l.modulate.a = 0.0
+	var tw = create_tween()
+	tw.tween_property(l, "scale", Vector2(1.18, 1.18), 0.28).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(l, "modulate:a", 1.0, 0.2)
+	tw.tween_property(l, "scale", Vector2(1.0, 1.0), 0.25)
+	var tp = create_tween().set_loops()
+	tp.tween_property(l, "modulate", Color(1.25, 1.2, 1.0, 1.0), 0.6).set_delay(0.6)
+	tp.tween_property(l, "modulate", Color(1, 1, 1, 1), 0.6)
+	_flash(Color(1.0, 0.9, 0.6), 0.5)
+
+
 # Rundenkopien (hinter/unter/vor dir) zur Stelle z schieben – nur wenn sich die Runde ändert
 func _lap_pos(z: float) -> void:
 	var l0 = int(floor((z - 20.0) / T.LAP))
@@ -6354,6 +6457,7 @@ func _process(delta: float) -> void:
 		_snd("win")
 		_show_resb()
 		hud.res.text = "1st  ·  LAST ONE STANDING\n%s" % _fmt(race_t)
+		_victory()
 	elif racing and g.z >= finish:
 		state = "done"
 		t_state = 0.0
@@ -6361,6 +6465,8 @@ func _process(delta: float) -> void:
 		_snd("win")
 		_show_resb()
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
+		if place == 1:
+			_victory()
 	_board_update(dt)
 	_resb_arm(dt)
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
@@ -6948,7 +7054,7 @@ func _lab_step(dt: float) -> void:
 	if grp == "city" and not holos.is_empty() and (holos[0].n as Node3D).visible:
 		# Reiter „City“: um die Hologramm-Tänzerin kreisen
 		var hn: Node3D = holos[0].n
-		tg = hn.global_position + Vector3.UP * DANCER_H * float(holos[0].get("sc", 27.0)) * 0.62
+		tg = hn.global_position + Vector3.UP * float(holos[0].get("H", HOLO_H)) * 0.62
 	var cp = cos(lab.pit)
 	var off: Vector3 = (-f.fw * cos(lab.yaw) + f.rr * sin(lab.yaw)) * cp + Vector3.UP * sin(lab.pit)
 	var ro: Vector3 = tg + off * lab.dist
