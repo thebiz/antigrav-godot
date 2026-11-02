@@ -91,6 +91,8 @@ func _ready() -> void:
 	_fx_load()
 	if OS.get_cmdline_user_args().has("--noir"):
 		cfg.look = 1
+	if OS.get_cmdline_user_args().has("--jungle"):
+		cfg.look = 2
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
 	if OS.get_cmdline_user_args().has("--records"):
@@ -101,6 +103,11 @@ func _ready() -> void:
 		CY = Color(0.9, 0.92, 0.95)
 		MG = OR
 		AM = OR
+	if _jungle():
+		# Biolumineszenz: Grün-Türkis links, Violett rechts, Bernstein für die Irrlichter
+		CY = Color(0.2, 1.0, 0.65)
+		MG = Color(0.75, 0.35, 1.0)
+		AM = Color(1.0, 0.75, 0.3)
 	# Feld-Verteilung: fest (0) oder je Rennen neu gewürfelt; ein Replay aus der Datei bringt seine eigene mit
 	if not rpf.is_empty():
 		pad_seed = int(rpf.get("ps", 0))
@@ -904,13 +911,15 @@ void sky(){
 """, [["vec3(.04,.02,.07),vec3(.002,.003,.012)", "vec3(.05),vec3(.004)"], ["vec3(.3,.8,1.):vec3(1.,.7,.45)", "vec3(.9):vec3(.7)"],
 		["(h21(vec2(bx,9.))>.5?vec3(0.,.78,1.):vec3(1.,.06,.42))", "(h21(vec2(bx,9.))>.7?vec3(1.,.36,.03):vec3(.55))"],
 		["vec3(.5,.12,.45)*exp", "vec3(.5,.18,.02)*exp"], ["vec3(.25,.3,.5)*pow", "vec3(.35)*pow"], ["vec3(.006,.005,.012)", "vec3(.007)"]])
+	if _jungle():
+		sky_mat.shader.code = JSKY_CODE
 	var sky = Sky.new()
 	sky.sky_material = sky_mat
 	var env = Environment.new()
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.19, 0.19, 0.2) if _noir() else Color(0.16, 0.12, 0.26)
+	env.ambient_light_color = Color(0.19, 0.19, 0.2) if _noir() else (Color(0.1, 0.2, 0.17) if _jungle() else Color(0.16, 0.12, 0.26))
 	env.ambient_light_energy = 0.35
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
@@ -931,7 +940,7 @@ void sky(){
 	env.ssao_enabled = _fplus()
 	env.ssao_intensity = 1.6
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.045, 0.045, 0.05) if _noir() else Color(0.05, 0.03, 0.09)
+	env.fog_light_color = Color(0.045, 0.045, 0.05) if _noir() else (Color(0.025, 0.07, 0.06) if _jungle() else Color(0.05, 0.03, 0.09))
 	fog_c = env.fog_light_color
 	env.fog_density = 0.012
 	env.fog_sky_affect = 0.0
@@ -944,7 +953,7 @@ void sky(){
 	add_child(we)
 	# Mondlicht mit echten Schatten
 	moon = DirectionalLight3D.new()
-	moon.light_color = Color(0.85, 0.87, 0.9) if _noir() else Color(0.6, 0.66, 1.0)
+	moon.light_color = Color(0.85, 0.87, 0.9) if _noir() else (Color(0.55, 0.8, 0.85) if _jungle() else Color(0.6, 0.66, 1.0))
 	moon.light_energy = 0.45
 	moon.shadow_enabled = true
 	moon.directional_shadow_max_distance = 35.0
@@ -1126,6 +1135,10 @@ func _noir() -> bool:
 	return int(cfg.get("look", 0)) == 1
 
 
+func _jungle() -> bool:
+	return int(cfg.get("look", 0)) == 2
+
+
 # Schwarz-Weiß-Look: Shader-Farben tauschen (nur wenn aktiv)
 func _nz(code: String, pairs: Array) -> String:
 	if not _noir():
@@ -1275,8 +1288,8 @@ func _build_track() -> void:
 		_strip("neonL" if sd < 0 else "neonR", 20.0, 720.0, sd * (TW - 0.012), sd * (TW - 0.012), 0.30, 0.36)
 		# Leuchtkante auf der Fahrbahn
 		_strip("neonL" if sd < 0 else "neonR", 20.0, 720.0, sd * (TW - 0.16), sd * (TW - 0.11), 0.006, 0.006)
-	# Mittellinie, gestrichelt
-	var zz = 20.0
+	# Mittellinie, gestrichelt (im Dschungel nicht)
+	var zz = 20.0 if not _jungle() else 9999.0
 	while zz < 720.0:
 		_strip("line", zz, zz + 1.5, -0.012, 0.012, 0.005, 0.005)
 		zz += 3.33
@@ -1301,7 +1314,9 @@ func _build_track() -> void:
 	var gk = 1
 	while gk * 28 + 7 < 720:
 		var zc = gk * 28.0 + 7.0
-		if zc > 20.0 and not T.in_tun(zc, 2.0):
+		if zc > 20.0 and not T.in_tun(zc, 2.0) and _jungle():
+			lights.append([zc, _neo(gk * 0.29)])   # Dschungel: nur die schwebenden Irrlichter
+		elif zc > 20.0 and not T.in_tun(zc, 2.0):
 			for sd in [-1.0, 1.0]:
 				_box("metal", zc, sd * (TW + 0.25), 0.6, 0.07, 0.72, 0.07)
 			_box("metal", zc, 0.0, 1.34, TW + 0.32, 0.08, 0.09)
@@ -1314,18 +1329,20 @@ func _build_track() -> void:
 		gk += 1
 	for k in range(1, 36):
 		var zc = k * 20.0 + 10.0
-		if zc > 715.0 or T.in_tun(zc, 2.0):
+		if zc > 715.0 or T.in_tun(zc, 2.0) or _jungle():
 			continue
 		var sd = 1.0 if k % 2 == 0 else -1.0
 		_box("metal", zc, sd * (TW + 0.42), 0.42, 0.03, 0.3, 1.6)
 		_box("board" + str(k % 3), zc, sd * (TW + 0.385), 0.42, 0.006, 0.26, 1.5)
 	for k in range(2, 51):
 		var zc = k * 14.0 + 7.0
-		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc):
+		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle():
 			continue
 		_box("metal", zc, 0.0, -3.3, 0.16, 3.1, 0.16)
-	# Neonringe in Gruppen
-	for zr in T.RINGS:
+	# Neonringe in Gruppen (im Dschungel stattdessen Baumwurzeln über der Strecke)
+	if _jungle():
+		_jungle_track()
+	for zr in ([] if _jungle() else T.RINGS):
 		_ring("ringC" if int(floor(zr / 150.0)) % 2 == 0 else "ringM", float(zr), TW + 0.55, 0.95, 0.065)
 	# Tunnel: Röhre innen, leuchtende Ringe, Deckenband
 	for tu in T.TUN:
@@ -1368,7 +1385,7 @@ uniform float rgl=1.;
 // Textur „Metal 046 B“ (ambientCG, CC0): Farbe + Rauheit (Alpha) und Oberflächenstruktur
 uniform sampler2D tcr:source_color,filter_linear_mipmap,repeat_enable;
 uniform sampler2D tn:hint_normal,filter_linear_mipmap,repeat_enable;
-uniform float tk=1.;uniform float ts=2.4;
+uniform float tk=1.;uniform float ts=2.4;uniform float jg=0.;
 uniform vec3 ncl=vec3(0.,.78,1.);uniform vec3 ncr=vec3(1.,.06,.42);uniform float nk=1.;   // Neonschein der Leitplanken   // Glanz der Fahrbahn (FX Lab): mehr = glatter, schärfere Spiegelungen
 varying float wz;varying float qh;
 float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
@@ -1389,6 +1406,7 @@ void fragment(){
 	vec4 tc=texture(tcr,tuv);
 	base*=mix(vec3(1.),clamp(tc.rgb/.05,0.,3.5),.85*tk*(1.-edge));
 	base*=1.-seam*.7;
+	if(jg>.5){base=tc.rgb*vec3(.75,.58,.42);seam=0.;edge=0.;}   // Dschungel: lehmiger Matsch statt Metallplatten
 	// Struktur der Textur auf die Normale (Tangenten aus den Bildableitungen – die Fahrbahn hat keine eigenen)
 	vec3 nm=vec3(texture(tn,tuv).xy*2.-1.,0.);nm.z=sqrt(max(1.-dot(nm.xy,nm.xy),0.));   // komprimiert nur x/y
 	vec3 N=NORMAL;vec3 dp1=dFdx(VERTEX),dp2=dFdy(VERTEX);vec2 du1=dFdx(tuv),du2=dFdy(tuv);
@@ -1398,6 +1416,7 @@ void fragment(){
 	NORMAL=normalize(N*max(nm.z,.2)+(Tn*nm.x+Bn*nm.y)*iv*.7*tk);
 	float rf=mix(1.,clamp(tc.a/.35,.4,2.2),.75*tk);
 	ALBEDO=base;METALLIC=.8;ROUGHNESS=clamp((.38+.1*br)/(.6+.4*rgl)*rf+seam*.3+edge*.2,.04,1.);SPECULAR=.45;
+	if(jg>.5){METALLIC=0.;ROUGHNESS=clamp(tc.a*.8,.2,1.);SPECULAR=.5;}
 	float cr=max(qh,0.)/max(max(qs,qs2),.01);   // glühender Kamm, aufgerissene Fugen
 	EMISSION=(qc*pow(cr,1.5)*6.+qc*vec3(1.,.6,.62)*seam*cr*14.)*step(.01,qs+qs2)*qg;
 	// Spiegelung der Neonbänder auf der glatten Fahrbahn – im Shader gerechnet statt mit teuren Flächenlichtern
@@ -1406,16 +1425,22 @@ void fragment(){
 	float shn=(exp(-dl*1.6)*.25+exp(-dl*5.)*.75)*(.08+frn*1.8)*(1.-seam*.6)*(1.-edge*.5);
 	EMISSION+=(x<0.?ncl:ncr)*shn*nk*.22;
 }""", [["vec3(.75,.62,.08)", "vec3(.8,.3,.02)"]]))
-	mats.road.set_shader_parameter("tcr", load("res://tex/road_cr.png"))
-	mats.road.set_shader_parameter("tn", load("res://tex/road_n.png"))
+	mats.road.set_shader_parameter("tcr", load("res://tex/road_cr.png" if not _jungle() else "res://tex/mud_cr.png"))
+	mats.road.set_shader_parameter("tn", load("res://tex/road_n.png" if not _jungle() else "res://tex/mud_n.png"))
+	if _jungle():
+		mats.road.set_shader_parameter("jg", 1.0)
+		mats.road.set_shader_parameter("ts", 3.0)
 	# Leitplanken: zerkratzter Stahl „Metal 038“, Tunnel: „Metal Plates 006“ (beide ambientCG, CC0)
-	mats["wall"] = _tex_metal("rail", Color(0.36, 0.37, 0.4), 0.7, 0.22, 0.85, 0.07)
+	mats["wall"] = _tex_metal("rail", Color(0.36, 0.37, 0.4), 0.7, 0.22, 0.85, 0.07) if not _jungle() else _tex_metal("bark", Color(0.42, 0.38, 0.32), 0.8, 0.85, 0.0)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
-	mats["tube"] = _tex_metal("tube", Color(0.24, 0.24, 0.27), 0.5, 0.28, 0.9, 0.05, Color(0.35, 0.55, 0.6))
+	mats["tube"] = _tex_metal("tube", Color(0.24, 0.24, 0.27), 0.5, 0.28, 0.9, 0.05, Color(0.35, 0.55, 0.6)) if not _jungle() else _tex_metal("bark", Color(0.3, 0.27, 0.22), 0.4, 0.85, 0.0, 0.04, Color(0.3, 0.9, 0.6))
+	if _jungle():
+		mats["root"] = _tex_metal("bark", Color(0.45, 0.4, 0.33), 0.7, 0.85, 0.0, 0.03, Color(0.3, 0.9, 0.6))
+		mats["jfloor"] = _tex_metal("mud", Color(0.3, 0.36, 0.26), 0.33, 0.9, 0.0)
 	mats["neonL"] = _neon(CY, 5.0)
 	mats["neonR"] = _neon(MG, 5.0)
-	mats["ringC"] = _neon(CY, 7.0)
-	mats["ringM"] = _neon(MG, 7.0)
+	mats["ringC"] = _neon(CY, 7.0 if not _jungle() else 1.2)
+	mats["ringM"] = _neon(MG, 7.0 if not _jungle() else 1.2)
 	mats["line"] = _neon(Color(0.8, 0.85, 1.0), 0.6)
 	mats["tlight"] = _neon(Color(0.9, 0.95, 1.0), 4.0)
 	mats["board0"] = _neon(Color(0.8, 0.8, 0.85) if _noir() else Color(0.1, 0.4, 1.0), 2.2)
@@ -1450,7 +1475,7 @@ void fragment(){vec2 q=floor(vec2(UV.x*2.,UV.y*12.));ALBEDO=vec3(mod(q.x+q.y,2.)
 		if key == "pad" or key == "start" or key == "wpad":
 			st = _fix_uv(st, key)
 		st.index()
-		if key == "wall" or key == "tube":
+		if key == "wall" or key == "tube" or key == "root" or key == "jfloor":
 			st.generate_tangents()   # für die Oberflächenstruktur der Texturen
 		if not chunks.has(ci):
 			chunks[ci] = ArrayMesh.new()
@@ -1475,6 +1500,13 @@ void fragment(){vec2 q=floor(vec2(UV.x*2.,UV.y*12.));ALBEDO=vec3(mod(q.x+q.y,2.)
 			om.omni_attenuation = 1.6
 			om.position = T.world(l[0], 0.0, 1.1)
 			n.add_child(om)
+			if _jungle():
+				var orb = MeshInstance3D.new()
+				orb.mesh = _lowsphere(0.05, 10, 6)
+				orb.material_override = _neon(l[1], 6.0)
+				orb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				orb.position = om.position
+				n.add_child(orb)
 			lights_nodes.append(om)
 		add_child(n)
 		# Lichtsäulen über den Waffenfeldern (schon von Weitem zu sehen)
@@ -1536,6 +1568,9 @@ func _fix_uv(st: SurfaceTool, key: String) -> SurfaceTool:
 
 # ---------------------------------------------------------------- Hochhäuser neben der Strecke (eine Instanz-Liste, Fenster im Shader)
 func _build_city() -> void:
+	if _jungle():
+		_jungle_build()
+		return
 	var box = BoxMesh.new()
 	box.size = Vector3(2, 2, 2)
 	city_mat = _shader_mat(_nz("""
@@ -1578,6 +1613,328 @@ void fragment(){
 
 
 var city_mat: ShaderMaterial
+
+
+# ================================================================ Dschungel (Look „Jungle“)
+# Nachthimmel über dem Regenwald: dunkles Blaugrün, wenige Sterne, Mond, Baumkronen am Horizont, Dunst
+const JSKY_CODE = """
+shader_type sky;
+uniform float sb=1.;uniform float st=1.;uniform float sl=1.;uniform float mn=1.;uniform float hu=0.;
+float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+void sky(){
+	vec3 d=EYEDIR;float h=d.y;float an=atan(d.x,d.z);
+	vec3 c=mix(vec3(.02,.05,.055),vec3(.002,.006,.012),smoothstep(0.,.55,h))*sb;
+	vec2 sp=vec2(an*90.,h*160.);vec2 ci=floor(sp);
+	c+=vec3(.8,.9,1.)*step(.992,h21(ci))*smoothstep(.12,.4,h)*(1.-step(.3,length(fract(sp)-.5)))*1.3*st;
+	vec3 md=normalize(vec3(.5,.32,.8));float mo=dot(d,md);
+	c+=(vec3(.85,.95,.95)*smoothstep(.9994,.9997,mo)*4.+vec3(.15,.3,.3)*pow(max(0.,mo),60.)*.35)*mn;
+	// Baumkronen am Horizont in zwei Tiefen
+	for(int k=0;k<2;k++){float fk=float(k);
+		float tl=(.05+.03*sin(an*(6.+fk*3.)+fk)+.02*sin(an*(19.+fk*5.)+1.+fk)+.012*sin(an*57.+2.))*(1.+fk*.6)*sl;
+		if(h<tl&&sl>.01)c=mix(vec3(.004,.014,.012),vec3(.002,.006,.006),fk)+vec3(0.,.03,.025)*smoothstep(tl-.04,tl,h);}
+	c+=vec3(.03,.1,.08)*exp(-abs(h)*14.)*.5*sb;
+	if(h<-.04)c=mix(c,vec3(.003,.008,.007),smoothstep(-.04,-.15,h));
+	COLOR=c;
+}
+"""
+
+# Bildkarten (Bäume, Unterholz): zwei gekreuzte Flächen, Bild aus einem Atlas, Wind in den Spitzen
+const JCARD_CODE = """
+shader_type spatial;
+render_mode unshaded,cull_disabled;
+uniform sampler2D at:source_color,filter_linear_mipmap;
+uniform float nc=4.;uniform float dk=.2;uniform float wd=.05;
+uniform vec3 g1=vec3(.2,1.,.65);uniform vec3 g2=vec3(.75,.35,1.);
+varying float cell;varying vec4 cd;
+void vertex(){
+	cd=INSTANCE_CUSTOM;
+	cell=floor(cd.r*nc+.5)+(cd.b>.5?0.:UV2.x);
+	float top=1.-UV.y;
+	VERTEX.x+=sin(TIME*1.3+cd.a*40.)*wd*top*top;
+}
+void fragment(){
+	float c=mod(cell,nc);
+	vec4 t=texture(at,vec2((c+clamp(UV.x,.004,.996))/nc,UV.y));
+	float top=1.-UV.y;
+	vec3 col=t.rgb*dk*(.65+.7*cd.g)*(.5+.8*top);
+	col=mix(col,mix(g1,g2,cd.g)*3.*t.r,cd.b);   // Leuchtpflanzen
+	ALBEDO=col;ALPHA=t.a;ALPHA_SCISSOR_THRESHOLD=.5;
+}
+"""
+
+# Glühwürmchen: kleine Lichtpunkte, die schweben und blinken (immer zur Kamera gedreht)
+const JFLY_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+uniform vec3 fc=vec3(.75,1.,.3);
+varying float br;
+void vertex(){
+	vec4 cd=INSTANCE_CUSTOM;float s=cd.r*100.;
+	vec3 o=MODEL_MATRIX[3].xyz+vec3(sin(TIME*.7+s)*.5,sin(TIME*1.1+s*2.)*.3,cos(TIME*.6+s*1.3)*.5);
+	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(INV_VIEW_MATRIX[0],INV_VIEW_MATRIX[1],INV_VIEW_MATRIX[2],vec4(o,1.));
+	br=smoothstep(.15,1.,sin(TIME*(1.5+cd.g*2.)+s*7.));
+}
+void fragment(){float d=length(UV-.5)*2.;ALBEDO=fc*br*4.*pow(max(0.,1.-d),2.);}
+"""
+
+# Bach quer unter der Sprungstelle: dunkles Wasser, Wellen ziehen seitlich durch, leuchtende Glanzlichter
+const JWATER_CODE = """
+shader_type spatial;
+render_mode unshaded,cull_disabled;
+uniform vec3 wc=vec3(.2,1.,.65);
+varying vec3 wp;
+void vertex(){wp=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;}
+void fragment(){
+	float r=sin(wp.x*1.7-TIME*3.)*.5+.5;float r2=sin(wp.x*4.1+wp.z*2.3-TIME*5.)*.5+.5;
+	float sp=pow(r*r2,6.);
+	ALBEDO=vec3(.01,.04,.05)+wc*sp*1.2+vec3(.2,.35,.45)*pow(r2,14.)*.6;
+}
+"""
+
+# Bodenprofil neben der Strecke: [Abstand hinter der Leitplanke, Höhe]
+const JF = [[0.12, 0.46], [0.6, 0.0], [2.0, -0.35], [6.0, -0.8], [16.0, -1.4], [40.0, -2.0], [90.0, -2.4]]
+const JGAP = 413.5   # Mitte der Sprungstelle – dort fließt der Bach
+
+
+func _jdip(z: float) -> float:
+	var d = absf(T.lz(z) - JGAP)
+	var k = clampf(1.0 - d / 8.0, 0.0, 1.0)
+	return -1.9 * k * k * (3.0 - 2.0 * k)
+
+
+# Punkt auf dem Waldboden: Seite sd, la = Abstand hinter der Leitplanke
+func _jf(z: float, sd: float, la: float) -> Vector3:
+	var f = T.frame(z)
+	var r0: Vector3 = f.fw.cross(Vector3.UP).normalized()
+	var h = JF[JF.size() - 1][1]
+	for i in range(JF.size() - 1):
+		if la <= JF[i + 1][0]:
+			var u = clampf((la - JF[i][0]) / (JF[i + 1][0] - JF[i][0]), 0.0, 1.0)
+			h = lerpf(JF[i][1], JF[i + 1][1], u)
+			break
+	h += _jdip(z) * clampf(la / 1.5, 0.0, 1.0)
+	return f.c + r0 * (sd * (T.TW + la)) + Vector3.UP * h
+
+
+# Waldboden, Bachbett und Riesenwurzeln: in die Streckenabschnitte gebaut (wandern mit den Runden)
+func _jungle_track() -> void:
+	var TW = T.TW
+	var z = 20.0
+	var prev = {}
+	while z <= 720.0 + 0.001:
+		st_z = z - 1.0
+		var f = T.frame(z)
+		for sd in [-1.0, 1.0]:
+			var row = []
+			for i in range(JF.size()):
+				var p: Vector3
+				if i == 0:
+					p = f.c + f.rr * (sd * (TW + 0.12)) + f.uu * 0.46   # an der Leitplankenkante
+				else:
+					p = _jf(z, sd, JF[i][0])
+				row.append(p)
+			if prev.has(sd):
+				var pr: Array = prev[sd]
+				for i in range(row.size() - 1):
+					var a: Vector3 = pr[i]
+					var b: Vector3 = row[i]
+					var c: Vector3 = row[i + 1]
+					var d: Vector3 = pr[i + 1]
+					var n = (b - a).cross(d - a)
+					if n.y < 0.0:
+						n = -n
+					var la0 = sd * (TW + JF[i][0])
+					var la1 = sd * (TW + JF[i + 1][0])
+					_quad(_st("jfloor"), a, b, c, d, n.normalized(), Vector2(la0, z - 2.0), Vector2(la0, z), Vector2(la1, z), Vector2(la1, z - 2.0))
+			prev[sd] = row
+		z += 2.0
+	# Bachbett unter der Fahrbahn (nur an der Sprungstelle zu sehen)
+	var zb = JGAP - 10.0
+	var pb = []
+	while zb <= JGAP + 10.0:
+		st_z = zb
+		var f = T.frame(zb)
+		var r0: Vector3 = f.fw.cross(Vector3.UP).normalized()
+		var y = -0.5 + _jdip(zb)
+		var rb = [f.c + r0 * (-TW - 0.2) + Vector3.UP * y, f.c + r0 * (TW + 0.2) + Vector3.UP * y]
+		if pb.size() > 0:
+			_quad(_st("jfloor"), pb[0], rb[0], rb[1], pb[1], Vector3.UP, Vector2(-TW, zb - 1.0), Vector2(-TW, zb), Vector2(TW, zb), Vector2(TW, zb - 1.0))
+		pb = rb
+		zb += 1.0
+	# Riesenwurzeln als Tore über der Strecke
+	for rz in [[120.0, 0.0], [300.0, 1.7], [655.0, 3.1]]:
+		_jroot(rz[0], TW + 1.5, TW + 1.9, 0.45, rz[1])
+		_jroot(rz[0] + 1.7, TW + 1.1, TW + 1.4, 0.26, rz[1] + 2.0)
+
+
+# eine Wurzel: knorriger Bogen von links nach rechts über die Fahrbahn
+func _jroot(z0: float, A: float, B: float, r0: float, sdd: float) -> void:
+	st_z = z0
+	var f = T.frame(z0)
+	var NA = 30
+	var NR = 10
+	var rings = []
+	for i in range(NA + 1):
+		var th = lerpf(-0.18, PI + 0.18, float(i) / NA)
+		var P: Vector3 = f.c + f.rr * (-cos(th) * A) + f.uu * (sin(th) * B - 0.2) + f.fw * (0.35 * sin(3.0 * th + sdd))
+		var r = r0 * (1.0 + 0.45 * (1.0 - clampf(sin(th), 0.0, 1.0))) * (1.0 + 0.15 * sin(7.0 * th + sdd))
+		rings.append([P, r, th])
+	for i in range(NA):
+		var P0: Vector3 = rings[i][0]
+		var P1: Vector3 = rings[i + 1][0]
+		var Tg = (P1 - P0).normalized()
+		var N1: Vector3 = f.fw
+		var N2 = Tg.cross(N1).normalized()
+		N1 = N2.cross(Tg).normalized()
+		var Tg1 = ((rings[mini(i + 2, NA)][0] as Vector3) - P1).normalized() if i + 1 < NA else Tg
+		var M2 = Tg1.cross(f.fw).normalized()
+		var M1 = M2.cross(Tg1).normalized()
+		for j in range(NR):
+			var a0 = TAU * j / NR
+			var a1 = TAU * (j + 1) / NR
+			var o00 = (N1 * cos(a0) + N2 * sin(a0))
+			var o01 = (N1 * cos(a1) + N2 * sin(a1))
+			var o10 = (M1 * cos(a0) + M2 * sin(a0))
+			var o11 = (M1 * cos(a1) + M2 * sin(a1))
+			var a = P0 + o00 * float(rings[i][1])
+			var b = P1 + o10 * float(rings[i + 1][1])
+			var c = P1 + o11 * float(rings[i + 1][1])
+			var d = P0 + o01 * float(rings[i][1])
+			var u0 = float(i) * 0.35
+			var u1 = float(i + 1) * 0.35
+			_quad(_st("root"), a, b, c, d, (o00 + o11).normalized(), Vector2(float(j) / NR * 2.0, u0), Vector2(float(j) / NR * 2.0, u1), Vector2(float(j + 1) / NR * 2.0, u1), Vector2(float(j + 1) / NR * 2.0, u0))
+
+
+# zwei gekreuzte Flächen (Breite 1, Höhe 1, Fuß bei y = 0); UV2.x sagt, welche der beiden es ist
+func _xquad_mesh() -> ArrayMesh:
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for q in range(2):
+		var ax = Vector3(1, 0, 0) if q == 0 else Vector3(0, 0, 1)
+		var c = [[-0.5, 0.0, 0.0, 1.0], [0.5, 0.0, 1.0, 1.0], [0.5, 1.0, 1.0, 0.0], [-0.5, 1.0, 0.0, 0.0]]
+		var vs = []
+		for k in c:
+			vs.append([ax * k[0] + Vector3.UP * k[1], Vector2(k[2], k[3])])
+		for idx in [0, 1, 2, 0, 2, 3]:
+			st.set_normal(Vector3.UP)
+			st.set_uv(vs[idx][1])
+			st.set_uv2(Vector2(float(q), 0.0))
+			st.add_vertex(vs[idx][0])
+	return st.commit()
+
+
+var jtree_mm: MultiMesh
+var jund_mm: MultiMesh
+var jfly_mm: MultiMesh
+
+
+func _jcard_mat(path: String, dk: float, wd: float) -> ShaderMaterial:
+	var m = _shader_mat(JCARD_CODE)
+	m.set_shader_parameter("at", load(path))
+	m.set_shader_parameter("dk", dk)
+	m.set_shader_parameter("wd", wd)
+	m.set_shader_parameter("g1", _v3(CY))
+	m.set_shader_parameter("g2", _v3(MG))
+	return m
+
+
+func _jungle_build() -> void:
+	var rng = RandomNumberGenerator.new()
+	rng.seed = 4242
+	var xq = _xquad_mesh()
+	# Bäume in vier Reihen je Seite: nah, mittel, fern, ganz fern (dort größer und lockerer)
+	var trees = []
+	var rows = [[1.6, 4.0, 2.6, 6.0, 10.0, true], [4.0, 12.0, 3.0, 8.0, 14.0, true], [12.0, 35.0, 4.2, 10.0, 18.0, false], [35.0, 75.0, 6.5, 12.0, 21.0, false]]
+	for sd in [-1.0, 1.0]:
+		for rw in rows:
+			var z = 20.0 + rng.randf() * float(rw[2])
+			while z < 720.0:
+				var near = bool(rw[5])
+				var skip = absf(T.lz(z) - JGAP) < 5.0 or (near and T.in_tun(z, 3.0))
+				if not skip:
+					var la = rng.randf_range(float(rw[0]), float(rw[1]))
+					var h = rng.randf_range(float(rw[3]), float(rw[4]))
+					var p = _jf(z, sd, la) + Vector3.UP * -0.15
+					var bs = Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(h * 0.667, h, h * 0.667))
+					trees.append([Transform3D(bs, p), Color(float(rng.randi() % 4) / 4.0, rng.randf(), 0.0, rng.randf()), z])
+				z += float(rw[2]) * rng.randf_range(0.6, 1.4)
+	# Unterholz: Farne, große Blätter, Gräser, dazwischen Leuchtpflanzen
+	var und = []
+	for sd in [-1.0, 1.0]:
+		var z = 20.0
+		while z < 720.0:
+			if not T.in_tun(z, 1.0):
+				for k in range(2):
+					var la = rng.randf_range(0.4, 5.5) if k == 0 else rng.randf_range(0.4, 2.2)
+					var r = rng.randf()
+					var cell = 0 if r < 0.4 else (1 if r < 0.7 else (2 if r < 0.9 else 3))
+					var glow = 1.0 if cell == 3 else 0.0
+					var sz = rng.randf_range(0.6, 1.9) * (0.7 if cell == 3 else 1.0) * clampf(0.45 + la * 0.3, 0.45, 1.0)   # nah an der Planke kleiner
+					var p = _jf(z, sd, la) + Vector3.UP * -0.05
+					var bs = Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sz, sz, sz))
+					und.append([Transform3D(bs, p), Color(float(cell) / 4.0, rng.randf(), glow, rng.randf()), z])
+			z += rng.randf_range(0.35, 0.65)
+	# Glühwürmchen
+	var fq = QuadMesh.new()
+	fq.size = Vector2(0.09, 0.09)
+	fq.material = _shader_mat(JFLY_CODE)
+	jfly_mm = MultiMesh.new()
+	jfly_mm.transform_format = MultiMesh.TRANSFORM_3D
+	jfly_mm.use_custom_data = true
+	jfly_mm.mesh = fq
+	jfly_mm.instance_count = 520
+	for i in range(520):
+		var z = rng.randf_range(20.0, 720.0)
+		var sd = -1.0 if rng.randf() < 0.5 else 1.0
+		var p = _jf(z, sd, rng.randf_range(0.2, 14.0)) + Vector3.UP * rng.randf_range(0.6, 4.0)
+		jfly_mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, p))
+		jfly_mm.set_instance_custom_data(i, Color(rng.randf(), rng.randf(), 0, 0))
+	var tmat = _jcard_mat("res://tex/jungle_tree.png", 0.2, 0.02)
+	var umat = _jcard_mat("res://tex/jungle_under.png", 0.22, 0.06)
+	# Bach
+	var wf = T.frame(JGAP)
+	var wr: Vector3 = wf.fw.cross(Vector3.UP).normalized()
+	var wfw = Vector3.UP.cross(wr).normalized()
+	var wpm = PlaneMesh.new()
+	wpm.size = Vector2(200.0, 12.0)
+	wpm.material = _shader_mat(JWATER_CODE)
+	(wpm.material as ShaderMaterial).set_shader_parameter("wc", _v3(CY))
+	# in Abschnitte zerlegt, damit der Renderer alles außerhalb des Blickfelds weglässt
+	var groups = []
+	for pr in [[trees, tmat], [und, umat]]:
+		var by = {}
+		for it in pr[0]:
+			var ci = clampi(int(floor((float(it[2]) - 20.0) / CHUNK)), 0, int(T.LAP / CHUNK) - 1)
+			if not by.has(ci):
+				by[ci] = []
+			by[ci].append(it)
+		for ci in by:
+			var lst: Array = by[ci]
+			var mm = MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_custom_data = true
+			mm.mesh = xq
+			mm.instance_count = lst.size()
+			for i in range(lst.size()):
+				mm.set_instance_transform(i, lst[i][0])
+				mm.set_instance_custom_data(i, lst[i][1])
+			groups.append([mm, pr[1]])
+	groups.append([jfly_mm, null])
+	for n in laps:
+		for pr in groups:
+			var mmi = MultiMeshInstance3D.new()
+			mmi.multimesh = pr[0]
+			if pr[1] != null:
+				mmi.material_override = pr[1]
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			mmi.extra_cull_margin = 4.0
+			n.add_child(mmi)
+		var wm = MeshInstance3D.new()
+		wm.mesh = wpm
+		wm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		wm.transform = Transform3D(Basis(wr, Vector3.UP, wfw), wf.c + Vector3.UP * (-0.5 + _jdip(JGAP) + 0.45))
+		n.add_child(wm)
+	print("JUNGLE trees=", trees.size(), " under=", und.size())
 
 
 # Kommt in den nächsten Metern eine Kurve? (für den Autopiloten)
@@ -1668,6 +2025,8 @@ func _pillar_apply() -> void:
 
 # Häuser verteilen: Anzahl, Höhe, Breite, Abstand zur Strecke aus dem FX Lab (gleicher Zufall, damit die Stadt gleich bleibt)
 func _city_fill() -> void:
+	if bld_mm == null:
+		return
 	var E: Dictionary = fx.env
 	var dens = float(E.dens) if float(E.city) > 0.5 else 0.0
 	var items = []
@@ -2133,7 +2492,7 @@ func _starter_pose() -> Array:
 
 
 func _starter_live() -> void:
-	if not ships.is_empty() and starter.is_empty() and city_root != null:
+	if not ships.is_empty() and starter.is_empty() and not laps.is_empty():
 		_starter_make()
 	if starter.is_empty():
 		return
@@ -3279,8 +3638,8 @@ func _menu() -> void:
 	lr.add_theme_constant_override("separation", 10)
 	lcol.add_child(lr)
 	ui.look = []
-	for q in range(2):
-		var b = _btn(["Color", "Noir"][q])
+	for q in range(3):
+		var b = _btn(["Color", "Noir", "Jungle"][q])
 		b.add_theme_font_size_override("font_size", 30)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.toggle_mode = true
@@ -3451,11 +3810,11 @@ func _dot(r: int) -> ImageTexture:
 
 func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
-	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Textures: ambientCG (CC0) · private use only"
+	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Textures: ambientCG (CC0) · “Jungle Tree” by gelmi.com.br, CC BY 4.0 · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
 	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
 	ui.sl.res.text = "Resolution  %d %%" % int(round(float(cfg.res) * 100.0))
-	for q in range(2):
+	for q in range(3):
 		ui.look[q].button_pressed = int(cfg.look) == q
 	ui.sl.glow.text = "Glow  %d %%" % int(round(float(cfg.glow) * 100.0))
 	ui.sl.neon.text = "Neon lights  %d %%" % int(round(float(cfg.neon) * 100.0))
@@ -3478,7 +3837,7 @@ func _refresh_ui() -> void:
 		var st3 = _style(Color(0.93, 0.41, 0.18) if on3 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on3 else Color(1, 1, 1, 0.22))
 		for k in ["normal", "pressed", "hover"]:
 			ui.pads[q].add_theme_stylebox_override(k, st3)
-	for q in range(2):
+	for q in range(3):
 		var on2 = int(cfg.look) == q
 		var st2 = _style(Color(0.93, 0.41, 0.18) if on2 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on2 else Color(1, 1, 1, 0.22))
 		for k in ["normal", "pressed", "hover"]:
@@ -7865,7 +8224,7 @@ func _tunnel(dt: float) -> void:
 		k = maxf(k, clampf(minf(zl - tu[0] + 2.0, tu[1] - zl + 2.0) / 7.0, 0.0, 1.0))
 	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
 	wenv.ambient_light_energy = lerpf(0.35 * _newr("amb", 1.0), 0.02, tun_k)
-	wenv.fog_density = lerpf(0.012 * float(fx.env.fog), 0.0, tun_k)
+	wenv.fog_density = lerpf((0.03 if _jungle() else 0.012) * float(fx.env.fog), 0.0, tun_k)
 	var fog_on = float(fx.env.fog) > 0.01
 	if wenv.fog_enabled != fog_on:
 		wenv.fog_enabled = fog_on
