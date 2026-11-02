@@ -621,7 +621,8 @@ const FXS = {
 	"pillar": [["speed", "Ring speed", 0.0, 6.0, 1.0], ["size", "Ring size", 0.3, 5.0, 1.0], ["glow", "Ring glow", 0.0, 10.0, 1.0], ["squash", "Rubber squash", 0.0, 6.0, 1.0],
 		["soft", "Soft bounce", 0.0, 2.0, 1.0], ["beam", "Pillar light", 0.0, 10.0, 1.0]],
 	"ship": [["height", "Hover height", 0.2, 8.0, 1.0], ["bob", "Hover bob", 0.0, 10.0, 1.0], ["bank", "Lean in curves", 0.0, 6.0, 1.0], ["pitch", "Nose pitch", 0.0, 8.0, 1.0],
-		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0], ["steer", "Steering lag", 0.2, 8.0, 1.0]],
+		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0], ["steer", "Steering lag", 0.2, 8.0, 1.0],
+		["steerk", "Steering strength", 0.3, 3.0, 1.0], ["grip", "Grip", 0.2, 4.0, 1.0], ["drift", "Drift", 0.0, 4.0, 0.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -629,7 +630,7 @@ const FXS = {
 		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections", 0.0, 6.0, 1.0],
 		["gloss", "Road gloss", 0.0, 4.0, 2.0], ["wet", "Wet road", 0.0, 4.0, 1.0]],
 	"city": [["holo", "Holograms", 0.0, 4.0, 1.0], ["hsize", "Hologram size", 0.3, 3.0, 1.0], ["hflick", "Hologram glitch", 0.0, 12.0, 1.0], ["hhue", "Hologram color", -0.5, 0.5, 0.0],
-		["koi", "Koi fish", 0.0, 4.0, 1.0], ["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
+		["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
 		["mega", "Mega towers", 0.0, 3.0, 1.0]],
 	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
 		["grit", "Grit", 0.0, 2.0, 0.0], ["echo", "Echo", 0.0, 2.0, 0.0], ["etime", "Echo time", 0.2, 3.0, 1.0], ["reverb", "Reverb", 0.0, 2.0, 0.0], ["room", "Room size", 0.0, 1.0, 0.6],
@@ -2378,7 +2379,7 @@ func _holo_node(kind: String) -> Dictionary:
 
 
 func _holos_make() -> void:
-	for kind in ["dancer", "dancer", "koi", "koi"]:
+	for kind in ["dancer", "dancer"]:   # Koi-Fische entfernt
 		var h = _holo_node(kind)
 		_sp(h.mat, "sd", float(holos.size()) * 1.37)
 		if kind == "dancer":
@@ -2566,7 +2567,7 @@ func _city_live() -> void:
 	var C: Dictionary = fx.city
 	var city_on = float(fx.env.city) > 0.5
 	var hk = float(C.holo) if city_on else 0.0
-	var kk = float(C.koi) if city_on else 0.0
+	var kk = 0.0
 	var hs = float(C.hsize)
 	var cz = cam.global_position.z
 	var base = floor((cz - 20.0) / T.LAP) * T.LAP
@@ -6914,8 +6915,12 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	var z: float = s.z
 	s.u += (inp - s.u) * (1.0 - exp(-dt / (0.03 * float(fx.ship.steer) if is_p else 0.08)))
 	var turn: float = T.kap(z) * s.spd
-	s.psi = clampf(s.psi + (s.u * (YAW_P if is_p else YAW_AI) + turn) * dt, -0.9, 0.9)
+	var SH: Dictionary = fx.ship
+	s.psi = clampf(s.psi + (s.u * (YAW_P * float(SH.steerk) if is_p else YAW_AI) + turn) * dt, -0.9, 0.9)
 	var grip = 0.8 if s.air else (9.5 if is_p else 7.0)
+	if is_p and not s.air:
+		# Grip: wie fest das Schiff in der Spur bleibt; Drift: beim Einlenken rutscht es seitlich weiter (Nase zeigt in die Kurve)
+		grip *= float(SH.grip) / (1.0 + float(SH.drift) * absf(s.u) * 1.5)
 	s.vpsi = clampf(s.vpsi + ((s.psi - s.vpsi) * grip + turn) * dt, -0.9, 0.9)
 	var ap = is_p and (s.auto > 0.0 or state == "done" or state == "replay") and not s.out
 	if ap:
@@ -7148,7 +7153,7 @@ func _bench_next() -> void:
 		"jets":
 			fx.haze.jglow = 0.0
 		"city":
-			for c in ["holo", "koi", "signs", "search", "cars"]:
+			for c in ["holo", "signs", "search", "cars"]:
 				fx.city[c] = 0.0
 			_city_apply()
 		"sky":
