@@ -314,7 +314,7 @@ func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
-			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "minedrop.wav"]:
+			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	for k in ["engine", "idle", "field"]:
 		var p = AudioStreamPlayer.new()
@@ -1691,6 +1691,7 @@ shader_type spatial;
 render_mode unshaded,blend_add,cull_back,depth_draw_never,shadows_disabled,fog_disabled;
 uniform vec3 c1=vec3(1.,.3,.75);uniform vec3 c2=vec3(.25,.85,1.);
 uniform float hk=1.;uniform float fl=1.;uniform float sd=0.;uniform float by=0.;uniform float hh=40.;uniform float gx=0.;
+uniform float gs=1.;   // wie weit Störstreifen zur Seite reißen (Start-Mädel: wenig, damit sie nicht wegrutscht)
 varying vec3 wp;varying float my;varying float gb;
 float h11(float x){return fract(sin(x*127.1)*43758.5453);}
 void vertex(){
@@ -1709,6 +1710,7 @@ void vertex(){
 	}
 	off.x+=gx*(h11(floor(TIME*31.))-.5)*.12*hh;          // ganze Figur zittert beim Wechsel
 	off.y+=gx*(h11(floor(TIME*23.)+1.)-.5)*.04*hh;
+	off*=gs;
 	VERTEX+=inverse(mat3(MODEL_MATRIX))*off;
 	wp=w+off;
 }
@@ -2028,8 +2030,9 @@ func _hfig_arms(d: Dictionary, up: float, fwd: float, fup: float, ffwd: float, h
 		sk.set_bone_pose_rotation(a.ih, (fgp.inverse() * rh * (a.hg as Basis)).get_rotation_quaternion())
 
 
-func _hfig_look(d: Dictionary, base_y: float, H: float, gx: float, hk := 1.3) -> void:
+func _hfig_look(d: Dictionary, base_y: float, H: float, gx: float, hk := 1.3, gs := 0.15) -> void:
 	var mat: ShaderMaterial = d.mat
+	_sp(mat, "gs", gs)
 	var hue = float(fx.city.hhue)
 	var c1 = _hs(Color(1.0, 0.3, 0.75), hue)
 	var c2 = _hs(Color(0.25, 0.85, 1.0), hue)
@@ -4646,6 +4649,10 @@ func _fire() -> void:
 	var sup: bool = g.get("sup", false) or (w == "orbs" and g.orbs > 0.0 and state == "race")
 	g.wpn = ""
 	g.sup = false
+	if g.get("mega", false):
+		g.mega = false
+		_mega(g)
+		return
 	_fire_w(g, w, sup)
 
 
@@ -4800,6 +4807,83 @@ func _bwaves_clear() -> void:
 		if is_instance_valid(w.n):
 			w.n.queue_free()
 	bwaves.clear()
+	for w in megaw:
+		if is_instance_valid(w.n):
+			w.n.queue_free()
+	megaw.clear()
+
+
+# MEGA: zwei leuchtende Schockwellen rasen von dir aus nach vorn und hinten über die ganze Strecke;
+# jeder Gegner, den sie erreichen (spätestens am Ende: alle), verliert 75 % Energie – Schild hilft nicht
+var megaw = []
+const MEGA_V = 260.0
+
+
+func _mega(g: Dictionary) -> void:
+	var hit = {"ids": []}
+	for dir in [1.0, -1.0]:
+		var mi = _wall_node(true)
+		var m: ShaderMaterial = mi.material_override
+		m.set_shader_parameter("wc", Vector3(1.0, 0.35, 0.9))
+		m.set_shader_parameter("gk", 2.5)
+		(mi.get_meta("l") as OmniLight3D).light_color = Color(1.0, 0.4, 0.9)
+		(mi.get_meta("l") as OmniLight3D).omni_range = 14.0
+		megaw.append({"z": g.z + dir * 2.0, "dir": dir, "age": 0.0, "n": mi, "own": g.idx, "hit": hit})
+	_snd("boom", 4.0, 0.45)
+	_snd("wallon", 2.0, 0.7)
+	_snd("zap", 0.0, 0.6)
+	_flash(Color(1.0, 0.45, 0.95), 0.3)
+	shake = maxf(shake, 1.4)
+
+
+func _mega_hit(o: Dictionary, own: int) -> void:
+	if o.out or o.idx == own:
+		return
+	if o.shield > 0.0:
+		_shield_break(o)
+	_dmg(o, 0.75, own, "mega")
+	_zap_ship(o)
+	if o.idx != 0:
+		_snd("zap", 3.0, 0.8, (o.node as Node3D).global_position)
+
+
+func _megaw_update(dt: float) -> void:
+	for i in range(megaw.size() - 1, -1, -1):
+		var w = megaw[i]
+		w.age += dt
+		var z0: float = w.z
+		# erst sichtbar langsam, dann immer schneller über die halbe Runde
+		var st = (40.0 + MEGA_V * 2.0 * float(w.age)) * dt
+		w.d = float(w.get("d", 0.0)) + st
+		w.z += float(w.dir) * st
+		var done = float(w.d) > T.LAP * 0.5
+		var lo = minf(z0, w.z) - 1.0
+		var hi = maxf(z0, w.z) + 1.0
+		for o in ships:
+			if w.hit.ids.has(o.idx):
+				continue
+			# Strecke ist ein Rundkurs: Gegner auf der Nachbarrunde ebenfalls finden
+			for k in [-1.0, 0.0, 1.0]:
+				var oz: float = o.z + k * T.LAP
+				if oz >= lo and oz <= hi:
+					w.hit.ids.append(o.idx)
+					_mega_hit(o, int(w.own))
+					break
+		var mi: MeshInstance3D = w.n
+		var f = T.frame(w.z)
+		mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw).scaled(Vector3(1.15, 2.2, 1.0)), f.c + f.uu * 1.4)
+		var a = clampf(minf(w.age / 0.08, (T.LAP * 0.5 - float(w.d)) / 60.0), 0.0, 1.0)
+		(mi.material_override as ShaderMaterial).set_shader_parameter("a", a)
+		(mi.material_override as ShaderMaterial).set_shader_parameter("hit", 0.6 + 0.4 * sin(w.age * 40.0))
+		(mi.get_meta("l") as OmniLight3D).light_energy = 8.0 * a
+		if done:
+			if w.dir > 0.0:
+				for o in ships:   # wer nicht erreicht wurde, bekommt es jetzt ab
+					if not w.hit.ids.has(o.idx):
+						w.hit.ids.append(o.idx)
+						_mega_hit(o, int(w.own))
+			mi.queue_free()
+			megaw.remove_at(i)
 
 
 func _bwaves_update(dt: float) -> void:
@@ -4838,7 +4922,7 @@ func _weapons(dt: float, racing: bool) -> void:
 	var wz = (zz - _wzp(wk)) / 35.0
 	if wz < 0.0 or not _pad_ok(_wzp(wk)):
 		wz = 9.0
-	if racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and (g.wpn == "" or not g.get("sup", false)):
+	if racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and (g.wpn == "" or not g.get("mega", false)):
 		g.wpK = wk
 		if g.wpn == "":
 			g.wpn = _pick_w()
@@ -4851,7 +4935,15 @@ func _weapons(dt: float, racing: bool) -> void:
 		else:
 			# Waffe behalten und noch zwei Waffenfelder überfahren → deine Waffe wird zur Superwaffe
 			g.wpc = int(g.get("wpc", 1)) + 1
-			if g.wpc >= 3:
+			if g.wpc >= 4:
+				# noch ein Feld mit der Superwaffe → MEGA: Schockwelle zieht jedem Gegner 75 % Energie ab
+				g.mega = true
+				g.sup = true
+				_snd("pick", 0.0, 1.6)
+				_snd("vo_mega", 3.0)
+				_flash(Color(1.0, 0.35, 0.9), 0.45)
+				_msg("MEGA WEAPON", Color(1.0, 0.45, 0.95))
+			elif g.wpc >= 3:
 				g.sup = true
 				_snd("pick", -2.0, 1.35)
 				_snd("vo_super", 3.0)
@@ -4863,7 +4955,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		fire_req = false
 		if g.wpn != "" and racing:
 			_fire()
-	hud.fire.text = ("SUPER\n" if g.get("sup", false) and g.wpn != "" else "") + WN.get(g.wpn, "empty")
+	hud.fire.text = (("MEGA\n" if g.get("mega", false) else "SUPER\n") if g.get("sup", false) and g.wpn != "" else "") + WN.get(g.wpn, "empty")
 	if g.auto > 0.0 and g.wpn == "":
 		hud.fire.text = ("SUPER\n" if g.get("sauto", false) else "") + "AUTO" + (" …" if g.get("ahold", false) else " %.1f" % g.auto)
 	var armed = g.wpn != ""
@@ -5015,6 +5107,7 @@ func _weapons(dt: float, racing: bool) -> void:
 	if quake2 != null:
 		quake2 = _quake_step(quake2, dt)
 	_bwaves_update(dt)
+	_megaw_update(dt)
 	_fx_update(dt)
 	# Schild: blaue Hülle (für alle Schiffe)
 	for o in ships:
@@ -7598,6 +7691,12 @@ func _shot() -> void:
 				_start()
 				if p[2] != "intro":
 					state = "race"
+			if p.size() > 3 and p[3].begins_with("go") and state == "race" and t_state >= float(p[3].substr(2)):
+				get_viewport().get_texture().get_image().save_png(p[0])
+				print("GOSHOT z=", ships[0].z, " spd=", ships[0].spd, " cam=", cam.global_position, " fig=", starter.n.global_position if not starter.is_empty() else Vector3.ZERO)
+				get_tree().quit()
+			if p.size() > 3 and p[3].begins_with("go"):
+				return
 			if shot_n >= 2 and p.size() > 2 and p[2].begins_with("st"):
 				var v = float(p[2].substr(2))   # Start-Mädel testen: Zeit ab Countdown-Beginn
 				state = "count" if v < 3.0 else "race"
@@ -7613,6 +7712,13 @@ func _shot() -> void:
 				elif p[3].begins_with("gb"):
 					_gbomb(ships[0].z + 9.0, 0.0)
 					ships[0].boost = 1.5
+				elif p[3].begins_with("mega"):
+					ships[0].wpn = "rak"
+					ships[0].sup = true
+					ships[0].mega = true
+					for o in ships:
+						o.en = 1.0
+					fire_req = true
 				elif p[3] == "armed":
 					ships[0].wpn = "lenk"
 				elif p[3].begins_with("kill"):
@@ -7639,10 +7745,13 @@ func _shot() -> void:
 							te = fr.t
 				_rp_seek(te + 0.35)
 				rp.paused = true
-			if shot_n == ({"repb": 84, "repf": 85, "armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"repb": 84, "repf": 85, "armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44, "mega1": 46, "mega2": 52}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				if p.size() > 3 and p[3] == "long":
 					print(_perf_text())
+				if p.size() > 3 and p[3].begins_with("mega"):
+					for o in ships:
+						print("MEGA idx=", o.idx, " en=", o.en, " out=", o.out, " z=", o.z)
 				get_tree().quit()
 
 
