@@ -1981,9 +1981,14 @@ const ST_H = 15.0   # Größe in m
 
 
 func _starter_make() -> void:
+	starter = _hfig_make()
+
+
+# eigene Hologramm-Figur (Michelle) mit Skelett, dessen Arme wir selbst stellen
+func _hfig_make() -> Dictionary:
 	var n: Node3D = load(HOLO_FIGS[0][0]).instantiate()
 	var mat = _shader_mat(HOLO_CODE)
-	_sp(mat, "sd", 7.7)
+	_sp(mat, "sd", randf() * 10.0)
 	for mi in n.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).material_override = mat
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1994,18 +1999,53 @@ func _starter_make() -> void:
 	var sk: Skeleton3D = n.find_children("*", "Skeleton3D", true, false)[0]
 	n.visible = false
 	add_child(n)
-	starter = {"n": n, "mat": mat, "sk": sk, "arms": []}
-	# Arme: Drehung im Skelettraum um die Blickachse; links hebt +, rechts gespiegelt
-	for b in [["mixamorig_LeftArm", 1.0], ["mixamorig_RightArm", -1.0]]:
-		var i = sk.find_bone(b[0])
-		if i < 0:
+	var d = {"n": n, "mat": mat, "sk": sk, "arms": []}
+	# je Seite Oberarm + Unterarm; Drehungen im Skelettraum (Hochachse -z, Seitachse x, Blickachse y)
+	for b in [["mixamorig_LeftArm", "mixamorig_LeftForeArm", 1.0], ["mixamorig_RightArm", "mixamorig_RightForeArm", -1.0]]:
+		var ia = sk.find_bone(b[0])
+		var ifa = sk.find_bone(b[1])
+		var ih = sk.find_bone(b[0].replace("Arm", "Hand"))
+		if ia < 0 or ifa < 0 or ih < 0:
 			continue
-		var pg: Basis = sk.get_bone_global_rest(sk.get_bone_parent(i)).basis
-		starter.arms.append({"i": i, "s": b[1], "pg": pg, "bg": sk.get_bone_global_rest(i).basis})
-	var fa = []
-	for nm in ["mixamorig_LeftForeArm", "mixamorig_RightForeArm"]:
-		fa.append(sk.find_bone(nm))
-	starter.fa = fa
+		d.arms.append({"ia": ia, "ifa": ifa, "ih": ih, "s": b[2], "hg": sk.get_bone_global_rest(ih).basis,
+			"pg": sk.get_bone_global_rest(sk.get_bone_parent(ia)).basis, "bg": sk.get_bone_global_rest(ia).basis, "fg": sk.get_bone_global_rest(ifa).basis})
+	return d
+
+
+# Arme stellen: hoch = Grad über waagrecht, vor = Grad nach vorn; Unterarm eigene Werte (relativ zum Körper)
+func _hfig_arms(d: Dictionary, up: float, fwd: float, fup: float, ffwd: float, hb := 0.0) -> void:
+	var sk: Skeleton3D = d.sk
+	for a in d.arms:
+		var sg = float(a.s)
+		var ra = Basis(Vector3(0, 0, 1), deg_to_rad(fwd) * sg * HF_FWD) * Basis(Vector3(0, 1, 0), deg_to_rad(up) * sg)
+		var rf = Basis(Vector3(0, 0, 1), deg_to_rad(ffwd) * sg * HF_FWD) * Basis(Vector3(0, 1, 0), deg_to_rad(fup) * sg)
+		var ag: Basis = ra * (a.bg as Basis)
+		sk.set_bone_pose_rotation(a.ia, ((a.pg as Basis).inverse() * ag).get_rotation_quaternion())
+		var fgp: Basis = rf * (a.fg as Basis)
+		sk.set_bone_pose_rotation(a.ifa, (ag.inverse() * fgp).get_rotation_quaternion())
+		# Hand nach hinten abknicken (hb 0…1): offene Handfläche nach vorn wie ein Stoppzeichen
+		var rh = Basis(Vector3(0, 0, 1), deg_to_rad(ffwd - 40.0 * hb) * sg * HF_FWD) * Basis(Vector3(0, 1, 0), deg_to_rad(fup + 60.0 * hb) * sg)
+		sk.set_bone_pose_rotation(a.ih, (fgp.inverse() * rh * (a.hg as Basis)).get_rotation_quaternion())
+
+
+func _hfig_look(d: Dictionary, base_y: float, H: float, gx: float, hk := 1.3) -> void:
+	var mat: ShaderMaterial = d.mat
+	var hue = float(fx.city.hhue)
+	var c1 = _hs(Color(1.0, 0.3, 0.75), hue)
+	var c2 = _hs(Color(0.25, 0.85, 1.0), hue)
+	if _noir():
+		c1 = OR
+		c2 = Color(0.9, 0.9, 0.95)
+	_sp(mat, "c1", _v3(c1))
+	_sp(mat, "c2", _v3(c2))
+	_sp(mat, "hk", hk)
+	_sp(mat, "fl", float(fx.city.hflick))
+	_sp(mat, "gx", gx)
+	_sp(mat, "by", base_y)
+	_sp(mat, "hh", H)
+
+
+const HF_FWD = 1.0   # Vorzeichen „nach vorn“ im Skelettraum
 
 
 # Winkel der Arme (Grad, 0 = waagrecht, + = hoch) und Glitch-Stärke über die Startphase
@@ -2052,24 +2092,8 @@ func _starter_live() -> void:
 	var f = T.frame(T.ZST + 34.0)
 	var fw: Vector3 = (f.fw * Vector3(1, 0, 1)).normalized()
 	n.global_transform = Transform3D(Basis.looking_at(fw, Vector3.UP).scaled(Vector3.ONE * (ST_H / float(HOLO_FIGS[0][1]))), f.c + Vector3.UP * -0.2)
-	var sk: Skeleton3D = starter.sk
-	for a in starter.arms:
-		var r = Basis(Vector3(0, 1, 0), deg_to_rad(float(ps[1])) * float(a.s))
-		sk.set_bone_pose_rotation(a.i, ((a.pg as Basis).inverse() * r * (a.bg as Basis)).get_rotation_quaternion())
-	var mat: ShaderMaterial = starter.mat
-	var hue = float(fx.city.hhue)
-	var c1 = _hs(Color(1.0, 0.3, 0.75), hue)
-	var c2 = _hs(Color(0.25, 0.85, 1.0), hue)
-	if _noir():
-		c1 = OR
-		c2 = Color(0.9, 0.9, 0.95)
-	_sp(mat, "c1", _v3(c1))
-	_sp(mat, "c2", _v3(c2))
-	_sp(mat, "hk", 1.3)
-	_sp(mat, "fl", float(fx.city.hflick))
-	_sp(mat, "gx", float(ps[2]))
-	_sp(mat, "by", f.c.y)
-	_sp(mat, "hh", ST_H)
+	_hfig_arms(starter, float(ps[1]), 0.0, float(ps[1]), 0.0)
+	_hfig_look(starter, f.c.y, ST_H, float(ps[2]))
 
 
 # Koi aus einem gebogenen Rumpf mit Schwanz-, Rücken- und Brustflossen (Länge 1, Kopf bei +z)
@@ -4665,9 +4689,9 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			_flash(_hs(Color(1.0, 0.5, 0.15), float(fx.quake.hue)), 0.45 * minf(1.0, float(fx.quake.glow)))
 		"wand":
 			var mi = _wall_node(sup)
-			var z = g.z + 12.0
+			var z = g.z + 20.0
 			_wall_pose(mi, z, 0.0, 0.0)
-			walls.append({"z": z, "age": 0.0, "hit": [], "n": mi, "hf": 0.0, "sup": sup})
+			walls.append({"z": z, "age": 0.0, "hit": [], "n": mi, "hf": 0.0, "sup": sup, "own": g.idx})
 			_snd("wallon")
 		"auto":
 			g.auto = 5.0
@@ -4978,8 +5002,12 @@ func _weapons(dt: float, racing: bool) -> void:
 				_snd("zap", 2.0, 1.0, (o.node as Node3D).global_position)
 		w.hf = maxf(0.0, w.hf - dt * 2.5)
 		_wall_pose(w.n, w.z, w.age, w.hf)
+		_wall_fig(w)
 		if w.age > 5.3 * float(fx.wall.dur):
 			w.n.queue_free()
+			if w.has("fig"):
+				(w.fig.n as Node3D).visible = false
+				w.fig.busy = false
 			walls.remove_at(i)
 	# Beben: rollt nach vorn (Super: zweite Welle nach hinten), wirft Gegner hoch
 	if quake != null:
@@ -5036,6 +5064,46 @@ void fragment(){
 
 func _swall_node() -> MeshInstance3D:
 	return _wall_node(true)
+
+
+# Stopp-Hologramm hinter dem Force field (nur bei deinen eigenen): Arme halb ausgebreitet, halb abwehrend nach vorn
+var wall_figs = []
+const WF_H = 7.5
+
+
+func _wall_fig(w: Dictionary) -> void:
+	if int(w.get("own", -1)) != 0 or state == "replay":
+		return
+	if not w.has("fig"):
+		var fg = null
+		for c in wall_figs:
+			if not c.busy:
+				fg = c
+		if fg == null:
+			if wall_figs.size() >= 2:
+				return
+			fg = _hfig_make()
+			wall_figs.append(fg)
+		fg.busy = true
+		w.fig = fg
+	var d: Dictionary = w.fig
+	var life = 5.3 * float(fx.wall.dur)
+	var age = float(w.age)
+	var gx = maxf(clampf(1.0 - age / 0.35, 0.0, 1.0), clampf((age - (life - 0.5)) / 0.4, 0.0, 1.0) * 1.6)
+	var vis = age < life - 0.08 and (age < life - 0.25 or randf() < 0.4)
+	var n: Node3D = d.n
+	if n.visible != vis:
+		n.visible = vis
+	if not vis:
+		return
+	var f = T.frame(float(w.z) + 5.0)
+	var fw: Vector3 = (f.fw * Vector3(1, 0, 1)).normalized()
+	n.global_transform = Transform3D(Basis.looking_at(fw, Vector3.UP).scaled(Vector3.ONE * (WF_H / float(HOLO_FIGS[0][1]))), f.c + Vector3.UP * -0.2)
+	# Geste baut sich in 0,25 s auf, dann leichtes Nachdrücken
+	var k = 1.0 - pow(1.0 - clampf(age / 0.25, 0.0, 1.0), 3.0)
+	var push = sin(age * 6.0) * 3.0
+	_hfig_arms(d, lerpf(-72.0, 0.0, k), lerpf(0.0, 30.0, k) + push, lerpf(-72.0, 35.0, k), lerpf(0.0, 55.0, k) + push, k)
+	_hfig_look(d, f.c.y, WF_H, gx, 1.1)
 
 
 func _wall_node(sup := false) -> MeshInstance3D:
