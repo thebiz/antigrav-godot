@@ -4219,8 +4219,9 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 	if o.out or state != "race":
 		return
 	if o.shield > 0.0:
-		# Schild: Superwaffen zerschlagen ihn sofort, Raketen beim zweiten Treffer; sonst schluckt er alles
-		if sup or kind == "rocket":
+		# Schild: hält einen Waffentreffer aus (Rakete, Orb, Mine, Wand, Beben …), beim zweiten ist er weg;
+		# Superwaffen zerschlagen ihn sofort. Rempeln schluckt er einfach.
+		if sup or kind != "ram":
 			o.shh = int(o.get("shh", 0)) + (2 if sup else 1)
 			if o.shh >= 2:
 				_shield_break(o)
@@ -4231,8 +4232,6 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 		return
 	if _prot(o):
 		return
-	if sup:
-		a = maxf(a, o.en)   # Superwaffe: sofort erledigt
 	var before: float = o.en
 	o.en = maxf(0.0, o.en - a)
 	if src >= 0 and src < ships.size() and src != o.idx:
@@ -4340,8 +4339,7 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 	var wwin = maxf(2.8, o.spd * dt * 1.3) / 35.0
 	if posmod(wk, 2) == 0 and wz < wwin and wk != o.wpK and o.wpn != "" and not o.get("sup", false):
 		o.wpK = wk
-		o.wpc = int(o.get("wpc", 1)) + 1
-		if o.wpc >= 3:
+		if randf() < 0.4:   # Gegner: Superwaffe nur mit etwas Glück
 			o.sup = true
 	if posmod(wk, 2) == 0 and wz < wwin and wk != o.wpK and o.wpn == "":
 		o.wpK = wk
