@@ -16,8 +16,13 @@ const TUN := [[160.0, 245.0], [510.0, 595.0]]
 # langer sanfter Anstieg (120–400), steile lange Abfahrt (440–520) und direkt danach die lange Steilkurve (500–690)
 static var J := false
 const SEG_J := []
-const CRV_J := [[1.0, 50.0, -3.5455], [2.0, 7.0, -8.6618], [3.0, 2.0, -13.7781]]   # [Welle, Weite, Phase]
-const DROP := [[120.0, 280.0, 16.0], [440.0, 80.0, -16.0]]
+const CRV_J := [[1.0, 22.0, -3.9225], [2.0, 10.0, -9.4158], [3.0, 4.5, -14.9091], [4.0, 2.0, -20.4024]]   # [Welle, Weite, Phase] – große Kurve um z 632
+const DROP := [[80.0, 250.0, 38.0], [420.0, 160.0, -38.0]]   # Anstieg, dann die lange steile Abfahrt
+const TUN_J := [[605.0, 655.0]]   # Erdtunnel mitten in der Steilkurve
+
+
+static func tuns() -> Array:
+	return TUN_J if J else TUN
 
 
 static func seg() -> Array:
@@ -121,7 +126,7 @@ static func gap(z: float) -> bool:
 
 
 static func in_tun(zl: float, m: float = 0.0) -> bool:
-	for t in TUN:
+	for t in tuns():
 		if zl >= t[0] - m and zl <= t[1] + m:
 			return true
 	return false
@@ -130,7 +135,10 @@ static func in_tun(zl: float, m: float = 0.0) -> bool:
 # Steilkurve: die Außenseite hebt sich
 static func bank(z: float) -> float:
 	if J:
-		return clampf(d2px(z) * 70.0, -0.55, 0.55)   # Dschungel: steilere Kurven
+		# Dschungel: normale Kurven mäßig geneigt, die große Kurve bis etwa 60° – man hängt an der Wand
+		var d := d2px(z)
+		var b := d * 70.0 + signf(d) * 0.65 * clampf((absf(d) - 0.006) / 0.0035, 0.0, 1.0)
+		return clampf(b, -1.05, 1.05)
 	return clampf(d2px(z) * 45.0, -0.42, 0.42)
 
 

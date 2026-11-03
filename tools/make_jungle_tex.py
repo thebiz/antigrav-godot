@@ -76,15 +76,23 @@ def cell_reeds(rnd, S):
     return im
 
 def cell_glow(rnd, S):
-    # Leuchtpflanze: helle Stängel mit Knospen (Farbe kommt im Spiel dazu)
+    # Leuchtpilze: kleine Gruppe, helle Hüte (leuchten im Spiel), dunklere Stiele
     im = Image.new('RGBA', (S, S), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
-    for f in range(9):
-        a = -math.pi / 2 + rnd.uniform(-0.8, 0.8); L = S * rnd.uniform(0.35, 0.75)
-        x, y = S / 2, S * 0.99
-        ex, ey = x + math.cos(a) * L, y + math.sin(a) * L
-        d.line([(x, y), ((x + ex) / 2 + rnd.uniform(-15, 15), (y + ey) / 2), (ex, ey)], fill=(150, 190, 170, 255), width=3)
-        r = rnd.uniform(5, 11)
-        d.ellipse([ex - r, ey - r, ex + r, ey + r], fill=(255, 255, 255, 255))
+    ms = []
+    for f in range(7):
+        ms.append((S / 2 + rnd.uniform(-S * 0.3, S * 0.3), rnd.uniform(0.35, 1.0)))
+    ms.sort(key=lambda m: m[1])
+    for x, sz in ms:
+        h = S * 0.26 * sz; w = S * 0.15 * sz
+        base = S * 0.99
+        d.rounded_rectangle([x - w * 0.26, base - h, x + w * 0.26, base], radius=int(w * 0.15) + 1, fill=(70, 75, 70, 255))
+        cap = [x - w, base - h - w * 0.9, x + w, base - h + w * 0.9]
+        d.pieslice(cap, 180, 360, fill=(255, 255, 255, 255))
+        d.ellipse([x - w * 0.95, base - h - w * 0.12, x + w * 0.95, base - h + w * 0.12], fill=(200, 200, 200, 255))
+        for k in range(3):
+            dx = rnd.uniform(-0.6, 0.6) * w; dy = rnd.uniform(-0.45, -0.15) * w
+            r = w * 0.09
+            d.ellipse([x + dx - r, base - h + dy - r, x + dx + r, base - h + dy + r], fill=(170, 170, 170, 255))
     return im
 
 def under_atlas(dst):

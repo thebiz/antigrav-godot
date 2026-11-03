@@ -127,6 +127,7 @@ func _ready() -> void:
 	_build_track()
 	_build_city()
 	_spawn_ships()
+	_nav_apply()
 	cam = Camera3D.new()
 	cam.fov = 52.0
 	cam.near = 0.08
@@ -415,6 +416,7 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 	p.volume_db = db
 	p.pitch_scale = pitch
 	if k.begins_with("vo_"):
+		_rev(["vo", k, db])   # Ansagen auch in der Wiederholung
 		p.bus = "Voice"
 		# solange die Stimme spricht (ohne den Hall am Ende), alles andere absenken
 		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + maxf(0.4, snd[k].get_length() - 0.25) / maxf(0.1, AudioServer.playback_speed_scale))
@@ -613,6 +615,8 @@ const FXS = {
 		["hue", "Color (all)", -0.5, 0.5, 0.0]],
 	"rak": [["size", "Size", 0.2, 8.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["light", "Light", 0.0, 10.0, 1.0],
 		["hue", "Color", -0.5, 0.5, 0.0]],
+	"jungle": [["trees", "Trees", 0.0, 1.0, 1.0], ["under", "Undergrowth", 0.0, 1.0, 1.0], ["flies", "Fireflies", 0.0, 1.0, 1.0], ["fsize", "Firefly size", 0.3, 3.0, 1.0],
+		["mush", "Mushroom glow", 0.0, 4.0, 1.0], ["wall", "Wall height (restart)", 0.3, 2.0, 1.0], ["meteor", "Shooting stars", 0.0, 4.0, 1.0], ["far", "Far mountains", 0.0, 2.0, 1.0]],
 	"lock": [["shape", "Shape", 0.0, 4.0, 0.0], ["size", "Size", 0.3, 4.0, 1.0], ["thick", "Line thickness", 0.2, 5.0, 1.0], ["glow", "Glow", 0.0, 10.0, 1.0],
 		["spin", "Rotation", 0.0, 6.0, 1.0], ["hue", "Color (tracking)", -0.5, 0.5, 0.0], ["lhue", "Color (locked)", -0.5, 0.5, 0.0],
 		["time", "Lock time", 0.2, 4.0, 1.0], ["vol", "Beep volume", 0.0, 3.0, 1.0], ["pitch", "Beep pitch", 0.5, 2.0, 1.0]],
@@ -630,7 +634,8 @@ const FXS = {
 		["soft", "Soft bounce", 0.0, 2.0, 1.0], ["beam", "Pillar light", 0.0, 10.0, 1.0]],
 	"ship": [["height", "Hover height", 0.2, 8.0, 1.0], ["bob", "Hover bob", 0.0, 10.0, 1.0], ["bank", "Lean in curves", 0.0, 6.0, 1.0], ["pitch", "Nose pitch", 0.0, 8.0, 1.0],
 		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0], ["steer", "Steering lag", 0.2, 8.0, 1.0],
-		["steerk", "Steering strength", 0.3, 3.0, 1.0], ["grip", "Grip", 0.2, 4.0, 1.0], ["drift", "Drift", 0.0, 4.0, 0.0]],
+		["steerk", "Steering strength", 0.3, 3.0, 1.0], ["grip", "Grip", 0.2, 4.0, 1.0], ["drift", "Drift", 0.0, 4.0, 0.0],
+		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -645,7 +650,7 @@ const FXS = {
 		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
 		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
 }
-const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["lock", "Lock"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["sound", "Sound"]]
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["lock", "Lock"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["jungle", "Jungle"], ["sound", "Sound"]]
 var fx = {}
 
 
@@ -1006,6 +1011,30 @@ func _tex_metal(nm: String, c: Color, scale: float, rough: float, metal: float =
 	return m
 
 
+const NAV_CODE = """
+shader_type spatial;
+render_mode unshaded,shadows_disabled;
+uniform vec3 c=vec3(1.,.1,.1);uniform float k=1.;uniform float rt=1.;uniform float ph=0.;
+void fragment(){float t=fract(TIME*.7*rt+ph);float b=step(t,.08)+.5*step(.16,t)*step(t,.22);ALBEDO=c*(.25+b*7.)*k;}
+"""
+var nav_m = {}
+
+
+func nav_mat(sd: float) -> ShaderMaterial:
+	if not nav_m.has(sd):
+		var m = _shader_mat(NAV_CODE)
+		m.set_shader_parameter("c", Vector3(0.1, 1.0, 0.3) if sd < 0.0 else Vector3(1.0, 0.08, 0.06))   # von hinten gesehen: links rot, rechts grün
+		m.set_shader_parameter("ph", 0.0 if sd < 0.0 else 0.5)
+		nav_m[sd] = m
+	return nav_m[sd]
+
+
+func _nav_apply() -> void:
+	for m in nav_m.values():
+		(m as ShaderMaterial).set_shader_parameter("k", float(fx.ship.nav))
+		(m as ShaderMaterial).set_shader_parameter("rt", float(fx.ship.navb))
+
+
 func _neon(c: Color, e: float = 5.0) -> StandardMaterial3D:
 	var m = StandardMaterial3D.new()
 	m.albedo_color = Color(0, 0, 0)
@@ -1358,7 +1387,7 @@ func _build_track() -> void:
 	for zr in ([] if _jungle() else T.RINGS):
 		_ring("ringC" if int(floor(zr / 150.0)) % 2 == 0 else "ringM", float(zr), TW + 0.55, 0.95, 0.065)
 	# Tunnel: Röhre innen, leuchtende Ringe, Deckenband
-	for tu in ([] if _jungle() else T.TUN):   # Dschungel: keine Tunnelröhren
+	for tu in T.tuns():   # Dschungel: ein dunkler Erdtunnel in der Steilkurve
 		var R = TW + 0.25
 		var am = acos(maxf(-1.0, -0.56 / R))
 		var na = 22
@@ -1379,13 +1408,14 @@ func _build_track() -> void:
 					_quad(_st("tube"), pr[i][0], ring[i][0], ring[i + 1][0], pr[i + 1][0], ring[i][1], Vector2(z2 - 1.0, v0), Vector2(z2, v0), Vector2(z2, v1), Vector2(z2 - 1.0, v1))
 			pr = ring
 			z2 += 1.0
-		var zt: float = tu[0] + 1.0
+		var zt: float = tu[0] + 1.0 if not _jungle() else 9999.0   # Erdtunnel: keine Leuchtringe
 		var ti = 0
 		while zt < tu[1]:
 			_ring("ringC" if ti % 5 != 4 else "ringM", zt, R - 0.03, 0.4, 0.025, am * 0.98, 30)
 			zt += 1.43
 			ti += 1
-		_strip("tlight", tu[0], tu[1], -0.06, 0.06, 0.4 + R - 0.04, 0.4 + R - 0.04)
+		if not _jungle():
+			_strip("tlight", tu[0], tu[1], -0.06, 0.06, 0.4 + R - 0.04, 0.4 + R - 0.04)
 	# Materialien zusammenstellen
 	mats["road"] = _shader_mat(_nz("""
 shader_type spatial;
@@ -1446,7 +1476,7 @@ void fragment(){
 	# Leitplanken: zerkratzter Stahl „Metal 038“, Tunnel: „Metal Plates 006“ (beide ambientCG, CC0)
 	mats["wall"] = _tex_metal("rail", Color(0.36, 0.37, 0.4), 0.7, 0.22, 0.85, 0.07) if not _jungle() else _tex_metal("bark", Color(0.42, 0.38, 0.32), 0.8, 0.85, 0.0)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
-	mats["tube"] = _tex_metal("tube", Color(0.24, 0.24, 0.27), 0.5, 0.28, 0.9, 0.05, Color(0.35, 0.55, 0.6)) if not _jungle() else _tex_metal("bark", Color(0.3, 0.27, 0.22), 0.4, 0.85, 0.0, 0.04, Color(0.3, 0.9, 0.6))
+	mats["tube"] = _tex_metal("tube", Color(0.24, 0.24, 0.27), 0.5, 0.28, 0.9, 0.05, Color(0.35, 0.55, 0.6)) if not _jungle() else _tex_metal("mud", Color(0.38, 0.31, 0.22), 0.35, 0.95, 0.0)
 	if _jungle():
 		mats["root"] = _tex_metal("bark", Color(0.45, 0.4, 0.33), 0.7, 0.85, 0.0, 0.03, Color(0.3, 0.9, 0.6))
 		mats["jfloor"] = _tex_metal("mud", Color(0.62, 0.52, 0.38), 0.33, 0.9, 0.0, 0.07, Color(0.55, 0.42, 0.28))
@@ -1493,7 +1523,7 @@ void fragment(){vec2 q=floor(vec2(UV.x*2.,UV.y*12.));ALBEDO=vec3(mod(q.x+q.y,2.)
 		var st: SurfaceTool = sts[ck]
 		if key == "pad" or key == "start" or key == "wpad":
 			st = _fix_uv(st, key)
-		if key == "jfloor":
+		if key == "jfloor" or (key == "road" and _jungle()):
 			st = _smooth_st(st)
 		st.index()
 		if key == "wall" or key == "tube" or key == "root" or key == "jfloor":
@@ -1656,7 +1686,10 @@ var city_mat: ShaderMaterial
 const JSKY_CODE = """
 shader_type sky;
 uniform float sb=1.;uniform float st=1.;uniform float sl=1.;uniform float mn=1.;uniform float hu=0.;
+uniform float mt=1.;uniform float m3=1.;
+float h11(float x){return fract(sin(x*127.1)*43758.5453);}
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float sdseg(vec2 p,vec2 a,vec2 b){vec2 pa=p-a,ba=b-a;float hh=clamp(dot(pa,ba)/dot(ba,ba),0.,1.);return length(pa-ba*hh);}
 void sky(){
 	vec3 d=EYEDIR;float h=d.y;float an=atan(d.x,d.z);
 	// Himmel etwas heller als in der Stadt: tiefes Nachtblau, zum Horizont hin dunstig aufgehellt
@@ -1665,9 +1698,20 @@ void sky(){
 	c+=vec3(.85,.9,1.)*step(.988,h21(ci))*smoothstep(.06,.35,h)*(1.-step(.3,length(fract(sp)-.5)))*1.4*st;
 	vec3 md=normalize(vec3(.5,.32,.8));float mo=dot(d,md);
 	c+=(vec3(.85,.95,.95)*smoothstep(.9994,.9997,mo)*4.+vec3(.15,.25,.3)*pow(max(0.,mo),60.)*.35)*mn;
-	// Berge: schlichte, dunkle Silhouetten in zwei Tiefen – ohne Kontur, nur zu erahnen
+	// ab und zu eine Sternschnuppe: kurzer heller Kopf, feiner Schweif
+	float slot=floor(TIME/6.);float ph=fract(TIME/6.)/.16;
+	if(ph<1.&&h11(slot)<.55*mt&&h>.08){
+		float a0=h11(slot+3.)*6.2832-3.1416;float h0=.35+.35*h11(slot+7.);float sx=h11(slot+11.)<.5?-1.:1.;
+		vec2 v=vec2(sx*.55,-.22);vec2 hd=vec2(a0,h0)+v*ph;
+		vec2 q=vec2(an,h);q.x=hd.x+mod(q.x-hd.x+3.1416,6.2832)-3.1416;
+		float dd=sdseg(q,hd-v*.28,hd);float alng=clamp(dot(q-(hd-v*.28),v)/dot(v,v)/.28,0.,1.);
+		c+=vec3(.8,.95,1.)*smoothstep(.0035,0.,dd)*alng*alng*sin(3.1416*ph)*2.2;
+	}
+	// Berge: schlichte, dunkle Silhouetten in drei Tiefen – hinten heller und dunstiger, vorn fast schwarz
+	float m0=(.085+.05*sin(an*1.5+2.3)+.03*sin(an*4.+.9)+.01*sin(an*9.+2.))*sl;
 	float m1=(.06+.045*sin(an*2.+.7)+.03*sin(an*5.+2.1)+.012*sin(an*11.+.4))*sl;
 	float m2=(.035+.03*sin(an*3.+1.9)+.018*sin(an*7.+.3)+.008*sin(an*17.+1.))*sl;
+	if(h<m0&&sl>.01)c=mix(c,vec3(.03,.05,.065),.5*m3);
 	if(h<m1&&sl>.01)c=mix(c,vec3(.012,.02,.03),.85);
 	if(h<m2&&sl>.01)c=vec3(.004,.008,.012);
 	if(h<-.04)c=mix(c,vec3(.003,.006,.008),smoothstep(-.04,-.15,h));
@@ -1680,7 +1724,7 @@ const JCARD_CODE = """
 shader_type spatial;
 render_mode unshaded,cull_disabled;
 uniform sampler2D at:source_color,filter_linear_mipmap;
-uniform float nc=4.;uniform float dk=.2;uniform float wd=.05;
+uniform float nc=4.;uniform float dk=.2;uniform float wd=.05;uniform float gk=1.;
 uniform vec3 g1=vec3(.2,1.,.65);uniform vec3 g2=vec3(.75,.35,1.);
 varying float cell;varying vec4 cd;
 void vertex(){
@@ -1694,7 +1738,7 @@ void fragment(){
 	vec4 t=texture(at,vec2((c+clamp(UV.x,.004,.996))/nc,UV.y));
 	float top=1.-UV.y;
 	vec3 col=t.rgb*dk*(.65+.7*cd.g)*(.5+.8*top);
-	col=mix(col,mix(g1,g2,cd.g)*3.*t.r,cd.b);   // Leuchtpflanzen
+	col=mix(col,mix(g1,g2,cd.g)*3.*pow(t.r,3.)*gk,cd.b);   // Leuchtpilze: Hüte glühen, Stiele kaum
 	ALBEDO=col;ALPHA=t.a;ALPHA_SCISSOR_THRESHOLD=.5;
 }
 """
@@ -1703,11 +1747,12 @@ void fragment(){
 const JFLY_CODE = """
 shader_type spatial;
 render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
-uniform vec3 fc=vec3(.75,1.,.3);
+uniform vec3 fc=vec3(.75,1.,.3);uniform float fs=1.;
 varying float br;
 void vertex(){
 	vec4 cd=INSTANCE_CUSTOM;float s=cd.r*100.;
 	vec3 o=MODEL_MATRIX[3].xyz+vec3(sin(TIME*.7+s)*.5,sin(TIME*1.1+s*2.)*.3,cos(TIME*.6+s*1.3)*.5);
+	VERTEX*=fs;
 	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(INV_VIEW_MATRIX[0],INV_VIEW_MATRIX[1],INV_VIEW_MATRIX[2],vec4(o,1.));
 	br=smoothstep(.15,1.,sin(TIME*(1.5+cd.g*2.)+s*7.));
 }
@@ -1749,9 +1794,10 @@ const JGAP = 413.5   # Mitte der Sprungstelle – dort fließt der Bach
 # Wall auf der Außenseite der Steilkurven höher (bis fast dreifach)
 func _jwall(z: float, sd: float) -> float:
 	var b = T.bank(z)
+	var wk = float(fx.jungle.wall)
 	if absf(b) < 0.01 or signf(b) != sd:   # die angehobene (äußere) Seite der Steilkurve
-		return 1.0
-	return 1.0 + 1.8 * clampf((absf(b) - 0.12) / 0.35, 0.0, 1.0)
+		return wk
+	return wk * (1.0 + 1.8 * clampf((absf(b) - 0.12) / 0.35, 0.0, 1.0))
 
 
 func _jdip(z: float) -> float:
@@ -1761,38 +1807,39 @@ func _jdip(z: float) -> float:
 
 
 # Punkt auf dem Waldboden: Seite sd, la = Abstand hinter der Leitplanke
-func _jf(z: float, sd: float, la: float) -> Vector3:
-	var f = T.frame(z)
-	var r0: Vector3 = f.fw.cross(Vector3.UP).normalized()
-	var h = JF[JF.size() - 1][1]
+func _jfh(la: float) -> float:
 	for i in range(JF.size() - 1):
 		if la <= JF[i + 1][0]:
 			var u = clampf((la - JF[i][0]) / (JF[i + 1][0] - JF[i][0]), 0.0, 1.0)
-			h = lerpf(JF[i][1], JF[i + 1][1], u)
-			break
-	if la < 3.0:
-		h *= _jwall(z, sd)
-	h += _jdip(z) * clampf(la / 1.5, 0.0, 1.0)
-	return f.c + r0 * (sd * (T.TW + la)) + Vector3.UP * h
+			return lerpf(JF[i][1], JF[i + 1][1], u)
+	return JF[JF.size() - 1][1]
 
 
-# Waldboden, Bachbett und Riesenwurzeln: in die Streckenabschnitte gebaut (wandern mit den Runden)
+# Punkt neben der Strecke: die Wanne (bis 3 hinter der Kante) kippt mit der Steilkurve, dahinter läuft der Waldboden weiter
+func _jf(z: float, sd: float, la: float) -> Vector3:
+	var f = T.frame(z)
+	var wm = _jwall(z, sd)
+	var dip = Vector3.UP * (_jdip(z) * clampf(la / 1.5, 0.0, 1.0))
+	if la <= 3.0:
+		# nur der Wall wächst mit (an der Fahrbahnkante bleibt die Höhe gleich – kein Absatz)
+		var base = 0.06 * (1.0 - la / 3.0)
+		return f.c + f.rr * (sd * (T.TW + la)) + f.uu * (base + (_jfh(la) - base) * wm) + dip
+	var pb: Vector3 = f.c + f.rr * (sd * (T.TW + 3.0)) + f.uu * (_jfh(3.0) * wm)
+	var r0: Vector3 = f.fw.cross(Vector3.UP).normalized()
+	return pb + r0 * (sd * (la - 3.0)) + Vector3.UP * (_jfh(la) - _jfh(3.0)) + dip
+
+
 func _jungle_track() -> void:
 	var TW = T.TW
 	var z = 20.0
 	var prev = {}
 	while z <= 720.0 + 0.001:
-		st_z = z - 1.0
+		st_z = z - 0.25   # dieselben Reihen und Abschnitte wie die Fahrbahn: gemeinsame Punkte, weiche Naht
 		var f = T.frame(z)
 		for sd in [-1.0, 1.0]:
 			var row = []
 			for i in range(JF.size()):
-				var p: Vector3
-				if i < JF_BANK:
-					p = f.c + f.rr * (sd * (TW + JF[i][0])) + f.uu * (JF[i][1] * _jwall(z, sd))   # Erdwall an der Fahrbahnkante
-				else:
-					p = _jf(z, sd, JF[i][0])
-				row.append(p)
+				row.append(_jf(z, sd, JF[i][0]))
 			if prev.has(sd):
 				var pr: Array = prev[sd]
 				for i in range(row.size() - 1):
@@ -1801,13 +1848,18 @@ func _jungle_track() -> void:
 					var c: Vector3 = row[i + 1]
 					var d: Vector3 = pr[i + 1]
 					var n = (b - a).cross(d - a)
-					if n.y < 0.0:
+					var trough = JF[i + 1][0] <= 3.001
+					if n.dot(f.uu if trough else Vector3.UP) < 0.0:
 						n = -n
 					var la0 = sd * (TW + JF[i][0])
 					var la1 = sd * (TW + JF[i + 1][0])
-					_quad(_st("jfloor"), a, b, c, d, n.normalized(), Vector2(la0, z - 1.0), Vector2(la0, z), Vector2(la1, z), Vector2(la1, z - 1.0))
+					if trough:
+						# die Wanne mit dem Material der Fahrbahn – Piste und Wand gehen nahtlos ineinander über
+						_quad(_st("road"), a, b, c, d, n.normalized(), Vector2(la0 / 4.8 + 0.5, (z - 0.5) * 0.08), Vector2(la0 / 4.8 + 0.5, z * 0.08), Vector2(la1 / 4.8 + 0.5, z * 0.08), Vector2(la1 / 4.8 + 0.5, (z - 0.5) * 0.08))
+					else:
+						_quad(_st("jfloor"), a, b, c, d, n.normalized(), Vector2(la0, z - 0.5), Vector2(la0, z), Vector2(la1, z), Vector2(la1, z - 0.5))
 			prev[sd] = row
-		z += 1.0
+		z += 0.5
 	# Bachbett unter der Fahrbahn (nur an der Sprungstelle zu sehen)
 	var zb = JGAP - 10.0
 	var pb = []
@@ -1884,6 +1936,30 @@ func _xquad_mesh() -> ArrayMesh:
 
 
 var jtree_mm: MultiMesh
+var jmm_t = []   # [MultiMesh, volle Anzahl] – Regler „Trees“
+var jmm_u = []
+var jumat: ShaderMaterial
+var jfly_mat: ShaderMaterial
+var jfly_n = 0
+
+
+# Regler aus dem Reiter „Jungle“ anwenden (ohne Neubau)
+func _jungle_apply() -> void:
+	if not _jungle():
+		return
+	var J: Dictionary = fx.jungle
+	for e in jmm_t:
+		(e[0] as MultiMesh).visible_instance_count = int(round(float(e[1]) * float(J.trees)))
+	for e in jmm_u:
+		(e[0] as MultiMesh).visible_instance_count = int(round(float(e[1]) * float(J.under)))
+	if jfly_mm != null:
+		jfly_mm.visible_instance_count = int(round(jfly_n * float(J.flies)))
+		_sp(jfly_mat, "fs", float(J.fsize))
+	if jumat != null:
+		_sp(jumat, "gk", float(J.mush))
+	if sky_m != null:
+		sky_m.set_shader_parameter("mt", float(J.meteor))
+		sky_m.set_shader_parameter("m3", float(J.far))
 var jund_mm: MultiMesh
 var jfly_mm: MultiMesh
 
@@ -1910,7 +1986,7 @@ func _jungle_build() -> void:
 			var z = 20.0 + rng.randf() * float(rw[2])
 			while z < 720.0:
 				var near = bool(rw[5])
-				var skip = absf(T.lz(z) - JGAP) < 5.0
+				var skip = absf(T.lz(z) - JGAP) < 5.0 or (near and T.in_tun(T.lz(z), 4.0))   # nichts in den Erdtunnel
 				if not skip:
 					var la = rng.randf_range(float(rw[0]), float(rw[1]))
 					var h = rng.randf_range(float(rw[3]), float(rw[4]))
@@ -1920,15 +1996,18 @@ func _jungle_build() -> void:
 				z += float(rw[2]) * rng.randf_range(0.6, 1.4)
 	# Unterholz: Farne, große Blätter, Gräser, dazwischen Leuchtpflanzen
 	var und = []
+	var mush_p = []
 	for sd in [-1.0, 1.0]:
 		var z = 20.0
 		while z < 720.0:
-			if true:
+			if not T.in_tun(T.lz(z), 1.0):
 				for k in range(2):
 					var la = rng.randf_range(0.4, 5.5) if k == 0 else rng.randf_range(0.4, 2.2)
 					var r = rng.randf()
 					var cell = 0 if r < 0.4 else (1 if r < 0.7 else (2 if r < 0.9 else 3))
 					var glow = 1.0 if cell == 3 else 0.0
+					if cell == 3:
+						mush_p.append([z, sd, la])
 					var sz = rng.randf_range(0.6, 1.9) * (0.7 if cell == 3 else 1.0) * clampf(0.45 + la * 0.3, 0.45, 1.0)   # nah an der Planke kleiner
 					var p = _jf(z, sd, la) + Vector3.UP * -0.05
 					var bs = Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sz, sz, sz))
@@ -1936,19 +2015,28 @@ func _jungle_build() -> void:
 			z += rng.randf_range(0.35, 0.65)
 	# Glühwürmchen
 	var fq = QuadMesh.new()
-	fq.size = Vector2(0.09, 0.09)
-	fq.material = _shader_mat(JFLY_CODE)
+	fq.size = Vector2(0.05, 0.05)
+	jfly_mat = _shader_mat(JFLY_CODE)
+	fq.material = jfly_mat
 	jfly_mm = MultiMesh.new()
 	jfly_mm.transform_format = MultiMesh.TRANSFORM_3D
 	jfly_mm.use_custom_data = true
 	jfly_mm.mesh = fq
-	jfly_mm.instance_count = 520
-	for i in range(520):
-		var z = rng.randf_range(20.0, 720.0)
-		var sd = -1.0 if rng.randf() < 0.5 else 1.0
-		var p = _jf(z, sd, rng.randf_range(0.2, 14.0)) + Vector3.UP * rng.randf_range(0.6, 4.0)
+	# nur neben der Fahrbahn (nicht davor), ein Teil schwirrt um die Leuchtpilze
+	var nfm = mini(160, mush_p.size())
+	jfly_mm.instance_count = 420 + nfm
+	for i in range(420 + nfm):
+		var p: Vector3
+		if i < 420:
+			var z = rng.randf_range(20.0, 720.0)
+			var sd = -1.0 if rng.randf() < 0.5 else 1.0
+			p = _jf(z, sd, rng.randf_range(1.8, 14.0)) + Vector3.UP * rng.randf_range(0.8, 4.0)
+		else:
+			var mp: Array = mush_p[rng.randi() % mush_p.size()]
+			p = _jf(mp[0], mp[1], maxf(1.2, mp[2])) + Vector3.UP * rng.randf_range(0.25, 1.0)
 		jfly_mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, p))
 		jfly_mm.set_instance_custom_data(i, Color(rng.randf(), rng.randf(), 0, 0))
+	jfly_n = jfly_mm.instance_count
 	var tmat = _jcard_mat("res://tex/jungle_tree.png", 0.2, 0.02)
 	var umat = _jcard_mat("res://tex/jungle_under.png", 0.22, 0.06)
 	# Bach
@@ -1979,6 +2067,7 @@ func _jungle_build() -> void:
 				mm.set_instance_transform(i, lst[i][0])
 				mm.set_instance_custom_data(i, lst[i][1])
 			groups.append([mm, pr[1]])
+			(jmm_t if pr[1] == tmat else jmm_u).append([mm, lst.size()])
 	groups.append([jfly_mm, null])
 	for n in laps:
 		for pr in groups:
@@ -1994,6 +2083,8 @@ func _jungle_build() -> void:
 		wm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		wm.transform = Transform3D(Basis(wr, Vector3.UP, wfw), wf.c + Vector3.UP * (-0.5 + _jdip(JGAP) + 0.45))
 		n.add_child(wm)
+	jumat = umat
+	_jungle_apply()
 	print("JUNGLE trees=", trees.size(), " under=", und.size())
 
 
@@ -2451,7 +2542,7 @@ func _holos_make() -> void:
 
 # Start-Mädel: großes Hologramm über der Strecke vor dem Feld – Arme hoch bei 3‑2‑1, bei GO runter, dann zack weg mit Glitch
 var starter = {}
-const ST_H = 15.0   # Größe in m
+const ST_H = 20.5   # Größe in m (so groß, dass sie im Hochformat mit Armen gerade noch ganz ins Bild passt)
 
 
 func _starter_make() -> void:
@@ -2534,8 +2625,8 @@ func _starter_pose() -> Array:
 	elif state == "count":
 		var c = 3 - int(floor(t_state))
 		var u = t_state - floor(t_state)
-		var tg = [-72.0, 80.0, 45.0, 10.0][clampi(c, 0, 3)]       # 3: waagrecht · 2: halb hoch · 1: ganz hoch
-		var pv = [-72.0, 80.0, 45.0, 10.0][clampi(c + 1, 0, 3)] if c < 3 else -72.0
+		var tg = [-72.0, 85.0, 65.0, 42.0][clampi(c, 0, 3)]       # 3: schräg hoch · 2: höher · 1: ganz hoch
+		var pv = [-72.0, 85.0, 65.0, 42.0][clampi(c + 1, 0, 3)] if c < 3 else -72.0
 		ang = lerpf(pv, tg, 1.0 - pow(1.0 - clampf(u / 0.22, 0.0, 1.0), 3.0))
 		if c == 1:
 			ang += sin(u * 40.0) * 2.0 * u        # zittert vor Spannung
@@ -2564,7 +2655,7 @@ func _starter_live() -> void:
 		n.visible = ps[0]
 	if not ps[0]:
 		return
-	var f = T.frame(T.ZST + 34.0)
+	var f = T.frame(T.ZST + 36.0)
 	var fw: Vector3 = (f.fw * Vector3(1, 0, 1)).normalized()
 	n.global_transform = Transform3D(Basis.looking_at(fw, Vector3.UP).scaled(Vector3.ONE * (ST_H / float(HOLO_FIGS[0][1]))), f.c + Vector3.UP * -0.2)
 	_hfig_arms(starter, float(ps[1]), 0.0, float(ps[1]), 0.0)
@@ -2750,6 +2841,14 @@ func _ship_node(idx: int) -> Node3D:
 	m.scale = Vector3(s, s, s)
 	m.position = -Vector3(bb.get_center().x, bb.position.y, bb.get_center().z) * s
 	root.set_meta("bb", AABB(Vector3(-bb.size.x * 0.5, 0.0, -bb.size.z * 0.5) * s, bb.size * s))
+	# Positionslichter wie am Flugzeug: rot links, grün rechts, kurzer Blitz (FX Lab „Ship“: Nav lights)
+	for sd in [-1.0, 1.0]:
+		var nl = MeshInstance3D.new()
+		nl.mesh = _lowsphere(0.022, 8, 4)
+		nl.material_override = nav_mat(sd)
+		nl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		nl.position = Vector3(sd * bb.size.x * s * 0.47, bb.size.y * s * 0.45, bb.size.z * s * 0.05)
+		root.add_child(nl)
 	var lt = OmniLight3D.new()
 	lt.light_color = Color(0.6, 0.4, 1.0)
 	lt.light_energy = 1.4
@@ -4952,17 +5051,22 @@ func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
 
 
 # Minen fallen nacheinander hinten aus dem Schiff: „dupp, dupp, dupp“; Super-Minen: Teppich über die ganze Breite
+var mine_grp = 0
+
+
 func _drop_mines(o: Dictionary, sup := false) -> void:
+	mine_grp += 1   # ein Teppich = eine Gruppe: wer hineinfliegt, bekommt nur einmal Schaden
+	var gid = mine_grp
 	if sup:
 		for k in range(9):
 			var la = lerpf(-T.TW + 0.35, T.TW - 0.35, k / 8.0)
-			get_tree().create_timer(k * 0.05).timeout.connect(func(): _drop_one(o, k, la, 0.6 * (k % 2)))
+			get_tree().create_timer(k * 0.05).timeout.connect(func(): _drop_one(o, k, la, 0.6 * (k % 2), gid))
 		return
 	for k in range(3):
-		get_tree().create_timer(k * 0.14).timeout.connect(func(): _drop_one(o, k))
+		get_tree().create_timer(k * 0.14).timeout.connect(func(): _drop_one(o, k, 999.0, 0.0, gid))
 
 
-func _drop_one(o: Dictionary, k: int, lat_o := 999.0, back := 0.0) -> void:
+func _drop_one(o: Dictionary, k: int, lat_o := 999.0, back := 0.0, gid := 0) -> void:
 	if o.out or not (state == "race" or state == "done" or state == "lab"):
 		return
 	var X: Dictionary = fx.mine
@@ -4970,7 +5074,7 @@ func _drop_one(o: Dictionary, k: int, lat_o := 999.0, back := 0.0) -> void:
 	var z = o.z - 0.9 - back
 	var lat = o.lat + (k - 1) * 0.22 if lat_o > 99.0 else lat_o
 	mi.position = T.world(z, lat, 0.45)
-	mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi, "own": o.idx, "sup": lat_o < 99.0})
+	mines.append({"z": z, "lat": lat, "t": 0.0, "n": mi, "own": o.idx, "sup": lat_o < 99.0, "g": gid})
 	_snd("minedrop", -1.0 if o.idx == 0 else 2.0, randf_range(0.92, 1.08), (o.node as Node3D).global_position if o.idx != 0 else null)
 
 
@@ -5605,7 +5709,7 @@ func _tips_check(g: Dictionary, racing: bool, dt: float) -> void:
 			_tip("energy", "Hits cost energy – at 0 % you are out! Hitting rivals refills yours, every new lap adds 25 %.")
 		if int(floor((g.z - T.ZST) / T.LAP)) >= 1:
 			_tip("lap", "3 laps in total – finish first or be the last one still flying.")
-		if hud.mw.visible:
+		if hud.get("mlamp") != null and (hud.mlamp as Control).visible:
 			_tip("mines", "Ahead on the track – steer around them!")
 	# anzeigen: einer nach dem anderen, je ~4 s
 	if tip_t > 0.0:
@@ -6162,9 +6266,14 @@ func _weapons(dt: float, racing: bool) -> void:
 		var boom = false
 		for o in ships:
 			if o.idx != m.get("own", 0) and not o.out and absf(o.z - m.z) < 0.5 + o.spd * dt * 1.3 and absf(o.lat - m.lat) < 0.38:
-				if not _prot(o):
-					o.slow = minf(o.slow, 0.35)
-				_dmg(o, 0.2, m.get("own", 0), "mine", m.get("sup", false))
+				var mg = int(m.get("g", 0))
+				var mh: Dictionary = o.get("mh", {})
+				if mg == 0 or not mh.has(mg):
+					mh[mg] = true
+					o.mh = mh
+					if not _prot(o):
+						o.slow = minf(o.slow, 0.35)
+					_dmg(o, 0.12, m.get("own", 0), "mine", m.get("sup", false))
 				boom = true
 		# Quake-Welle räumt Minen ab (egal von wem), Minen verschwinden nach 25 s von selbst
 		if not boom and ((quake != null and absf(m.z - quake.z) < 2.6) or (quake2 != null and absf(m.z - quake2.z) < 2.6)):
@@ -6651,6 +6760,8 @@ func _replay(dt: float) -> void:
 					_snd("zap", 0.0, 1.0, (ships[ev[1]].node as Node3D).global_position)
 				"big":
 					_big(ev[1], ev[2])
+				"vo":
+					_snd(ev[1], ev[2])
 	if rp.t > F[F.size() - 1].t + 0.4:
 		_replay_end()
 		return
@@ -7216,16 +7327,40 @@ func _mine_warn(dt: float, racing: bool) -> void:
 			var dz: float = m.z - g.z
 			if dz > 1.0 and dz < 35.0 and absf(m.lat - g.lat) < 1.4 and dz < best:
 				best = dz
+	if hud.get("mlamp") == null:
+		var ml = Control.new()
+		ml.anchor_left = 0.5
+		ml.anchor_right = 0.5
+		ml.offset_left = -150
+		ml.offset_right = 150
+		ml.offset_top = 150
+		ml.offset_bottom = 230
+		ml.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ml.draw.connect(func():
+			var tt = Time.get_ticks_msec() / 1000.0
+			var pu = 0.5 + 0.5 * sin(tt * 12.0)
+			var cc = Vector2(46, 40)
+			var rc = Color(1.0, 0.12, 0.08)
+			ml.draw_circle(cc, 30.0, Color(rc.r, rc.g, rc.b, 0.18 + 0.25 * pu))
+			ml.draw_circle(cc, 20.0, Color(rc.r * (0.6 + 0.4 * pu), rc.g, rc.b, 1.0))
+			ml.draw_arc(cc, 30.0, 0.0, TAU, 32, Color(1, 0.4, 0.35, 0.8), 2.5, true)
+			_wicon(ml, cc, 13.0, "mine", Color(1, 1, 1, 0.9))
+			ml.draw_string(ThemeDB.fallback_font, Vector2(88, 52), "MINES AHEAD", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.35, 0.3, 0.6 + 0.4 * pu)))
+		ml.visible = false
+		(hud.fire as Control).get_parent().add_child(ml)
+		hud.mlamp = ml
+	hud.mw.visible = false
+	var lamp: Control = hud.mlamp
 	if best > 100.0:
-		hud.mw.visible = false
+		lamp.visible = false
 		mine_bt = 0.0
 		return
-	var k = clampf(best / 35.0, 0.0, 1.0)
-	hud.mw.visible = fmod(Time.get_ticks_msec() / 1000.0, 0.4) < 0.26
-	mine_bt -= dt
-	if mine_bt <= 0.0:
-		_snd("beep", -2.0, 1.25 + (1.0 - k) * 0.55)
-		mine_bt = lerpf(0.09, 0.5, k)
+	if not lamp.visible:
+		# Lämpchen geht an: kurzes Doppelsignal wie im Cockpit
+		_snd("beep", -4.0, 1.7)
+		get_tree().create_timer(0.13).timeout.connect(func(): _snd("beep", -4.0, 1.7))
+	lamp.visible = true
+	lamp.queue_redraw()
 
 
 # Ergebnistafel nach dem Rennen
@@ -8519,6 +8654,10 @@ func _lab_tab(t: String) -> void:
 				_env_apply()
 			if t == "pillar":
 				_pillar_apply()
+			if t == "jungle":
+				_jungle_apply()
+			if t == "ship":
+				_nav_apply()
 			if t == "city":
 				if key == "mega":
 					_city_fill()
@@ -8920,7 +9059,7 @@ func _tunnel(dt: float) -> void:
 	var g: Dictionary = _focus()
 	var zl = T.lz(g.z)
 	var k = 0.0
-	for tu in ([] if _jungle() else T.TUN):
+	for tu in T.tuns():
 		k = maxf(k, clampf(minf(zl - tu[0] + 2.0, tu[1] - zl + 2.0) / 7.0, 0.0, 1.0))
 	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
 	wenv.ambient_light_energy = lerpf(0.35 * _newr("amb", 1.0), 0.02, tun_k)
@@ -8953,7 +9092,7 @@ func _tunnel(dt: float) -> void:
 			tun_l.append(l)
 	var base = g.z - zl
 	var j = 0
-	for tu in T.TUN:
+	for tu in ([] if _jungle() else T.TUN):   # Erdtunnel bleibt dunkel
 		var ti0 = 4
 		while j < tun_l.size():
 			var zr = tu[0] + 1.0 + ti0 * 1.43
@@ -9077,6 +9216,15 @@ func _camera(dt: float) -> void:
 	var uc: Vector3 = (Vector3.UP * 0.25 + f.uu * 0.75).normalized()
 	var ro: Vector3 = S0 - fc * (2.6 + cam_d) + uc * (0.95 - 0.15 * cam_d) - f.uu * g.h * 0.5
 	var ta: Vector3 = S0 + fc * 7.0 + uc * 0.35
+	# Countdown: Blick leicht nach oben, damit das riesige Start-Mädel ganz ins Bild passt
+	var lift = 0.0
+	if state == "count":
+		lift = 1.0
+	elif state == "intro":
+		lift = clampf((t_state / INTRO_T - 0.6) / 0.4, 0.0, 1.0)
+	elif state == "race":
+		lift = clampf(1.0 - t_state / 0.9, 0.0, 1.0)
+	ta += Vector3.UP * 1.3 * lift * lift * (3.0 - 2.0 * lift)
 	if state == "intro":
 		var u = clampf(t_state / INTRO_T, 0.0, 1.0)
 		var Y = Vector3.UP
