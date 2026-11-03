@@ -4821,6 +4821,9 @@ func _prot(o: Dictionary) -> bool:
 func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 	if o.out or state != "race":
 		return
+	if o.shield > 0.0 and float(o.get("mshield", 0.0)) > 0.0:
+		_shield_ping(o)   # Mega-Schild: hält alles aus
+		return
 	if o.shield > 0.0:
 		# Schild: hält einen Waffentreffer aus (Rakete, Orb, Mine, Wand, Beben …), beim zweiten ist er weg;
 		# Superwaffen zerschlagen ihn sofort. Rempeln schluckt er einfach.
@@ -5011,7 +5014,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 			return
 		_fx_res()
 		orb_key = Vector4(-1, -1, -1, -1)   # neue Materialien: Farben sicher setzen
-		for j in range(4):
+		for j in range(6):
 			var sp = _lowsphere(0.11, 16, 8)
 			var c = Color(1.0, 0.5, 0.12) if _noir() else Color(0.35, 0.85, 1.0)
 			var mi = _glow_node(sp, Color(c.r * 4.0, c.g * 4.0, c.b * 4.0), 3.0)
@@ -5042,8 +5045,9 @@ func _orbs_update(dt: float, live: bool) -> void:
 	var X: Dictionary = fx.orbs
 	if g.orbs <= 0.0:
 		g.sorb = false
+		g.morb = false
 	var so: bool = g.get("sorb", false)
-	var no = 4 if so else 2
+	var no = 6 if g.get("morb", false) else (4 if so else 2)
 	var oc = _hs(Color(1.0, 0.5, 0.12) if _noir() else Color(0.35, 0.85, 1.0), float(X.hue))
 	if so:
 		oc = _hs(Color(1.0, 0.72, 0.18), float(X.shue))
@@ -5114,7 +5118,7 @@ func _fire() -> void:
 	g.sup = false
 	if g.get("mega", false):
 		g.mega = false
-		_mega(g)
+		_fire_mega(g, w)
 		return
 	_fire_w(g, w, sup)
 
@@ -5168,6 +5172,89 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			g.ahold = false
 			g.sauto = sup
 			_snd("shield")
+
+
+# MEGA: jede Waffe hat ihre eigene, große Wirkung – stark, aber kein Sofortsieg (höchstens ~40 % Schaden je Gegner)
+func _fire_mega(g: Dictionary, w: String) -> void:
+	_flash(Color(1.0, 0.45, 0.95), 0.3)
+	shake = maxf(shake, 0.8)
+	match w:
+		"rak":
+			# drei Raketen im Fächer
+			var grp = {}
+			for d in [-0.16, 0.0, 0.16]:
+				_add_shot(g, false, false, 1.0)
+				shots[shots.size() - 1].dl = tan(g.psi) + d
+				shots[shots.size() - 1].grp = grp   # jeder Gegner wird von der Salve nur einmal getroffen
+				shots[shots.size() - 1].mega = true
+		"lenk":
+			# eine Lenkrakete für jeden Gegner vor dir (bis zu drei)
+			var n = 0
+			var grp = {}
+			for o in ships:
+				if o.idx != g.idx and not o.out and o.z > g.z and o.z - g.z < 220.0 and n < 3:
+					_add_shot(g, false, true, 1.0)
+					shots[shots.size() - 1].tg = o
+					shots[shots.size() - 1].grp = grp
+					shots[shots.size() - 1].only = true   # trifft nur sein eigenes Ziel
+					shots[shots.size() - 1].mega = true
+					n += 1
+			if n == 0:
+				_add_shot(g, false, true, 1.0)
+		"mine":
+			# zwei Minenteppiche hintereinander über die ganze Breite
+			_drop_mines(g, true)
+			get_tree().create_timer(0.35).timeout.connect(func(): _drop_mines(g, true))
+		"schild":
+			# 10 s unzerstörbarer Schild und 30 % Energie
+			g.shield = 10.0
+			g.shh = 0
+			g.mshield = 10.0
+			g.en = minf(1.0, g.en + 0.3)
+			_snd("shield", 2.0, 0.8)
+			if g.idx == 0:
+				_msg("+30 % ENERGY", Color(0.4, 1.0, 0.55))
+		"turbo":
+			# langer Turbo, dabei geschützt, zwei Druckwellen nach hinten
+			g.turbo = 4.5
+			g.boost = 3.0
+			g.shield = maxf(g.shield, 4.5)
+			g.mshield = 4.5
+			_backwave(g)
+			get_tree().create_timer(0.8).timeout.connect(func(): _backwave(g))
+			_snd("boost", 2.0, 0.85)
+		"beben":
+			# Super-Quake in beide Richtungen, dazu eine zweite Welle nach vorn
+			_fire_w(g, "beben", true)
+			get_tree().create_timer(0.8).timeout.connect(func():
+				if state == "race":
+					quake = _quake_make(g.z + 3.0, 1.0, quake)
+					quake.sup = true
+					_snd("boom", 3.0, 0.55))
+		"auto":
+			# 8 s Autopilot, dabei geschützt
+			g.auto = 8.0
+			g.ahold = false
+			g.sauto = true
+			g.shield = maxf(g.shield, 8.0)
+			g.mshield = 8.0
+			_snd("shield")
+		"wand":
+			# zwei Barrieren hintereinander: bremsen deutlich, je 20 % Schaden (zusammen 40 %)
+			for dz in [20.0, 30.0]:
+				var mi = _wall_node(true)
+				var z = g.z + dz
+				_wall_pose(mi, z, 0.0, 0.0)
+				walls.append({"z": z, "age": 0.0, "hit": [], "n": mi, "hf": 0.0, "sup": true, "mega": true, "own": g.idx})
+			_snd("wallon", 2.0, 0.8)
+		"orbs":
+			# sechs Kugeln, länger
+			g.orbs = 14.0
+			g.sorb = true
+			g.morb = true
+			_snd("shield", 0.0, 0.85)
+		_:
+			_fire_w(g, w, true)
 
 
 # Bebenwelle bauen: dir 1 = nach vorn, -1 = nach hinten (Super-Quake)
@@ -5578,7 +5665,7 @@ func _show_help(on: bool) -> void:
 		rows.append([w, WN[w].capitalize(), WD[w]])
 	rows += [["#", "Power-ups", ""],
 		["super", "Super", "Keep your weapon and fly over 2 more weapon pads – it turns SUPER: stronger and gold."],
-		["mega", "Mega", "One more pad with a Super weapon → MEGA: a shock wave takes 75 % energy from every rival."],
+		["mega", "Mega", "One more pad with a Super weapon → MEGA: rockets fly in a fan, homing hits every rival ahead, two mine carpets, two force fields, six orbs, an unbreakable shield …"],
 		["energy", "Energy", "Hits cost energy – at 0 % you are out. Damage you deal refills you, every new lap adds 25 %."]]
 	for r in rows:
 		if r[0] == "#":
@@ -5826,14 +5913,14 @@ func _weapons(dt: float, racing: bool) -> void:
 			elif g.wpc == 3:
 				_tip("sup2", "SUPER weapon! Keep it for one more pad and it becomes MEGA.")
 			if g.wpc >= 4:
-				_tip("mega", "MEGA! Fire it: a shock wave takes 75 % energy from every rival.")
+				_tip("mega", "MEGA weapon! Every weapon has its own huge effect – fire it!")
 				# noch ein Feld mit der Superwaffe → MEGA: Schockwelle zieht jedem Gegner 75 % Energie ab
 				g.mega = true
 				g.sup = true
 				_snd("pick", 0.0, 1.6)
 				_snd("vo_mega", 3.0)
 				_flash(Color(1.0, 0.35, 0.9), 0.45)
-				_msg("MEGA WEAPON", Color(1.0, 0.45, 0.95))
+				_msg("MEGA " + WN.get(g.wpn, ""), Color(1.0, 0.45, 0.95))
 			elif g.wpc >= 3:
 				g.sup = true
 				_snd("pick", -2.0, 1.35)
@@ -5920,26 +6007,40 @@ func _weapons(dt: float, racing: bool) -> void:
 		for o in ships:
 			if o.out or o.idx == sh.own or (sh.pl and o.idx != 0):
 				continue
+			if sh.has("grp") and sh.grp.has(o.idx):
+				continue
+			if sh.get("only", false) and sh.tg != null and o != sh.tg:
+				continue
 			var lw = 0.4 if sh.pl else (0.75 if sh.hm and sh.tg == o else 0.6)
 			if o.z > zlo and o.z < zhi and absf(sh.lat - o.lat) < lw:
 				hit = o
+				if sh.has("grp"):
+					sh.grp[o.idx] = true
 				break
 		var dead = false
 		if hit != null:
 			if not _prot(hit):
 				hit.slow = minf(hit.slow, 0.35)
 				hit.vpsi += randf_range(-0.25, 0.25)
-			_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
-			_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
+			if sh.get("mega", false):
+				# Mega-Salve: fester Schaden (40 %), Explosion ohne schwarzes Loch – sonst summiert es sich im Pulk
+				_dmg(hit, 0.4, sh.own, "rocket", true)
+				_explode(hit.z, hit.lat, false, 1.2)
+			else:
+				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
+				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
 			dead = true
 		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0 or (sh.cl and sh.t > 0.42) or (state == "lab" and absf(sh.z - LZ) > 18.0):
-			_shot_boom(sh, sh.z, clampf(sh.lat, -T.TW, T.TW), -1)
+			if sh.get("mega", false):
+				_explode(sh.z, clampf(sh.lat, -T.TW, T.TW), false, 0.8)   # Mega-Salve: daneben = nur ein Knall, kein Loch
+			else:
+				_shot_boom(sh, sh.z, clampf(sh.lat, -T.TW, T.TW), -1)
 			dead = true
 		else:
 			# Annäherungszünder: fliegt die Rakete dicht an einem Gegner vorbei, geht sie sofort hoch
 			for o in ships:
-				if o.out or o.idx == sh.own or sh.pl or (sh.hm and sh.tg != null):
-					continue   # Lenkrakete mit Ziel: kein Vorbeiflug-Zünder, sie schlägt direkt ein
+				if o.out or o.idx == sh.own or sh.pl or (sh.hm and sh.tg != null) or sh.get("mega", false):
+					continue   # Lenkrakete mit Ziel und Mega-Salve: kein Vorbeiflug-Zünder
 				if o.z > zlo and o.z < zhi and absf(sh.lat - o.lat) < 1.6:
 					_shot_boom(sh, o.z, sh.lat, -1)
 					dead = true
@@ -5985,12 +6086,13 @@ func _weapons(dt: float, racing: bool) -> void:
 			if o.idx != 0 and not o.out and not w.hit.has(o.idx) and o.z >= w.z and o.z - o.spd * dt * 1.5 < w.z + 0.01:
 				w.hit.append(o.idx)
 				var ws: bool = w.get("sup", false)
+				var wm: bool = w.get("mega", false)
 				if not _prot(o):   # mit Schild: fliegt einfach durch
 					o.slowT = 4.0 if ws else 2.5
 				if ws and not _prot(o):
-					o.slow = minf(o.slow, 0.35)
+					o.slow = minf(o.slow, 0.3 if wm else 0.35)
 				w.hf = 1.0
-				_dmg(o, 0.25 if ws else 0.1, 0, "wall", ws)
+				_dmg(o, 0.2 if wm else (0.25 if ws else 0.1), 0, "wall", ws)
 				_zap_ship(o)
 				_snd("zap", 2.0, 1.0, (o.node as Node3D).global_position)
 		w.hf = maxf(0.0, w.hf - dt * 2.5)
@@ -7884,6 +7986,7 @@ func _process(delta: float) -> void:
 		g.turbo -= dt
 		g.boost = maxf(g.boost, 1.5)
 	g.shield = maxf(0.0, g.shield - dt)
+	g.mshield = maxf(0.0, float(g.get("mshield", 0.0)) - dt)
 	for k in range(n):
 		_phys(g, steer, true, hdt, racing)
 	for i in range(1, ships.size()):
@@ -8661,7 +8764,7 @@ func _shot() -> void:
 					ships[0].h = 0.6
 					ships[0].lat = T.TW + 0.4
 				elif p[3].begins_with("mega"):
-					ships[0].wpn = "rak"
+					ships[0].wpn = p[3].substr(5) if p[3].contains("_") else "rak"
 					ships[0].sup = true
 					ships[0].mega = true
 					for o in ships:
