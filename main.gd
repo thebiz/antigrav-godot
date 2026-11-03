@@ -1746,6 +1746,14 @@ static func _jf_make() -> Array:
 const JGAP = 413.5   # Mitte der Sprungstelle – dort fließt der Bach
 
 
+# Wall auf der Außenseite der Steilkurven höher (bis fast dreifach)
+func _jwall(z: float, sd: float) -> float:
+	var b = T.bank(z)
+	if absf(b) < 0.01 or signf(b) != sd:   # die angehobene (äußere) Seite der Steilkurve
+		return 1.0
+	return 1.0 + 1.8 * clampf((absf(b) - 0.12) / 0.35, 0.0, 1.0)
+
+
 func _jdip(z: float) -> float:
 	var d = absf(T.lz(z) - JGAP)
 	var k = clampf(1.0 - d / 8.0, 0.0, 1.0)
@@ -1762,6 +1770,8 @@ func _jf(z: float, sd: float, la: float) -> Vector3:
 			var u = clampf((la - JF[i][0]) / (JF[i + 1][0] - JF[i][0]), 0.0, 1.0)
 			h = lerpf(JF[i][1], JF[i + 1][1], u)
 			break
+	if la < 3.0:
+		h *= _jwall(z, sd)
 	h += _jdip(z) * clampf(la / 1.5, 0.0, 1.0)
 	return f.c + r0 * (sd * (T.TW + la)) + Vector3.UP * h
 
@@ -1779,7 +1789,7 @@ func _jungle_track() -> void:
 			for i in range(JF.size()):
 				var p: Vector3
 				if i < JF_BANK:
-					p = f.c + f.rr * (sd * (TW + JF[i][0])) + f.uu * JF[i][1]   # Erdwall an der Fahrbahnkante
+					p = f.c + f.rr * (sd * (TW + JF[i][0])) + f.uu * (JF[i][1] * _jwall(z, sd))   # Erdwall an der Fahrbahnkante
 				else:
 					p = _jf(z, sd, JF[i][0])
 				row.append(p)
