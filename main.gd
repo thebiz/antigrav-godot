@@ -1492,6 +1492,8 @@ void fragment(){vec2 q=floor(vec2(UV.x*2.,UV.y*12.));ALBEDO=vec3(mod(q.x+q.y,2.)
 		var st: SurfaceTool = sts[ck]
 		if key == "pad" or key == "start" or key == "wpad":
 			st = _fix_uv(st, key)
+		if key == "jfloor":
+			st = _smooth_st(st)
 		st.index()
 		if key == "wall" or key == "tube" or key == "root" or key == "jfloor":
 			st.generate_tangents()   # für die Oberflächenstruktur der Texturen
@@ -1557,6 +1559,21 @@ var lights_nodes = []
 var wpads = []
 var beam_mat: ShaderMaterial
 var beam_n = []
+
+
+# Flächen weich schattieren: gleiche Punkte zusammenlegen und Normalen über die Nachbarn mitteln (keine Kanten)
+func _smooth_st(st: SurfaceTool) -> SurfaceTool:
+	var arr = st.commit_to_arrays()
+	var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var uvs: PackedVector2Array = arr[Mesh.ARRAY_TEX_UV]
+	var s2 = SurfaceTool.new()
+	s2.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in range(vs.size()):
+		s2.set_uv(uvs[i])
+		s2.add_vertex(vs[i])
+	s2.index()
+	s2.generate_normals()
+	return s2
 
 
 # Boost-Felder und Startlinie: UV aus der Lage im Streifen (x längs, y quer)
@@ -1711,8 +1728,20 @@ void fragment(){
 """
 
 # Bodenprofil neben der Strecke: [Abstand hinter der Leitplanke, Höhe]
-const JF = [[0.0, 0.06], [0.15, 0.11], [0.35, 0.2], [0.6, 0.34], [0.9, 0.5], [1.25, 0.62], [1.7, 0.66], [2.4, 0.4], [3.6, -0.15], [6.0, -0.8], [16.0, -1.4], [40.0, -2.0], [90.0, -2.4]]
-const JF_BANK = 8   # die ersten Punkte (Wall) folgen der Schräglage der Fahrbahn
+var JF = _jf_make()
+var JF_BANK = 21   # die Punkte der Wanne folgen der Schräglage der Fahrbahn
+
+
+# Profil neben der Fahrbahn: eine runde Mulde wie eine Halfpipe aus Erde – sanft hoch, runde Kuppe, sanft runter
+static func _jf_make() -> Array:
+	var a = []
+	for i in range(21):
+		var la = 3.0 * i / 20.0
+		var u = la / 3.0
+		a.append([la, 0.06 * (1.0 - u) + 0.68 * pow(sin(PI * u), 1.6)])
+	for q in [[3.8, -0.2], [6.0, -0.8], [16.0, -1.4], [40.0, -2.0], [90.0, -2.4]]:
+		a.append(q)
+	return a   # die ersten Punkte (Wall) folgen der Schräglage der Fahrbahn
 const JGAP = 413.5   # Mitte der Sprungstelle – dort fließt der Bach
 
 
@@ -1765,9 +1794,9 @@ func _jungle_track() -> void:
 						n = -n
 					var la0 = sd * (TW + JF[i][0])
 					var la1 = sd * (TW + JF[i + 1][0])
-					_quad(_st("jfloor"), a, b, c, d, n.normalized(), Vector2(la0, z - 2.0), Vector2(la0, z), Vector2(la1, z), Vector2(la1, z - 2.0))
+					_quad(_st("jfloor"), a, b, c, d, n.normalized(), Vector2(la0, z - 1.0), Vector2(la0, z), Vector2(la1, z), Vector2(la1, z - 1.0))
 			prev[sd] = row
-		z += 2.0
+		z += 1.0
 	# Bachbett unter der Fahrbahn (nur an der Sprungstelle zu sehen)
 	var zb = JGAP - 10.0
 	var pb = []
@@ -1864,7 +1893,7 @@ func _jungle_build() -> void:
 	var xq = _xquad_mesh()
 	# Bäume in vier Reihen je Seite: nah, mittel, fern, ganz fern (dort größer und lockerer)
 	var trees = []
-	var rows = [[1.6, 4.0, 2.6, 6.0, 10.0, true], [4.0, 12.0, 3.0, 8.0, 14.0, true], [12.0, 35.0, 4.2, 10.0, 18.0, false], [35.0, 75.0, 6.5, 12.0, 21.0, false]]
+	var rows = [[3.0, 5.0, 2.6, 6.0, 10.0, true], [4.0, 12.0, 3.0, 8.0, 14.0, true], [12.0, 35.0, 4.2, 10.0, 18.0, false], [35.0, 75.0, 6.5, 12.0, 21.0, false]]
 	for sd in [-1.0, 1.0]:
 		for rw in rows:
 			var z = 20.0 + rng.randf() * float(rw[2])
@@ -5483,65 +5512,113 @@ func _tip(id: String, text: String) -> void:
 	tipq.append([id, text])
 
 
+# Titel und Symbol je Hinweis
+const TIPH = {"steer": ["STEERING", "steer"], "boost": ["BOOST PAD", "boost"], "wpad": ["WEAPON PAD", "wpad"], "energy": ["ENERGY", "energy"],
+	"lap": ["LAP 2", "goal"], "mines": ["MINES", "mine"], "sup1": ["SUPER  2 / 3", "super"], "sup2": ["SUPER WEAPON", "super"], "mega": ["MEGA WEAPON", "mega"]}
+var tip_tt: Label
+var tip_ic: Control
+var tip_key = ""
+
+
 func _tips_check(g: Dictionary, racing: bool, dt: float) -> void:
 	if tip_box == null:
+		# Neon-Kachel: dunkles Glas, leuchtender Rand mit Schein, Symbol links, Titel und Text rechts
 		tip_box = PanelContainer.new()
 		var sb = StyleBoxFlat.new()
-		sb.bg_color = Color(0.02, 0.03, 0.08, 0.82)
-		sb.border_color = Color(0.35, 0.85, 1.0, 0.8)
+		sb.bg_color = Color(0.01, 0.02, 0.06, 0.8)
+		sb.border_color = Color(CY.r, CY.g, CY.b, 0.95)
 		sb.set_border_width_all(3)
-		sb.set_corner_radius_all(22)
-		sb.content_margin_left = 26
-		sb.content_margin_right = 26
-		sb.content_margin_top = 16
-		sb.content_margin_bottom = 16
+		sb.set_corner_radius_all(26)
+		sb.shadow_color = Color(CY.r, CY.g, CY.b, 0.4)
+		sb.shadow_size = 22
+		sb.content_margin_left = 22
+		sb.content_margin_right = 28
+		sb.content_margin_top = 18
+		sb.content_margin_bottom = 18
 		tip_box.add_theme_stylebox_override("panel", sb)
-		tip_box.anchor_left = 0.07
-		tip_box.anchor_right = 0.93
-		tip_box.anchor_top = 0.2
-		tip_box.anchor_bottom = 0.2
+		tip_box.anchor_left = 0.06
+		tip_box.anchor_right = 0.94
+		tip_box.anchor_top = 0.19
+		tip_box.anchor_bottom = 0.19
 		tip_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var hb = HBoxContainer.new()
+		hb.add_theme_constant_override("separation", 22)
+		hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tip_box.add_child(hb)
+		tip_ic = Control.new()
+		tip_ic.custom_minimum_size = Vector2(84, 84)
+		tip_ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		tip_ic.draw.connect(func():
+			var cc = tip_ic.size * 0.5
+			var pu = 0.5 + 0.5 * sin(Time.get_ticks_msec() / 1000.0 * 4.0)
+			tip_ic.draw_circle(cc, 42.0, Color(CY.r, CY.g, CY.b, 0.1 + 0.06 * pu))
+			tip_ic.draw_arc(cc, 41.0, 0.0, TAU, 40, Color(CY.r, CY.g, CY.b, 0.6), 2.0, true)
+			_wicon(tip_ic, cc, 26.0, tip_key, Color(1, 1, 1, 0.95)))
+		hb.add_child(tip_ic)
+		var vb = VBoxContainer.new()
+		vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		vb.add_theme_constant_override("separation", 2)
+		vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hb.add_child(vb)
+		tip_tt = Label.new()
+		tip_tt.add_theme_font_size_override("font_size", 30)
+		tip_tt.add_theme_color_override("font_color", CY.lightened(0.35))
+		tip_tt.add_theme_color_override("font_outline_color", Color(CY.r, CY.g, CY.b, 0.35))
+		tip_tt.add_theme_constant_override("outline_size", 6)
+		vb.add_child(tip_tt)
 		tip_lbl = Label.new()
-		tip_lbl.add_theme_font_size_override("font_size", 32)
+		tip_lbl.add_theme_font_size_override("font_size", 28)
+		tip_lbl.add_theme_color_override("font_color", Color(0.92, 0.95, 1.0))
 		tip_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		tip_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		tip_box.add_child(tip_lbl)
+		vb.add_child(tip_lbl)
 		tip_box.visible = false
 		(hud.fire as Control).get_parent().add_child(tip_box)
 	if racing:
 		if t_state > 0.9:
-			_tip("steer", "Hold the LEFT or RIGHT half of the screen to steer.")
+			_tip("steer", "Hold the left or right half of the screen.")
 		# Boost- und Waffenfeld voraus?
 		var k0 = int(round(g.z / 35.0))
 		for k in [k0, k0 + 1]:
 			var bz = _bzp(k)
 			if _pad_ok(bz) and bz - g.z > 4.0 and bz - g.z < 32.0 and t_state > 3.0:
-				_tip("boost", "BOOST PAD ahead – fly over the arrows for a burst of speed.")
+				_tip("boost", "Ahead! Fly over the arrows for a burst of speed.")
 		var w0 = int(round((g.z - 17.0) / 35.0))
 		for k in [w0, w0 + 1, w0 + 2]:
 			var wz = _wzp(k)
 			if posmod(k, 2) == 0 and _pad_ok(wz) and wz - g.z > 4.0 and wz - g.z < 32.0 and t_state > 6.0:
-				_tip("wpad", "WEAPON PAD ahead – fly through the ring to pick up a weapon.")
+				_tip("wpad", "Ahead! Fly through the ring to pick up a weapon.")
 		if WN.has(g.wpn) and not tip_w.has(g.wpn):
 			tip_w[g.wpn] = true
-			_tip("w_" + g.wpn, "%s – %s\nTap the FIRE button to use it." % [WN.get(g.wpn, g.wpn), WD.get(g.wpn, "")])
+			_tip("w_" + g.wpn, "%s Tap the FIRE button to use it." % WD.get(g.wpn, ""))
 		if g.en < 0.6:
 			_tip("energy", "Hits cost energy – at 0 % you are out! Hitting rivals refills yours, every new lap adds 25 %.")
 		if int(floor((g.z - T.ZST) / T.LAP)) >= 1:
-			_tip("lap", "Lap 2! Race 3 laps – finish first or be the last one still flying.")
+			_tip("lap", "3 laps in total – finish first or be the last one still flying.")
 		if hud.mw.visible:
-			_tip("mines", "Mines ahead – steer around them!")
+			_tip("mines", "Ahead on the track – steer around them!")
 	# anzeigen: einer nach dem anderen, je ~4 s
 	if tip_t > 0.0:
 		tip_t -= dt
-		tip_box.modulate.a = clampf(minf(tip_t / 0.4, (4.6 - tip_t) / 0.25), 0.0, 1.0)
+		var ain = clampf((4.8 - tip_t) / 0.35, 0.0, 1.0)
+		var aout = clampf(tip_t / 0.45, 0.0, 1.0)
+		var ee = 1.0 - pow(1.0 - ain, 3.0)
+		tip_box.modulate.a = minf(ee, aout)
+		tip_box.offset_top = -30.0 * (1.0 - ee) - 12.0 * (1.0 - aout)
+		tip_box.offset_bottom = tip_box.offset_top
+		tip_ic.queue_redraw()
 		if tip_t <= 0.0:
 			tip_box.visible = false
 	elif not tipq.is_empty() and state == "race":
 		var q = tipq.pop_front()
+		var id: String = q[0]
+		var hd = TIPH.get(id, ["", ""])
+		if id.begins_with("w_"):
+			hd = [WN.get(id.substr(2), ""), id.substr(2)]
+		tip_tt.text = hd[0]
+		tip_key = hd[1]
 		tip_lbl.text = q[1]
 		tip_box.visible = true
-		tip_t = 4.6
+		tip_t = 4.8
 		var seen = str(cfg.get("tseen", ""))
 		cfg.tseen = (seen + "," if seen != "" else "") + q[0]
 		_save_cfg()
@@ -5913,9 +5990,9 @@ func _weapons(dt: float, racing: bool) -> void:
 			if g.wpc == 2:
 				_tip("sup1", "Keep your weapon! One more weapon pad and it turns SUPER – stronger and gold.")
 			elif g.wpc == 3:
-				_tip("sup2", "SUPER weapon! Keep it for one more pad and it becomes MEGA.")
+				_tip("sup2", "Keep it for one more pad and it becomes MEGA.")
 			if g.wpc >= 4:
-				_tip("mega", "MEGA weapon! Every weapon has its own huge effect – fire it!")
+				_tip("mega", "Every weapon has its own huge effect – fire it!")
 				# noch ein Feld mit der Superwaffe → MEGA: Schockwelle zieht jedem Gegner 75 % Energie ab
 				g.mega = true
 				g.sup = true
