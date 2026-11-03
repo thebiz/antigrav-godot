@@ -5608,6 +5608,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		var sh = shots[i]
 		sh.t += dt
 		var sdir: float = sh.get("dir", 1.0)
+		var z0: float = sh.z
 		sh.z += spd * dt * sdir
 		if sh.pl:
 			sh.lat += (g.lat - sh.lat) * minf(1.0, dt * 3.0)
@@ -5620,14 +5621,20 @@ func _weapons(dt: float, racing: bool) -> void:
 						bd = (o.z - sh.z) * sdir
 						sh.tg = o
 			if sh.tg != null:
-				sh.lat += (sh.tg.lat - sh.lat) * minf(1.0, dt * 5.0)
+				# je näher, desto härter auf die Spur des Ziels – die Lenkrakete schlägt direkt ein
+				var dzt = absf(sh.tg.z - sh.z)
+				sh.lat += (sh.tg.lat - sh.lat) * minf(1.0, dt * (5.0 + 60.0 / maxf(1.0, dzt)))
 		else:
 			sh.lat += sh.dl * spd * dt
+		# Treffer: Weg der Rakete in diesem Bild (von z0 nach z) kreuzt das Schiff
 		var hit = null
+		var zlo = minf(z0, sh.z) - 0.6
+		var zhi = maxf(z0, sh.z) + 0.6
 		for o in ships:
 			if o.out or o.idx == sh.own or (sh.pl and o.idx != 0):
 				continue
-			if absf(sh.z - o.z) < 0.8 + spd * dt * 1.5 and absf(sh.lat - o.lat) < (0.4 if sh.pl else 0.6):
+			var lw = 0.4 if sh.pl else (0.75 if sh.hm and sh.tg == o else 0.6)
+			if o.z > zlo and o.z < zhi and absf(sh.lat - o.lat) < lw:
 				hit = o
 				break
 		var dead = false
@@ -5636,7 +5643,7 @@ func _weapons(dt: float, racing: bool) -> void:
 				hit.slow = minf(hit.slow, 0.35)
 				hit.vpsi += randf_range(-0.25, 0.25)
 			_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
-			_shot_boom(sh, sh.z, sh.lat, hit.idx)
+			_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
 			dead = true
 		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0 or (sh.cl and sh.t > 0.42) or (state == "lab" and absf(sh.z - LZ) > 18.0):
 			_shot_boom(sh, sh.z, clampf(sh.lat, -T.TW, T.TW), -1)
@@ -5644,10 +5651,10 @@ func _weapons(dt: float, racing: bool) -> void:
 		else:
 			# Annäherungszünder: fliegt die Rakete dicht an einem Gegner vorbei, geht sie sofort hoch
 			for o in ships:
-				if o.out or o.idx == sh.own or sh.pl:
-					continue
-				if absf(sh.z - o.z) < 0.8 + spd * dt * 1.5 and absf(sh.lat - o.lat) < 1.6:
-					_shot_boom(sh, sh.z, sh.lat, -1)
+				if o.out or o.idx == sh.own or sh.pl or (sh.hm and sh.tg != null):
+					continue   # Lenkrakete mit Ziel: kein Vorbeiflug-Zünder, sie schlägt direkt ein
+				if o.z > zlo and o.z < zhi and absf(sh.lat - o.lat) < 1.6:
+					_shot_boom(sh, o.z, sh.lat, -1)
 					dead = true
 					break
 		if dead:
