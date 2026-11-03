@@ -38,7 +38,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": ""}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": ""}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -54,6 +54,11 @@ const WP_AI = [["lenk", 0.35], ["rak", 0.25], ["mine", 0.2], ["schild", 0.1], ["
 # eigene Farbe je Waffe, damit man sie im Augenwinkel unterscheiden kann
 const WC = {"rak": Color(1.0, 0.55, 0.12), "lenk": Color(1.0, 0.18, 0.22), "mine": Color(1.0, 0.86, 0.1), "orbs": Color(0.3, 0.6, 1.0),
 	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95)}
+# kurze Erklärung je Waffe (Hinweise beim ersten Mal und „How to play“)
+const WD = {"rak": "Flies straight ahead – aim by steering.", "lenk": "Locks onto the rival ahead and hits for sure.",
+	"mine": "Drops mines behind you.", "schild": "Protects you from two hits.", "turbo": "A big burst of speed.",
+	"beben": "A shock wave rolls ahead and throws rivals off course.", "auto": "Autopilot for 5 seconds – steers for you.",
+	"wand": "An energy wall ahead – rivals flying through it get zapped.", "orbs": "Glowing orbs circle you and hit anyone close."}
 const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS"}
 var shots = []
 var mines = []
@@ -95,6 +100,8 @@ func _ready() -> void:
 		cfg.look = 2
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
+	if OS.get_cmdline_user_args().has("--howto"):
+		_show_help.call_deferred(true)
 	if OS.get_cmdline_user_args().has("--records"):
 		_show_records.call_deferred(true)
 	if OS.get_cmdline_user_args().has("--namedemo"):
@@ -1454,15 +1461,21 @@ void fragment(){
 shader_type spatial;
 render_mode unshaded,cull_disabled;
 void fragment(){
-	vec2 u=UV;float ch=step(abs(fract(u.x*6.-TIME*2.)-.5-abs(u.y-.5)*.9),.14);
-	ALBEDO=mix(vec3(.05,.6,1.),vec3(1.,.85,.15),ch)*(1.6+ch*1.8);
+	// Boost: breite Pfeile laufen nach vorn, heller Rahmen – eindeutig „schneller“
+	vec2 u=UV;float ch=step(abs(fract(u.x*3.-TIME*2.5)-.5-abs(u.y-.5)*.9),.2);
+	float bd=step(.4,abs(u.y-.5))+step(.46,abs(u.x-.5));
+	vec3 b2=mix(vec3(.05,.6,1.),vec3(1.,.85,.15),ch);
+	ALBEDO=b2*(1.0+ch*2.8)*.9+b2*bd*2.5;
 }""", [["vec3(.05,.6,1.),vec3(1.,.85,.15)", "vec3(.8),vec3(1.,.36,.03)"]]))
 	mats["wpad"] = _shader_mat(_nz("""
 shader_type spatial;
 render_mode unshaded,cull_disabled;
 void fragment(){
 	vec2 q=vec2((UV.x-.5)*2.5,(UV.y-.5)*1.);float r=length(q);
-	float ring=smoothstep(.05,0.,abs(r-.38))+smoothstep(.04,0.,abs(r-.24))*.8+smoothstep(.12,0.,r);
+	// Waffe: drehender Ring und eine Raute in der Mitte (wie eine Waffenkiste)
+	float an=atan(q.y,q.x)+TIME*2.;float dash=step(.0,sin(an*6.));
+	float dm=abs(q.x)+abs(q.y)*1.2;
+	float ring=smoothstep(.05,0.,abs(r-.4))*dash+smoothstep(.035,0.,abs(r-.3))*.8+smoothstep(.03,0.,abs(dm-.15))+smoothstep(.05,0.,dm)*.9;
 	vec3 c=.5+.5*cos(6.2832*(atan(q.y,q.x)/6.2832+TIME*.4+vec3(0.,.33,.67)));
 	ALBEDO=c*(3.5+1.5*sin(TIME*6.));ALPHA=clamp(ring,0.,1.);
 }""", [["vec3 c=.5+.5*cos(6.2832*(atan(q.y,q.x)/6.2832+TIME*.4+vec3(0.,.33,.67)));", "vec3 c=mix(vec3(1.,.36,.03),vec3(1.),.5+.5*sin(atan(q.y,q.x)*3.+TIME*4.));"]]))
@@ -3098,21 +3111,21 @@ func _hud() -> void:
 	hud.en_bg = ColorRect.new()
 	hud.en_bg.color = Color(1, 1, 1, 0.15)
 	hud.en_bg.position = Vector2(36, 140)
-	hud.en_bg.size = Vector2(200, 12)
+	hud.en_bg.size = Vector2(300, 20)
 	cl.add_child(hud.en_bg)
 	hud.en = ColorRect.new()
 	hud.en.color = Color(0.36, 1.0, 0.6)
-	hud.en.size = Vector2(200, 12)
+	hud.en.size = Vector2(300, 20)
 	hud.en_bg.add_child(hud.en)
 	# Fortschritt über die ganze Strecke: drei Abschnitte (= drei Runden), füllt sich live
 	var pg = Control.new()
 	pg.position = Vector2(36, 112)
-	pg.size = Vector2(200, 10)
+	pg.size = Vector2(300, 10)
 	cl.add_child(pg)
 	hud.pg = pg
 	hud.pgf = []
 	for k in range(T.LAPS):
-		var w = (200.0 - 2 * 6.0) / T.LAPS
+		var w = (300.0 - 2 * 6.0) / T.LAPS
 		var bg = ColorRect.new()
 		bg.color = Color(1, 1, 1, 0.15)
 		bg.position = Vector2(k * (w + 6.0), 0)
@@ -3125,7 +3138,8 @@ func _hud() -> void:
 		hud.pgf.append([fl, w])
 	var el = mk.call(16, HORIZONTAL_ALIGNMENT_LEFT)
 	el.text = "ENERGY"
-	el.position = Vector2(36, 156)
+	el.position = Vector2(36, 164)
+	el.add_theme_font_size_override("font_size", 22)
 	hud.el = el
 	el.modulate = Color(1, 1, 1, 0.7)
 	# Waffenknopf: runder Knopf, geladen = orange mit drehendem, pulsierendem Ring
@@ -3164,7 +3178,9 @@ func _hud() -> void:
 		# drei drehende Bogenstücke
 		for k in range(3):
 			var a0 = t * 2.2 + k * TAU / 3.0
-			ring.draw_arc(c, 104.0, a0, a0 + 1.2, 24, Color(oc.r, oc.g, oc.b, 0.95), 6.0, true))
+			ring.draw_arc(c, 104.0, a0, a0 + 1.2, 24, Color(oc.r, oc.g, oc.b, 0.95), 6.0, true)
+		# Symbol der Waffe über dem Namen
+		_wicon(ring, c + Vector2(0, -42), 30.0, str(ships[0].wpn), Color(1, 1, 1, 0.95)))
 	hud.ring = ring
 	hud.fire = mk.call(30, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.fire.anchor_left = 0.5
@@ -3175,7 +3191,8 @@ func _hud() -> void:
 	hud.fire.offset_right = 95
 	hud.fire.offset_top = -300
 	hud.fire.offset_bottom = -110
-	hud.fire.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hud.fire.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	hud.fire.offset_bottom = -138
 	hud.fire.add_theme_font_size_override("font_size", 30)
 	var fsb = StyleBoxFlat.new()
 	fsb.bg_color = Color(1, 1, 1, 0.05)
@@ -3549,6 +3566,10 @@ func _menu() -> void:
 	brl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	brl.pressed.connect(func(): _show_replays(true))
 	rrow.add_child(brl)
+	var bhp = _btn("How to play")
+	bhp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bhp.pressed.connect(func(): _show_help(true))
+	rrow.add_child(bhp)
 	var brc = _btn("Records")
 	brc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	brc.pressed.connect(func(): _show_records(true))
@@ -3710,6 +3731,27 @@ func _menu() -> void:
 		bench_req = true
 		get_tree().reload_current_scene())
 	sp.add_child(bbn)
+	var trow = HBoxContainer.new()
+	trow.add_theme_constant_override("separation", 12)
+	sp.add_child(trow)
+	var btp = _btn("Tips: " + ("On" if int(cfg.tips) == 1 else "Off"))
+	btp.add_theme_font_size_override("font_size", 30)
+	btp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btp.pressed.connect(func():
+		cfg.tips = 1 - int(cfg.tips)
+		_save_cfg()
+		btp.text = "Tips: " + ("On" if int(cfg.tips) == 1 else "Off"))
+	trow.add_child(btp)
+	var btr = _btn("Show all tips again")
+	btr.add_theme_font_size_override("font_size", 30)
+	btr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btr.pressed.connect(func():
+		cfg.tseen = ""
+		cfg.tips = 1
+		_save_cfg()
+		btp.text = "Tips: On"
+		_toast("Tips will show again"))
+	trow.add_child(btr)
 	var back = _btn("Done", true)
 	back.pressed.connect(func(): _show_settings(false))
 	sp.add_child(back)
@@ -4160,6 +4202,8 @@ func _glow_node(mesh: Mesh, c: Color, e: float, alpha := 1.0) -> MeshInstance3D:
 
 
 func _msg(t: String, c: Color) -> void:
+	if big_t > 0.4 and t.begins_with("HIT"):
+		return   # große Meldung läuft gerade: kleine Trefferzeile weglassen
 	hud.msg.text = t
 	hud.msg.modulate = c
 	msg_t = 1.4
@@ -5330,6 +5374,242 @@ func _bwaves_update(dt: float) -> void:
 			bwaves.remove_at(i)
 
 
+# ================================================================ Hinweise für Neulinge (jeder nur einmal)
+var tipq = []
+var tip_t = 0.0
+var tip_box: PanelContainer
+var tip_lbl: Label
+var tip_w = {}
+
+
+func _tip(id: String, text: String) -> void:
+	if int(cfg.get("tips", 1)) != 1 or state != "race" or not rpf.is_empty():
+		return
+	var seen: PackedStringArray = str(cfg.get("tseen", "")).split(",", false)
+	if seen.has(id):
+		return
+	for q in tipq:
+		if q[0] == id:
+			return
+	tipq.append([id, text])
+
+
+func _tips_check(g: Dictionary, racing: bool, dt: float) -> void:
+	if tip_box == null:
+		tip_box = PanelContainer.new()
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = Color(0.02, 0.03, 0.08, 0.82)
+		sb.border_color = Color(0.35, 0.85, 1.0, 0.8)
+		sb.set_border_width_all(3)
+		sb.set_corner_radius_all(22)
+		sb.content_margin_left = 26
+		sb.content_margin_right = 26
+		sb.content_margin_top = 16
+		sb.content_margin_bottom = 16
+		tip_box.add_theme_stylebox_override("panel", sb)
+		tip_box.anchor_left = 0.07
+		tip_box.anchor_right = 0.93
+		tip_box.anchor_top = 0.2
+		tip_box.anchor_bottom = 0.2
+		tip_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tip_lbl = Label.new()
+		tip_lbl.add_theme_font_size_override("font_size", 32)
+		tip_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		tip_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tip_box.add_child(tip_lbl)
+		tip_box.visible = false
+		(hud.fire as Control).get_parent().add_child(tip_box)
+	if racing:
+		if t_state > 0.9:
+			_tip("steer", "Hold the LEFT or RIGHT half of the screen to steer.")
+		# Boost- und Waffenfeld voraus?
+		var k0 = int(round(g.z / 35.0))
+		for k in [k0, k0 + 1]:
+			var bz = _bzp(k)
+			if _pad_ok(bz) and bz - g.z > 4.0 and bz - g.z < 32.0 and t_state > 3.0:
+				_tip("boost", "BOOST PAD ahead – fly over the arrows for a burst of speed.")
+		var w0 = int(round((g.z - 17.0) / 35.0))
+		for k in [w0, w0 + 1, w0 + 2]:
+			var wz = _wzp(k)
+			if posmod(k, 2) == 0 and _pad_ok(wz) and wz - g.z > 4.0 and wz - g.z < 32.0 and t_state > 6.0:
+				_tip("wpad", "WEAPON PAD ahead – fly through the ring to pick up a weapon.")
+		if WN.has(g.wpn) and not tip_w.has(g.wpn):
+			tip_w[g.wpn] = true
+			_tip("w_" + g.wpn, "%s – %s\nTap the FIRE button to use it." % [WN.get(g.wpn, g.wpn), WD.get(g.wpn, "")])
+		if g.en < 0.6:
+			_tip("energy", "Hits cost energy – at 0 % you are out! Hitting rivals refills yours, every new lap adds 25 %.")
+		if int(floor((g.z - T.ZST) / T.LAP)) >= 1:
+			_tip("lap", "Lap 2! Race 3 laps – finish first or be the last one still flying.")
+		if hud.mw.visible:
+			_tip("mines", "Mines ahead – steer around them!")
+	# anzeigen: einer nach dem anderen, je ~4 s
+	if tip_t > 0.0:
+		tip_t -= dt
+		tip_box.modulate.a = clampf(minf(tip_t / 0.4, (4.6 - tip_t) / 0.25), 0.0, 1.0)
+		if tip_t <= 0.0:
+			tip_box.visible = false
+	elif not tipq.is_empty() and state == "race":
+		var q = tipq.pop_front()
+		tip_lbl.text = q[1]
+		tip_box.visible = true
+		tip_t = 4.6
+		var seen = str(cfg.get("tseen", ""))
+		cfg.tseen = (seen + "," if seen != "" else "") + q[0]
+		_save_cfg()
+	if state != "race" and tip_box.visible:
+		tip_box.visible = false
+		tip_t = 0.0
+
+
+# Waffensymbole (einfache Neon-Striche), s = halbe Größe
+func _wicon(c: CanvasItem, p: Vector2, s: float, w: String, col: Color) -> void:
+	var lw = maxf(2.0, s * 0.13)
+	match w:
+		"rak":
+			c.draw_polyline(PackedVector2Array([p + Vector2(0, -s), p + Vector2(s * 0.35, -s * 0.4), p + Vector2(s * 0.35, s * 0.6), p + Vector2(-s * 0.35, s * 0.6), p + Vector2(-s * 0.35, -s * 0.4), p + Vector2(0, -s)]), col, lw, true)
+			c.draw_line(p + Vector2(-s * 0.35, s * 0.2), p + Vector2(-s * 0.7, s * 0.8), col, lw, true)
+			c.draw_line(p + Vector2(s * 0.35, s * 0.2), p + Vector2(s * 0.7, s * 0.8), col, lw, true)
+		"lenk":
+			c.draw_arc(p, s * 0.7, 0.0, TAU, 32, col, lw, true)
+			for d in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+				c.draw_line(p + d * s * 0.35, p + d * s, col, lw, true)
+			c.draw_circle(p, lw * 0.8, col)
+		"mine":
+			c.draw_arc(p, s * 0.5, 0.0, TAU, 24, col, lw, true)
+			for i in range(8):
+				var d = Vector2(cos(i * TAU / 8.0), sin(i * TAU / 8.0))
+				c.draw_line(p + d * s * 0.5, p + d * s * 0.9, col, lw, true)
+		"schild":
+			c.draw_polyline(PackedVector2Array([p + Vector2(0, -s), p + Vector2(s * 0.8, -s * 0.6), p + Vector2(s * 0.65, s * 0.3), p + Vector2(0, s), p + Vector2(-s * 0.65, s * 0.3), p + Vector2(-s * 0.8, -s * 0.6), p + Vector2(0, -s)]), col, lw, true)
+		"turbo":
+			for o in [-0.35, 0.35]:
+				c.draw_polyline(PackedVector2Array([p + Vector2(-s * 0.7, s * (o + 0.45)), p + Vector2(0, s * (o - 0.25)), p + Vector2(s * 0.7, s * (o + 0.45))]), col, lw, true)
+		"beben":
+			var pts = PackedVector2Array()
+			for i in range(9):
+				pts.append(p + Vector2(-s + i * s * 0.25, (s * 0.45 if i % 2 == 0 else -s * 0.45) * (1.0 - absf(i - 4) / 5.0)))
+			c.draw_polyline(pts, col, lw, true)
+		"auto":
+			c.draw_arc(p, s * 0.8, 0.0, TAU, 32, col, lw, true)
+			c.draw_arc(p, s * 0.2, 0.0, TAU, 16, col, lw, true)
+			for a in [PI * 0.5, PI * 1.17, PI * 1.83]:
+				c.draw_line(p + Vector2(cos(a), sin(a)) * s * 0.2, p + Vector2(cos(a), sin(a)) * s * 0.8, col, lw, true)
+		"wand":
+			for i in range(4):
+				var x = -s * 0.75 + i * s * 0.5
+				c.draw_line(p + Vector2(x, -s * 0.8), p + Vector2(x, s * 0.8), col, lw, true)
+			c.draw_line(p + Vector2(-s * 0.9, -s * 0.8), p + Vector2(s * 0.9, -s * 0.8), col, lw, true)
+		"orbs":
+			c.draw_arc(p, s * 0.7, 0.0, TAU, 32, Color(col.r, col.g, col.b, col.a * 0.5), lw * 0.7, true)
+			for i in range(3):
+				var a = i * TAU / 3.0 - PI * 0.5
+				c.draw_circle(p + Vector2(cos(a), sin(a)) * s * 0.7, s * 0.2, col)
+		"boost":
+			for o in [-0.3, 0.3]:
+				c.draw_polyline(PackedVector2Array([p + Vector2(-s * 0.7, s * (o + 0.35)), p + Vector2(0, s * (o - 0.35)), p + Vector2(s * 0.7, s * (o + 0.35))]), Color(1.0, 0.85, 0.2), lw * 1.3, true)
+			c.draw_rect(Rect2(p - Vector2(s * 0.9, s), Vector2(s * 1.8, s * 2.0)), Color(0.2, 0.7, 1.0), false, lw)
+		"wpad":
+			c.draw_arc(p, s * 0.9, 0.0, TAU, 32, Color(1.0, 0.4, 0.9), lw, true)
+			c.draw_polyline(PackedVector2Array([p + Vector2(0, -s * 0.45), p + Vector2(s * 0.4, 0), p + Vector2(0, s * 0.45), p + Vector2(-s * 0.4, 0), p + Vector2(0, -s * 0.45)]), Color(0.4, 0.9, 1.0), lw, true)
+		"fire":
+			c.draw_arc(p, s * 0.9, 0.0, TAU, 32, Color(1.0, 0.55, 0.15), lw * 1.2, true)
+			c.draw_arc(p, s * 0.7, 0.4, 1.6, 12, Color(1.0, 0.55, 0.15), lw, true)
+		"steer":
+			c.draw_polyline(PackedVector2Array([p + Vector2(-s * 0.2, -s * 0.5), p + Vector2(-s * 0.8, 0), p + Vector2(-s * 0.2, s * 0.5)]), col, lw, true)
+			c.draw_polyline(PackedVector2Array([p + Vector2(s * 0.2, -s * 0.5), p + Vector2(s * 0.8, 0), p + Vector2(s * 0.2, s * 0.5)]), col, lw, true)
+		"goal":
+			for i in range(4):
+				for j in range(3):
+					if (i + j) % 2 == 0:
+						c.draw_rect(Rect2(p + Vector2(-s * 0.8 + i * s * 0.4, -s * 0.6 + j * s * 0.4), Vector2(s * 0.4, s * 0.4)), col)
+			c.draw_rect(Rect2(p + Vector2(-s * 0.8, -s * 0.6), Vector2(s * 1.6, s * 1.2)), col, false, lw * 0.6)
+		"super":
+			for i in range(3):
+				c.draw_circle(p + Vector2(-s * 0.6 + i * s * 0.6, 0), s * 0.22, Color(1.0, 0.8, 0.25))
+		"mega":
+			c.draw_arc(p, s * 0.35, 0.0, TAU, 24, Color(1.0, 0.45, 0.95), lw, true)
+			c.draw_arc(p, s * 0.65, 0.0, TAU, 32, Color(1.0, 0.45, 0.95, 0.75), lw, true)
+			c.draw_arc(p, s * 0.95, 0.0, TAU, 40, Color(1.0, 0.45, 0.95, 0.45), lw, true)
+		"energy":
+			c.draw_rect(Rect2(p - Vector2(s * 0.9, s * 0.3), Vector2(s * 1.8, s * 0.6)), col, false, lw * 0.7)
+			c.draw_rect(Rect2(p - Vector2(s * 0.8, s * 0.2), Vector2(s * 1.1, s * 0.4)), Color(0.36, 1.0, 0.6))
+
+
+# „How to play“: alles auf einer Seite, mit Symbolen
+func _show_help(on: bool) -> void:
+	if ui.has("helpp"):
+		if is_instance_valid(ui.helpp):
+			ui.helpp.queue_free()
+		ui.erase("helpp")
+	if not on:
+		return
+	var cl = CanvasLayer.new()
+	cl.layer = 12
+	add_child(cl)
+	ui.helpp = cl
+	var bg = ColorRect.new()
+	bg.color = Color(0.01, 0.01, 0.04, 0.98)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cl.add_child(bg)
+	var vb = VBoxContainer.new()
+	vb.anchor_left = 0.05
+	vb.anchor_right = 0.95
+	vb.anchor_top = 0.05
+	vb.anchor_bottom = 0.95
+	vb.add_theme_constant_override("separation", 14)
+	cl.add_child(vb)
+	vb.add_child(_lbl("HOW TO PLAY", 48))
+	var sc = ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vb.add_child(sc)
+	var lst = VBoxContainer.new()
+	lst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lst.add_theme_constant_override("separation", 18)
+	sc.add_child(lst)
+	var rows = [
+		["goal", "Goal", "Race 3 laps. Finish first – or be the last one still flying."],
+		["steer", "Steering", "Hold the left or right half of the screen."],
+		["boost", "Boost pad", "Arrows on the track. Fly over them for a burst of speed."],
+		["wpad", "Weapon pad", "A spinning ring. Fly through it to pick up a random weapon."],
+		["fire", "Fire", "Tap the round FIRE button at the bottom to use your weapon."],
+		["#", "Weapons", ""]]
+	for w in ["rak", "lenk", "mine", "orbs", "wand", "beben", "schild", "turbo", "auto"]:
+		rows.append([w, WN[w].capitalize(), WD[w]])
+	rows += [["#", "Power-ups", ""],
+		["super", "Super", "Keep your weapon and fly over 2 more weapon pads – it turns SUPER: stronger and gold."],
+		["mega", "Mega", "One more pad with a Super weapon → MEGA: a shock wave takes 75 % energy from every rival."],
+		["energy", "Energy", "Hits cost energy – at 0 % you are out. Damage you deal refills you, every new lap adds 25 %."]]
+	for r in rows:
+		if r[0] == "#":
+			var hd = _lbl(r[1], 34)
+			hd.add_theme_color_override("font_color", Color(1.0, 0.75, 0.35))
+			lst.add_child(hd)
+			continue
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 22)
+		var ic = Control.new()
+		ic.custom_minimum_size = Vector2(96, 96)
+		var key: String = r[0]
+		ic.draw.connect(func(): _wicon(ic, ic.size * 0.5, 36.0, key, Color(0.85, 0.95, 1.0)))
+		row.add_child(ic)
+		var tx = VBoxContainer.new()
+		tx.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var t1 = _lbl(r[1], 32)
+		t1.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		t1.add_theme_color_override("font_color", Color(0.55, 0.9, 1.0))
+		tx.add_child(t1)
+		var t2 = _lbl(r[2], 27)
+		t2.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		t2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		tx.add_child(t2)
+		row.add_child(tx)
+		lst.add_child(row)
+	var bb = _btn("Back", true)
+	bb.pressed.connect(func(): _show_help(false))
+	vb.add_child(bb)
+
+
 # Zielerfassung der Lenkrakete: ein Neon-Zeichen in der 3D-Welt um den Gegner (leuchtet wie die Leitplanken),
 # zieht sich zusammen, Piepsen wird schneller, eingerastet = andere Farbe, Dauersirren, „LOCKED“.
 # Aussehen im FX Lab, Reiter „Lock“ (Form, Größe, Dicke, Leuchten, Drehung, Farben, Einrastzeit, Ton).
@@ -5541,7 +5821,12 @@ func _weapons(dt: float, racing: bool) -> void:
 		else:
 			# Waffe behalten und noch zwei Waffenfelder überfahren → deine Waffe wird zur Superwaffe
 			g.wpc = int(g.get("wpc", 1)) + 1
+			if g.wpc == 2:
+				_tip("sup1", "Keep your weapon! One more weapon pad and it turns SUPER – stronger and gold.")
+			elif g.wpc == 3:
+				_tip("sup2", "SUPER weapon! Keep it for one more pad and it becomes MEGA.")
 			if g.wpc >= 4:
+				_tip("mega", "MEGA! Fire it: a shock wave takes 75 % energy from every rival.")
 				# noch ein Feld mit der Superwaffe → MEGA: Schockwelle zieht jedem Gegner 75 % Energie ab
 				g.mega = true
 				g.sup = true
@@ -5557,6 +5842,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			else:
 				_snd("pick", -6.0, 1.2)
 				_msg("SUPER %d / 3" % g.wpc, Color(1.0, 0.82, 0.35))
+	_tips_check(g, racing, dt)
 	if fire_req:
 		fire_req = false
 		if g.wpn != "" and racing:
@@ -5582,7 +5868,8 @@ func _weapons(dt: float, racing: bool) -> void:
 			var bar: MeshInstance3D = (o.node as Node3D).get_meta("bar")
 			bar.set_instance_shader_parameter("fill", o.en)
 			bar.visible = state == "race" and o.z - g.z > 1.5 and o.z - g.z < 40.0
-	hud.en.size.x = 200.0 * g.en
+	hud.en.size.x = 300.0 * g.en
+	hud.el.text = "ENERGY  %d %%" % int(round(g.en * 100.0))
 	hud.en.color = Color(0.36, 1.0, 0.6) if g.en > 0.5 else (Color(1.0, 0.85, 0.25) if g.en > 0.25 else Color(1.0, 0.35, 0.3))
 	# Warnung bei wenig Energie: Ansage beim Unterschreiten von 25 %, Balken blinkt rot
 	if g.en <= 0.25 and not g.out and state == "race":
@@ -7078,6 +7365,8 @@ func _go_back() -> void:
 				_show_settings(false)
 			elif ui.has("recp") and is_instance_valid(ui.recp):
 				_show_records(false)
+			elif ui.has("helpp") and is_instance_valid(ui.helpp):
+				_show_help(false)
 			elif ui.has("rpl") and is_instance_valid(ui.rpl) and (ui.rpl as Control).visible:
 				_show_replays(false)
 			elif now - back_q < 2.0:
