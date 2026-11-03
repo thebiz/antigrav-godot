@@ -98,6 +98,7 @@ func _ready() -> void:
 		cfg.look = 1
 	if OS.get_cmdline_user_args().has("--jungle"):
 		cfg.look = 2
+	T.J = _jungle()   # eigene Streckenführung im Dschungel
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
 	if OS.get_cmdline_user_args().has("--howto"):

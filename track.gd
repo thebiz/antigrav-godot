@@ -12,6 +12,15 @@ const SEG := [[80.0, 120.0, 18.0], [240.0, 140.0, -26.0], [420.0, 110.0, 14.0], 
 const HILL := [[2.4, 2.0, 0.0], [0.8, 5.0, 1.0]]
 const RINGS := [90, 96, 102, 108, 114, 290, 296, 302, 308, 314, 440, 446, 452, 458, 464, 625, 631, 637, 643, 649]
 const TUN := [[160.0, 245.0], [510.0, 595.0]]
+# Dschungel: stärker gewunden, eine krasse Abfahrt (470–512) und danach eine lange Steilkurve (530–700);
+# die Höhe holt die Strecke vorher mit einem langen, sanften Anstieg (150–350) wieder herein
+static var J := false
+const SEG_J := [[80.0, 120.0, 44.0], [240.0, 140.0, -26.0], [420.0, 90.0, 22.0], [530.0, 170.0, -40.0]]
+const DROP := [[150.0, 200.0, 12.0], [470.0, 42.0, -12.0]]
+
+
+static func seg() -> Array:
+	return SEG_J if J else SEG
 
 
 static func lz(z: float) -> float:
@@ -38,7 +47,7 @@ static func s2(u: float) -> float:
 static func px(z: float) -> float:
 	var l := lz(z)
 	var r := 0.0
-	for s in SEG:
+	for s in seg():
 		r += s[2] * s5((l - s[0]) / s[1])
 	return r
 
@@ -46,7 +55,7 @@ static func px(z: float) -> float:
 static func dpx(z: float) -> float:
 	var l := lz(z)
 	var r := 0.0
-	for s in SEG:
+	for s in seg():
 		r += s[2] / s[1] * s1((l - s[0]) / s[1])
 	return r
 
@@ -54,7 +63,7 @@ static func dpx(z: float) -> float:
 static func d2px(z: float) -> float:
 	var l := lz(z)
 	var r := 0.0
-	for s in SEG:
+	for s in seg():
 		r += s[2] / (s[1] * s[1]) * s2((l - s[0]) / s[1])
 	return r
 
@@ -64,6 +73,10 @@ static func py(z: float) -> float:
 	var r := 0.0
 	for h in HILL:
 		r += h[0] * sin(l * h[1] * W + h[2])
+	if J:
+		var lj := lz(z)
+		for d in DROP:
+			r += d[2] * s5((lj - d[0]) / d[1])
 	return r
 
 
@@ -72,6 +85,10 @@ static func dpy(z: float) -> float:
 	var r := 0.0
 	for h in HILL:
 		r += h[0] * h[1] * W * cos(l * h[1] * W + h[2])
+	if J:
+		var lj := lz(z)
+		for d in DROP:
+			r += d[2] / d[1] * s1((lj - d[0]) / d[1])
 	return r
 
 
@@ -102,6 +119,8 @@ static func in_tun(zl: float, m: float = 0.0) -> bool:
 
 # Steilkurve: die Außenseite hebt sich
 static func bank(z: float) -> float:
+	if J:
+		return clampf(d2px(z) * 70.0, -0.55, 0.55)   # Dschungel: steilere Kurven
 	return clampf(d2px(z) * 45.0, -0.42, 0.42)
 
 
