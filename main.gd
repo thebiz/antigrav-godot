@@ -857,7 +857,7 @@ func _env_apply() -> void:
 	var E: Dictionary = fx.env
 	if mats.has("road"):
 		_rset("rgl", float(E.gloss))
-		_rset("nk", float(E.nlight))
+		_rset("nk", 0.0 if _jungle() else float(E.nlight))
 		_rset("ncl", _v3(CY))
 		_rset("ncr", _v3(MG))
 	_wet_apply()
@@ -1286,7 +1286,7 @@ func _build_track() -> void:
 		prev = row
 		z += 0.5
 	# Leitplanken: Metallwand innen, Deckel, Neonband (links Cyan, rechts Magenta)
-	for sd in [-1.0, 1.0]:
+	for sd in ([] if _jungle() else [-1.0, 1.0]):   # Dschungel: keine Leitplanken, der Erdwall begrenzt die Piste
 		_strip("wall", 20.0, 720.0, sd * TW, sd * TW, -0.06, 0.46)
 		_strip("wall", 20.0, 720.0, sd * TW, sd * (TW + 0.12), 0.46, 0.46)
 		_strip("neonL" if sd < 0 else "neonR", 20.0, 720.0, sd * (TW - 0.012), sd * (TW - 0.012), 0.30, 0.36)
@@ -1318,7 +1318,7 @@ func _build_track() -> void:
 	var gk = 1
 	while gk * 28 + 7 < 720:
 		var zc = gk * 28.0 + 7.0
-		if zc > 20.0 and not T.in_tun(zc, 2.0) and _jungle():
+		if zc > 20.0 and _jungle():
 			lights.append([zc, _neo(gk * 0.29)])   # Dschungel: nur die schwebenden Irrlichter
 		elif zc > 20.0 and not T.in_tun(zc, 2.0):
 			for sd in [-1.0, 1.0]:
@@ -1349,7 +1349,7 @@ func _build_track() -> void:
 	for zr in ([] if _jungle() else T.RINGS):
 		_ring("ringC" if int(floor(zr / 150.0)) % 2 == 0 else "ringM", float(zr), TW + 0.55, 0.95, 0.065)
 	# Tunnel: Röhre innen, leuchtende Ringe, Deckenband
-	for tu in T.TUN:
+	for tu in ([] if _jungle() else T.TUN):   # Dschungel: keine Tunnelröhren
 		var R = TW + 0.25
 		var am = acos(maxf(-1.0, -0.56 / R))
 		var na = 22
@@ -1440,7 +1440,7 @@ void fragment(){
 	mats["tube"] = _tex_metal("tube", Color(0.24, 0.24, 0.27), 0.5, 0.28, 0.9, 0.05, Color(0.35, 0.55, 0.6)) if not _jungle() else _tex_metal("bark", Color(0.3, 0.27, 0.22), 0.4, 0.85, 0.0, 0.04, Color(0.3, 0.9, 0.6))
 	if _jungle():
 		mats["root"] = _tex_metal("bark", Color(0.45, 0.4, 0.33), 0.7, 0.85, 0.0, 0.03, Color(0.3, 0.9, 0.6))
-		mats["jfloor"] = _tex_metal("mud", Color(0.3, 0.36, 0.26), 0.33, 0.9, 0.0)
+		mats["jfloor"] = _tex_metal("mud", Color(0.46, 0.4, 0.3), 0.33, 0.9, 0.0)
 	mats["neonL"] = _neon(CY, 5.0)
 	mats["neonR"] = _neon(MG, 5.0)
 	mats["ringC"] = _neon(CY, 7.0 if not _jungle() else 1.2)
@@ -1696,7 +1696,8 @@ void fragment(){
 """
 
 # Bodenprofil neben der Strecke: [Abstand hinter der Leitplanke, Höhe]
-const JF = [[0.12, 0.46], [0.6, 0.0], [2.0, -0.35], [6.0, -0.8], [16.0, -1.4], [40.0, -2.0], [90.0, -2.4]]
+const JF = [[0.0, -0.01], [0.25, 0.3], [0.6, 0.62], [1.3, 0.4], [2.6, -0.15], [6.0, -0.8], [16.0, -1.4], [40.0, -2.0], [90.0, -2.4]]
+const JF_BANK = 4   # die ersten Punkte (Wall) folgen der Schräglage der Fahrbahn
 const JGAP = 413.5   # Mitte der Sprungstelle – dort fließt der Bach
 
 
@@ -1732,8 +1733,8 @@ func _jungle_track() -> void:
 			var row = []
 			for i in range(JF.size()):
 				var p: Vector3
-				if i == 0:
-					p = f.c + f.rr * (sd * (TW + 0.12)) + f.uu * 0.46   # an der Leitplankenkante
+				if i < JF_BANK:
+					p = f.c + f.rr * (sd * (TW + JF[i][0])) + f.uu * JF[i][1]   # Erdwall an der Fahrbahnkante
 				else:
 					p = _jf(z, sd, JF[i][0])
 				row.append(p)
@@ -1854,7 +1855,7 @@ func _jungle_build() -> void:
 			var z = 20.0 + rng.randf() * float(rw[2])
 			while z < 720.0:
 				var near = bool(rw[5])
-				var skip = absf(T.lz(z) - JGAP) < 5.0 or (near and T.in_tun(z, 3.0))
+				var skip = absf(T.lz(z) - JGAP) < 5.0
 				if not skip:
 					var la = rng.randf_range(float(rw[0]), float(rw[1]))
 					var h = rng.randf_range(float(rw[3]), float(rw[4]))
@@ -1867,7 +1868,7 @@ func _jungle_build() -> void:
 	for sd in [-1.0, 1.0]:
 		var z = 20.0
 		while z < 720.0:
-			if not T.in_tun(z, 1.0):
+			if true:
 				for k in range(2):
 					var la = rng.randf_range(0.4, 5.5) if k == 0 else rng.randf_range(0.4, 2.2)
 					var r = rng.randf()
@@ -8422,7 +8423,7 @@ func _tunnel(dt: float) -> void:
 	var g: Dictionary = _focus()
 	var zl = T.lz(g.z)
 	var k = 0.0
-	for tu in T.TUN:
+	for tu in ([] if _jungle() else T.TUN):
 		k = maxf(k, clampf(minf(zl - tu[0] + 2.0, tu[1] - zl + 2.0) / 7.0, 0.0, 1.0))
 	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
 	wenv.ambient_light_energy = lerpf(0.35 * _newr("amb", 1.0), 0.02, tun_k)
