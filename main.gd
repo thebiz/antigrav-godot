@@ -6013,10 +6013,12 @@ func _weapons(dt: float, racing: bool) -> void:
 		fire_req = false
 		if g.wpn != "" and racing:
 			_fire()
-	hud.fire.text = (("MEGA\n" if g.get("mega", false) else "SUPER\n") if g.get("sup", false) and g.wpn != "" else "") + WN.get(g.wpn, "empty")
-	# lange Namen (FORCE FIELD) kleiner, damit sie in den runden Knopf passen
-	var fn: String = WN.get(g.wpn, "empty")
-	var fsz = 30 if fn.length() <= 7 else (24 if fn.length() <= 9 else 21)
+	# Namen aus zwei Wörtern (FORCE FIELD) untereinander, damit sie in den runden Knopf passen
+	var fn: String = str(WN.get(g.wpn, "empty")).replace(" ", "\n")
+	var pre = (("MEGA\n" if g.get("mega", false) else "SUPER\n") if g.get("sup", false) and g.wpn != "" else "")
+	hud.fire.text = pre + fn
+	var nl = (pre + fn).count("\n") + 1
+	var fsz = (30 if fn.length() <= 7 else 26) if nl <= 2 else 22
 	if hud.get("fsz", 0) != fsz:
 		hud.fsz = fsz
 		hud.fire.add_theme_font_size_override("font_size", fsz)
