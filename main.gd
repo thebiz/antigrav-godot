@@ -3223,7 +3223,7 @@ func _hud() -> void:
 	hud.fire.offset_top = -300
 	hud.fire.offset_bottom = -110
 	hud.fire.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	hud.fire.offset_bottom = -138
+	hud.fire.offset_bottom = -150
 	hud.fire.add_theme_font_size_override("font_size", 30)
 	var fsb = StyleBoxFlat.new()
 	fsb.bg_color = Color(1, 1, 1, 0.05)
@@ -6014,6 +6014,12 @@ func _weapons(dt: float, racing: bool) -> void:
 		if g.wpn != "" and racing:
 			_fire()
 	hud.fire.text = (("MEGA\n" if g.get("mega", false) else "SUPER\n") if g.get("sup", false) and g.wpn != "" else "") + WN.get(g.wpn, "empty")
+	# lange Namen (FORCE FIELD) kleiner, damit sie in den runden Knopf passen
+	var fn: String = WN.get(g.wpn, "empty")
+	var fsz = 30 if fn.length() <= 7 else (24 if fn.length() <= 9 else 21)
+	if hud.get("fsz", 0) != fsz:
+		hud.fsz = fsz
+		hud.fire.add_theme_font_size_override("font_size", fsz)
 	if g.auto > 0.0 and g.wpn == "":
 		hud.fire.text = ("SUPER\n" if g.get("sauto", false) else "") + "AUTO" + (" …" if g.get("ahold", false) else " %.1f" % g.auto)
 	_lock_update(dt, racing)
@@ -8850,7 +8856,7 @@ func _shot() -> void:
 						o.en = 1.0
 					fire_req = true
 				elif p[3].begins_with("armed"):
-					ships[0].wpn = "lenk"
+					ships[0].wpn = p[3].get_slice("_", 1) if p[3].contains("_") else "lenk"
 				elif p[3].begins_with("kill"):
 					for i in range(1, 4):
 						ships[i].en = 0.05
