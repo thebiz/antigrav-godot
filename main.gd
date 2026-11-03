@@ -1284,7 +1284,8 @@ func _build_track() -> void:
 		var row = []
 		for i in range(9):
 			var x = -TW + 2.0 * TW * i / 8.0
-			row.append(f.c + f.rr * x)
+			# Dschungel: Piste wie eine ausgefahrene Rinne – zu den Rändern hin leicht hoch
+			row.append(f.c + f.rr * x + (f.uu * 0.06 * pow(absf(x) / TW, 3.0) if _jungle() else Vector3.ZERO))
 		if prev.size() > 0 and not T.gap(z - 0.25):
 			for i in range(8):
 				var u0 = float(i) / 8.0
@@ -1447,7 +1448,7 @@ void fragment(){
 	mats["tube"] = _tex_metal("tube", Color(0.24, 0.24, 0.27), 0.5, 0.28, 0.9, 0.05, Color(0.35, 0.55, 0.6)) if not _jungle() else _tex_metal("bark", Color(0.3, 0.27, 0.22), 0.4, 0.85, 0.0, 0.04, Color(0.3, 0.9, 0.6))
 	if _jungle():
 		mats["root"] = _tex_metal("bark", Color(0.45, 0.4, 0.33), 0.7, 0.85, 0.0, 0.03, Color(0.3, 0.9, 0.6))
-		mats["jfloor"] = _tex_metal("mud", Color(0.46, 0.4, 0.3), 0.33, 0.9, 0.0)
+		mats["jfloor"] = _tex_metal("mud", Color(0.62, 0.52, 0.38), 0.33, 0.9, 0.0, 0.07, Color(0.55, 0.42, 0.28))
 	mats["neonL"] = _neon(CY, 5.0)
 	mats["neonR"] = _neon(MG, 5.0)
 	mats["ringC"] = _neon(CY, 7.0 if not _jungle() else 1.2)
@@ -1640,17 +1641,18 @@ uniform float sb=1.;uniform float st=1.;uniform float sl=1.;uniform float mn=1.;
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 void sky(){
 	vec3 d=EYEDIR;float h=d.y;float an=atan(d.x,d.z);
-	vec3 c=mix(vec3(.02,.05,.055),vec3(.002,.006,.012),smoothstep(0.,.55,h))*sb;
+	// Himmel etwas heller als in der Stadt: tiefes Nachtblau, zum Horizont hin dunstig aufgehellt
+	vec3 c=mix(vec3(.05,.085,.11),vec3(.006,.012,.03),smoothstep(0.,.6,h))*sb;
 	vec2 sp=vec2(an*90.,h*160.);vec2 ci=floor(sp);
-	c+=vec3(.8,.9,1.)*step(.992,h21(ci))*smoothstep(.12,.4,h)*(1.-step(.3,length(fract(sp)-.5)))*1.3*st;
+	c+=vec3(.85,.9,1.)*step(.988,h21(ci))*smoothstep(.06,.35,h)*(1.-step(.3,length(fract(sp)-.5)))*1.4*st;
 	vec3 md=normalize(vec3(.5,.32,.8));float mo=dot(d,md);
-	c+=(vec3(.85,.95,.95)*smoothstep(.9994,.9997,mo)*4.+vec3(.15,.3,.3)*pow(max(0.,mo),60.)*.35)*mn;
-	// Baumkronen am Horizont in zwei Tiefen
-	for(int k=0;k<2;k++){float fk=float(k);
-		float tl=(.05+.03*sin(an*(6.+fk*3.)+fk)+.02*sin(an*(19.+fk*5.)+1.+fk)+.012*sin(an*57.+2.))*(1.+fk*.6)*sl;
-		if(h<tl&&sl>.01)c=mix(vec3(.004,.014,.012),vec3(.002,.006,.006),fk)+vec3(0.,.03,.025)*smoothstep(tl-.04,tl,h);}
-	c+=vec3(.03,.1,.08)*exp(-abs(h)*14.)*.5*sb;
-	if(h<-.04)c=mix(c,vec3(.003,.008,.007),smoothstep(-.04,-.15,h));
+	c+=(vec3(.85,.95,.95)*smoothstep(.9994,.9997,mo)*4.+vec3(.15,.25,.3)*pow(max(0.,mo),60.)*.35)*mn;
+	// Berge: schlichte, dunkle Silhouetten in zwei Tiefen – ohne Kontur, nur zu erahnen
+	float m1=(.06+.045*sin(an*2.+.7)+.03*sin(an*5.+2.1)+.012*sin(an*11.+.4))*sl;
+	float m2=(.035+.03*sin(an*3.+1.9)+.018*sin(an*7.+.3)+.008*sin(an*17.+1.))*sl;
+	if(h<m1&&sl>.01)c=mix(c,vec3(.012,.02,.03),.85);
+	if(h<m2&&sl>.01)c=vec3(.004,.008,.012);
+	if(h<-.04)c=mix(c,vec3(.003,.006,.008),smoothstep(-.04,-.15,h));
 	COLOR=c;
 }
 """
@@ -1709,8 +1711,8 @@ void fragment(){
 """
 
 # Bodenprofil neben der Strecke: [Abstand hinter der Leitplanke, Höhe]
-const JF = [[0.0, -0.01], [0.25, 0.3], [0.6, 0.62], [1.3, 0.4], [2.6, -0.15], [6.0, -0.8], [16.0, -1.4], [40.0, -2.0], [90.0, -2.4]]
-const JF_BANK = 4   # die ersten Punkte (Wall) folgen der Schräglage der Fahrbahn
+const JF = [[0.0, 0.06], [0.15, 0.11], [0.35, 0.2], [0.6, 0.34], [0.9, 0.5], [1.25, 0.62], [1.7, 0.66], [2.4, 0.4], [3.6, -0.15], [6.0, -0.8], [16.0, -1.4], [40.0, -2.0], [90.0, -2.4]]
+const JF_BANK = 8   # die ersten Punkte (Wall) folgen der Schräglage der Fahrbahn
 const JGAP = 413.5   # Mitte der Sprungstelle – dort fließt der Bach
 
 
