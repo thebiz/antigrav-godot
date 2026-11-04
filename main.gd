@@ -24,13 +24,13 @@ const JETS = [
 	[[0.0, 0.11, -0.76, 0.05], [-0.184, 0.139, -0.72, 0.03], [0.184, 0.139, -0.72, 0.03]],
 	[[-0.069, 0.145, -0.72, 0.042], [0.069, 0.145, -0.72, 0.042]]]
 # Antigrav-Ringe unter dem Rumpf (wie Räder: zwei vorn, zwei hinten): Position, Radius
-const RINGS = {4: [[Vector3(0.23, 0.03, 0.3), 0.075], [Vector3(-0.23, 0.03, 0.3), 0.075], [Vector3(0.17, 0.03, -0.47), 0.08], [Vector3(-0.17, 0.03, -0.47), 0.08]]}
+const RINGS = {4: [[Vector3(0.0, 0.012, 0.26), 0.062], [Vector3(0.115, 0.03, -0.43), 0.08], [Vector3(-0.115, 0.03, -0.43), 0.08]]}
 # Behang (Cyber Gothic): je Schiff Ketten mit Anhängern, schwingen frei (Punkt im Schiffsraum, Glieder: Art + Länge)
 const DANG = {4: [
-	[Vector3(-0.245, 0.054, -0.245), [["link", 0.022], ["link", 0.022], ["knot", 0.024], ["tassel", 0.06]]],
-	[Vector3(0.245, 0.054, -0.245), [["link", 0.022], ["link", 0.022], ["knot", 0.024], ["tassel", 0.06]]],
-	[Vector3(-0.344, 0.077, -0.505), [["link", 0.026], ["link", 0.026], ["link", 0.026], ["link", 0.026], ["spike", 0.05]]],
-	[Vector3(0.344, 0.077, -0.505), [["link", 0.026], ["link", 0.026], ["link", 0.026], ["link", 0.026], ["spike", 0.05]]]]}
+	[Vector3(-0.24, 0.06, -0.245), [["link", 0.022], ["link", 0.022], ["knot", 0.024], ["tassel", 0.06]]],
+	[Vector3(0.24, 0.06, -0.245), [["link", 0.022], ["link", 0.022], ["knot", 0.024], ["tassel", 0.06]]],
+	[Vector3(-0.335, 0.16, -0.42), [["link", 0.026], ["link", 0.026], ["link", 0.026], ["link", 0.026], ["spike", 0.05]]],
+	[Vector3(0.335, 0.16, -0.42), [["link", 0.026], ["link", 0.026], ["link", 0.026], ["link", 0.026], ["spike", 0.05]]]]}
 const CFG_PATH = "user://settings.cfg"
 
 # Lenkung wie in der HTML-Version (von John abgestimmt)
@@ -363,8 +363,15 @@ func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
-			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav"]:
+			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
+			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
+	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
+	for c in ["ren", "vega", "kato", "mira"]:
+		for k in ["start", "win", "mad", "lose", "ko"]:
+			var pth = "res://sfx/cv_%s_%s.wav" % [c, k]
+			if ResourceLoader.exists(pth):
+				snd["cv_%s_%s" % [c, k]] = load(pth)
 	for k in ["engine", "idle", "field"]:
 		var p = AudioStreamPlayer.new()
 		p.stream = _looped(snd[k])
@@ -669,7 +676,8 @@ const FXS = {
 		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0], ["steer", "Steering lag", 0.2, 8.0, 1.0],
 		["steerk", "Steering strength", 0.3, 3.0, 1.0], ["grip", "Grip", 0.2, 4.0, 1.0], ["drift", "Drift", 0.0, 4.0, 0.0],
 		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0], ["trim", "Nose trim (down +)", -1.0, 1.0, 0.0],
-		["swing", "Tassel swing", 0.0, 3.0, 1.0], ["wind", "Tassel wind", 0.0, 3.0, 1.0]],
+		["weight", "Tassel weight", 0.1, 3.0, 1.0], ["swing", "Tassel swing", 0.1, 3.0, 1.0], ["wind", "Tassel wind (driving)", 0.0, 3.0, 1.0],
+		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -946,7 +954,7 @@ void sky(){
 	vec2 sp=vec2(an*90.,h*160.);vec2 ci=floor(sp);
 	c+=vec3(.8,.85,1.)*step(.986,h21(ci))*smoothstep(.03,.25,h)*(1.-step(.3,length(fract(sp)-.5)))*1.6*st;
 	vec3 md=normalize(vec3(.5,.32,.8));float mo=dot(d,md);
-	c+=(vec3(.9,.92,1.)*smoothstep(.9994,.9997,mo)*4.+vec3(.25,.3,.5)*pow(max(0.,mo),60.)*.35)*mn;
+	c+=(vec3(.9,.92,1.)*smoothstep(.0346,.0245,length(d-md))*4.+vec3(.25,.3,.5)*pow(max(0.,mo),60.)*.35)*mn;
 	// Skyline in zwei Tiefen mit Fenstern und Neonkanten
 	for(int k=0;k<2;k++){float fk=float(k);float s=55.-fk*20.;float bx=floor(an*s);
 		float bh=(.014+.05*pow(h21(vec2(bx,fk)),2.2))*(1.+fk*.7)*sl;
@@ -1731,7 +1739,7 @@ void sky(){
 	vec2 sp=vec2(an*90.,h*160.);vec2 ci=floor(sp);
 	c+=vec3(.85,.9,1.)*step(.988,h21(ci))*smoothstep(.06,.35,h)*(1.-step(.3,length(fract(sp)-.5)))*1.4*st;
 	vec3 md=normalize(vec3(.5,.32,.8));float mo=dot(d,md);
-	c+=(vec3(.85,.95,.95)*smoothstep(.9994,.9997,mo)*4.+vec3(.15,.25,.3)*pow(max(0.,mo),60.)*.35)*mn;
+	c+=(vec3(.85,.95,.95)*smoothstep(.0346,.0245,length(d-md))*4.+vec3(.15,.25,.3)*pow(max(0.,mo),60.)*.35)*mn;
 	// ab und zu eine Sternschnuppe: kurzer heller Kopf, feiner Schweif
 	float slot=floor(TIME/6.);float ph=fract(TIME/6.)/.16;
 	if(ph<1.&&h11(slot)<.55*mt&&h>.08){
@@ -1765,7 +1773,10 @@ void vertex(){
 	cd=INSTANCE_CUSTOM;
 	cell=floor(cd.r*nc+.5)+(cd.b>.5?0.:UV2.x);
 	float top=1.-UV.y;
-	VERTEX.x+=sin(TIME*1.3+cd.a*40.)*wd*top*top;
+	// leichte Brise: wiegt sich, mit langsamen Böen
+	float gust=.75+.5*sin(TIME*.37+cd.a*3.)*sin(TIME*.19);
+	VERTEX.x+=(sin(TIME*1.3+cd.a*40.)*.7+sin(TIME*.6+cd.a*9.)*.6)*wd*top*top*gust;
+	VERTEX.z+=sin(TIME*1.1+cd.a*23.)*wd*.5*top*top*gust;
 }
 void fragment(){
 	float c=mod(cell,nc);
@@ -1776,6 +1787,23 @@ void fragment(){
 	ALBEDO=col;ALPHA=t.a;ALPHA_SCISSOR_THRESHOLD=.5;
 }
 """
+
+# Blatt im Wind: dunkelgrünes Oval mit Mittelrippe, dreht sich frei
+const LEAF_CODE = """
+shader_type spatial;
+render_mode unshaded,cull_disabled,shadows_disabled;
+varying float sd;
+void vertex(){sd=INSTANCE_CUSTOM.x;MODELVIEW_MATRIX=VIEW_MATRIX*MODEL_MATRIX;}
+void fragment(){
+	vec2 p=UV*2.-1.;
+	float e=p.x*p.x+p.y*p.y*2.6;
+	if(e>1.)discard;
+	float rib=smoothstep(.06,0.,abs(p.y))*.35;
+	vec3 c=mix(vec3(.05,.14,.06),vec3(.13,.26,.08),.5+.5*p.x)*(1.-rib);
+	ALBEDO=c*(FRONT_FACING?1.:.7);
+}
+"""
+var jleaf: GPUParticles3D = null
 
 # Glühwürmchen: kleine Lichtpunkte, die schweben und blinken (immer zur Kamera gedreht)
 const JFLY_CODE = """
@@ -2047,6 +2075,36 @@ func _jungle_build() -> void:
 					var bs = Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sz, sz, sz))
 					und.append([Transform3D(bs, p), Color(float(cell) / 4.0, rng.randf(), glow, rng.randf()), z])
 			z += rng.randf_range(0.35, 0.65)
+	# Laub, das im Wind vorbeiweht (folgt der Kamera, siehe _pose_all)
+	jleaf = GPUParticles3D.new()
+	jleaf.amount = 36
+	jleaf.lifetime = 5.0
+	jleaf.preprocess = 5.0
+	jleaf.visibility_aabb = AABB(Vector3(-30, -20, -30), Vector3(60, 40, 60))
+	var lpm = ParticleProcessMaterial.new()
+	lpm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	lpm.emission_box_extents = Vector3(9, 4, 12)
+	lpm.direction = Vector3(1, -0.2, 0.3)
+	lpm.spread = 40.0
+	lpm.initial_velocity_min = 0.8
+	lpm.initial_velocity_max = 2.2
+	lpm.gravity = Vector3(0, -0.35, 0)
+	lpm.turbulence_enabled = true
+	lpm.turbulence_noise_strength = 1.2
+	lpm.turbulence_noise_scale = 3.0
+	lpm.angular_velocity_min = -160.0
+	lpm.angular_velocity_max = 160.0
+	lpm.angle_min = -180.0
+	lpm.angle_max = 180.0
+	lpm.scale_min = 0.6
+	lpm.scale_max = 1.3
+	jleaf.process_material = lpm
+	var lq = QuadMesh.new()
+	lq.size = Vector2(0.14, 0.09)
+	var lmat = _shader_mat(LEAF_CODE)
+	lq.material = lmat
+	jleaf.draw_pass_1 = lq
+	add_child(jleaf)
 	# Glühwürmchen
 	var fq = QuadMesh.new()
 	fq.size = Vector2(0.05, 0.05)
@@ -2576,11 +2634,120 @@ func _holos_make() -> void:
 
 # Start-Mädel: großes Hologramm über der Strecke vor dem Feld – Arme hoch bei 3‑2‑1, bei GO runter, dann zack weg mit Glitch
 var starter = {}
-const ST_H = 20.5   # Größe in m (so groß, dass sie im Hochformat mit Armen gerade noch ganz ins Bild passt)
+const ST_H = 15.5   # Größe in m (so groß, dass sie mit Flagge im Hochformat ganz ins Bild passt)
+
+
+const ST_MH = 0.955   # Höhe des Start-Mädel-Modells (Kopf oben) in Modell-Einheiten
+const FLAG_CODE = """
+shader_type spatial;
+render_mode unshaded,cull_disabled,shadows_disabled;
+uniform sampler2D tex:source_color,filter_linear_mipmap;
+uniform float sw=1.;uniform float k=1.;
+varying float ed;
+void vertex(){
+	// Welle läuft vom Mast weg, außen stärker; „sw“ = Wind/Schwung
+	float u=UV.x;
+	float w=sin(u*7.5-TIME*(6.+5.*sw)+UV.y*1.7)*.06+sin(u*13.-TIME*9.)*.02;
+	VERTEX.z+=w*u*(.6+sw)*.5;
+	VERTEX.y-=u*u*.04*(1.4-sw*.4);
+}
+void fragment(){
+	vec3 c=texture(tex,UV).rgb;
+	float e=max(max(smoothstep(.965,1.,UV.x),smoothstep(.04,0.,UV.y)),smoothstep(.96,1.,UV.y));
+	ALBEDO=c*k+vec3(1.,.08,.12)*e*2.2*k;
+}"""
 
 
 func _starter_make() -> void:
-	starter = _hfig_make()
+	var root = Node3D.new()
+	var m: Node3D = load("res://art/starter/starter.glb").instantiate()
+	# Modell steht mit z nach oben und schaut nach +x: aufrichten
+	m.transform = Transform3D.IDENTITY
+	root.add_child(m)
+	for mi in m.find_children("*", "MeshInstance3D", true, false):
+		var mm = mi as MeshInstance3D
+		var src = mm.mesh.surface_get_material(0) as StandardMaterial3D
+		var um = StandardMaterial3D.new()
+		um.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED   # Manga-Look: flach und gut sichtbar bei Nacht
+		if src != null:
+			um.albedo_texture = src.albedo_texture
+		um.albedo_color = Color(0.92, 0.9, 0.92)
+		mm.material_override = um
+		mm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mm.extra_cull_margin = 0.6
+	var sk: Skeleton3D = m.find_children("*", "Skeleton3D", true, false)[0]
+	root.visible = false
+	add_child(root)
+	var d = {"n": root, "sk": sk, "arms": []}
+	for b in [["mixamorig_LeftArm", 1.0], ["mixamorig_RightArm", -1.0]]:
+		var ia = sk.find_bone(b[0])
+		var ifa = sk.find_bone(b[0].replace("Arm", "ForeArm"))
+		var ih = sk.find_bone(b[0].replace("Arm", "Hand"))
+		if ia < 0 or ifa < 0 or ih < 0:
+			continue
+		d.arms.append({"ia": ia, "ifa": ifa, "ih": ih, "s": b[1], "hg": sk.get_bone_global_rest(ih).basis,
+			"pg": sk.get_bone_global_rest(sk.get_bone_parent(ia)).basis, "bg": sk.get_bone_global_rest(ia).basis, "fg": sk.get_bone_global_rest(ifa).basis})
+	# Drachenflagge in der rechten Hand: Mast entlang der Finger, Tuch weht nach außen
+	var ba = Node3D.new()   # folgt jedes Bild der Hand, Mast bleibt dabei eher senkrecht (siehe _starter_live)
+	ba.top_level = true
+	root.add_child(ba)
+	d.fp = ba
+	var pole = MeshInstance3D.new()
+	var cy = CylinderMesh.new()
+	cy.top_radius = 0.006
+	cy.bottom_radius = 0.006
+	cy.height = 0.34
+	cy.radial_segments = 8
+	cy.rings = 1
+	pole.mesh = cy
+	var pm = StandardMaterial3D.new()
+	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pm.albedo_color = Color(0.12, 0.12, 0.14)
+	pole.material_override = pm
+	pole.position = Vector3(0, 0.13, 0)
+	ba.add_child(pole)
+	var tip = MeshInstance3D.new()
+	tip.mesh = _lowsphere(0.012, 8, 4)
+	var tm = StandardMaterial3D.new()
+	tm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	tm.albedo_color = Color(1.0, 0.15, 0.2)
+	tip.material_override = tm
+	tip.position = Vector3(0, 0.3, 0)
+	ba.add_child(tip)
+	var fl = MeshInstance3D.new()
+	var pl = PlaneMesh.new()
+	pl.size = Vector2(0.3, 0.2)
+	pl.subdivide_width = 18
+	pl.subdivide_depth = 8
+	pl.orientation = PlaneMesh.FACE_Z
+	pl.center_offset = Vector3(0.15, -0.1, 0)
+	fl.mesh = pl
+	var fm = _shader_mat(FLAG_CODE)
+	fm.set_shader_parameter("tex", load("res://art/starter/flag.jpg"))
+	fl.material_override = fm
+	fl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Tuch-x zeigt von der Hand weg (Hand-z), Tuch-y entlang des Masts
+	fl.transform = Transform3D(Basis.IDENTITY, Vector3(0, 0.29, 0))
+	ba.add_child(fl)
+	d.flag = fm
+	d.fln = fl
+	starter = d
+
+
+# Start-Mädel: Arme einzeln stellen (Grad über waagrecht, Grad nach vorn); Skelettraum: oben +z, vorn +x
+func _st_arms(d: Dictionary, upL: float, upR: float, fwdL := 0.0, fwdR := 0.0) -> void:
+	var sk: Skeleton3D = d.sk
+	for a in d.arms:
+		var sg = float(a.s)
+		var up = upL if sg > 0.0 else upR
+		var fw = fwdL if sg > 0.0 else fwdR
+		var ra = Basis(Vector3(0, 0, 1), deg_to_rad(fw) * -sg) * Basis(Vector3(1, 0, 0), deg_to_rad(up) * sg)
+		var ag: Basis = ra * (a.bg as Basis)
+		sk.set_bone_pose_rotation(a.ia, ((a.pg as Basis).inverse() * ag).get_rotation_quaternion())
+		var fgp: Basis = ra * (a.fg as Basis)
+		sk.set_bone_pose_rotation(a.ifa, (ag.inverse() * fgp).get_rotation_quaternion())
+		var rh: Basis = ra * (a.hg as Basis)
+		sk.set_bone_pose_rotation(a.ih, (fgp.inverse() * rh).get_rotation_quaternion())
 
 
 # eigene Hologramm-Figur (Michelle) mit Skelett, dessen Arme wir selbst stellen
@@ -2650,30 +2817,35 @@ const HF_FWD = 1.0   # Vorzeichen „nach vorn“ im Skelettraum
 
 # Winkel der Arme (Grad, 0 = waagrecht, + = hoch) und Glitch-Stärke über die Startphase
 func _starter_pose() -> Array:
-	var ang = -72.0
-	var gx = 0.0
+	var ang = -72.0    # Flaggenarm (rechts)
+	var al = -72.0     # freier Arm (links)
+	var sw = 0.4       # Schwung fürs Tuch
 	var vis = true
 	if state == "intro":
-		gx = clampf(1.0 - t_state / 0.5, 0.0, 1.0) * 0.8   # flackert beim Erscheinen rein
-		ang = -72.0 + sin(t_state * 2.0) * 4.0
+		ang = -62.0 + sin(t_state * 2.0) * 4.0
+		al = -70.0 + sin(t_state * 1.6) * 3.0
 	elif state == "count":
 		var c = 3 - int(floor(t_state))
 		var u = t_state - floor(t_state)
-		var tg = [-72.0, 85.0, 65.0, 42.0][clampi(c, 0, 3)]       # 3: schräg hoch · 2: höher · 1: ganz hoch
-		var pv = [-72.0, 85.0, 65.0, 42.0][clampi(c + 1, 0, 3)] if c < 3 else -72.0
-		ang = lerpf(pv, tg, 1.0 - pow(1.0 - clampf(u / 0.22, 0.0, 1.0), 3.0))
+		var e = 1.0 - pow(1.0 - clampf(u / 0.22, 0.0, 1.0), 3.0)
+		var tg = [-62.0, 62.0, 42.0, 20.0][clampi(c, 0, 3)]       # 3: schräg hoch · 2: höher · 1: Flagge hoch
+		var pv = [-62.0, 62.0, 42.0, 20.0][clampi(c + 1, 0, 3)] if c < 3 else -62.0
+		ang = lerpf(pv, tg, e)
+		var tl = [-70.0, 20.0, 8.0, -5.0][clampi(c, 0, 3)]       # anderer Arm geht zur Seite raus
+		var pl = [-70.0, 20.0, 8.0, -5.0][clampi(c + 1, 0, 3)] if c < 3 else -70.0
+		al = lerpf(pl, tl, e)
 		if c == 1:
 			ang += sin(u * 40.0) * 2.0 * u        # zittert vor Spannung
-		gx = 0.35 * clampf(1.0 - u / 0.15, 0.0, 1.0)
-	elif state == "race" and t_state < 0.75:
-		# GO: Arme runterreißen, kurz halten, dann heftiger Glitch und weg
-		ang = lerpf(80.0, -55.0, clampf(t_state / 0.1, 0.0, 1.0))
-		gx = 0.0 if t_state < 0.3 else clampf((t_state - 0.3) / 0.35, 0.0, 1.0) * 1.6
-		if t_state > 0.62:
-			vis = randf() < 0.35   # letzte Zuckungen
+		sw = 0.6 + 1.2 * (1.0 - e)
+	elif state == "race" and t_state < 1.4:
+		# GO: Flagge runterreißen, das Tuch schlägt nach
+		var a = clampf(t_state / 0.14, 0.0, 1.0)
+		ang = lerpf(62.0, -50.0, a * a)
+		al = lerpf(20.0, -45.0, a)
+		sw = 2.0 - t_state
 	else:
 		vis = false
-	return [vis, ang, gx]
+	return [vis, ang, al, sw]
 
 
 func _starter_live() -> void:
@@ -2691,9 +2863,24 @@ func _starter_live() -> void:
 		return
 	var f = T.frame(T.ZST + 36.0)
 	var fw: Vector3 = (f.fw * Vector3(1, 0, 1)).normalized()
-	n.global_transform = Transform3D(Basis.looking_at(fw, Vector3.UP).scaled(Vector3.ONE * (ST_H / float(HOLO_FIGS[0][1]))), f.c + Vector3.UP * -0.2)
-	_hfig_arms(starter, float(ps[1]), 0.0, float(ps[1]), 0.0)
-	_hfig_look(starter, f.c.y, ST_H, float(ps[2]))
+	n.global_transform = Transform3D(Basis.looking_at(fw, Vector3.UP).scaled(Vector3.ONE * (ST_H / ST_MH)), f.c + Vector3.UP * -0.2)
+	_st_arms(starter, float(ps[2]), float(ps[1]), 8.0, 10.0)
+	_sp(starter.flag, "sw", float(ps[3]))
+	# Flaggenmast: an der Hand, Richtung halb Arm, halb senkrecht (beim Runterreißen ganz mit dem Arm)
+	var sk1: Skeleton3D = starter.sk
+	var hx: Transform3D = sk1.global_transform * sk1.get_bone_global_pose(sk1.find_bone("mixamorig_RightHand"))
+	var sx: Transform3D = sk1.global_transform * sk1.get_bone_global_pose(sk1.find_bone("mixamorig_RightArm"))
+	var adir: Vector3 = (hx.origin - sx.origin).normalized()
+	var wv = 0.72 if state != "race" else clampf(0.72 - t_state * 6.0, 0.0, 0.72)
+	var pdir: Vector3 = adir.lerp(Vector3.UP, wv).normalized()
+	var nrm: Vector3 = -fw
+	var outv: Vector3 = (adir - pdir * adir.dot(pdir))
+	if outv.length() < 0.05:
+		outv = nrm.cross(pdir)
+	outv = outv.normalized()
+	nrm = outv.cross(pdir).normalized()
+	var sc = ST_H / ST_MH
+	(starter.fp as Node3D).global_transform = Transform3D(Basis(outv * sc, pdir * sc, nrm * sc), hx.origin)
 
 
 # Koi aus einem gebogenen Rumpf mit Schwanz-, Rücken- und Brustflossen (Länge 1, Kopf bei +z)
@@ -3131,7 +3318,11 @@ func _dangle_step(nd: Node3D, dt: float) -> void:
 	var xf: Transform3D = nd.global_transform
 	var sc = xf.basis.get_scale().x
 	var dn: Vector3 = -xf.basis.y.normalized()
-	var g: Vector3 = dn * 9.0 * float(SX.swing)
+	var g: Vector3 = dn * 9.0 * float(SX.get("weight", 1.0))
+	# leichte, böige Brise, die immer weht (auch im Stand): Richtung dreht langsam, Stärke pulsiert
+	var tt = Time.get_ticks_msec() / 1000.0
+	var gust = 0.55 + 0.45 * sin(tt * 1.3) * sin(tt * 0.71 + 1.0) + 0.25 * sin(tt * 3.7)
+	var breeze: Vector3 = Vector3(sin(tt * 0.23), 0.0, cos(tt * 0.17)).normalized() * gust * 3.2 * float(SX.get("breeze", 1.0))
 	var fw: Vector3 = xf.basis.z.normalized()
 	var xi: Transform3D = xf.affine_inverse()
 	for d in dg:
@@ -3146,8 +3337,9 @@ func _dangle_step(nd: Node3D, dt: float) -> void:
 			d.la = a
 		var sv: Vector3 = (a - d.la) / dt
 		d.la = a
-		var wind: Vector3 = -sv * 0.25 * float(SX.wind)
-		var damp = pow(0.04, dt)   # Restschwung relativ zum Schiff nach 1 s noch 4 %
+		var wind: Vector3 = -sv * 0.25 * float(SX.wind) + breeze
+		# „Tassel swing“: wie lange sie nachschwingen (1 = nach 1 s noch 4 % Schwung, 3 = deutlich länger)
+		var damp = pow(0.04, dt / maxf(0.05, float(SX.swing)))
 		var p: Array = d.p
 		var pp: Array = d.pp
 		p[0] = a
@@ -3950,6 +4142,27 @@ func _menu() -> void:
 	dim.visible = false
 	root.add_child(dim)
 	ui.dim = dim
+	# weicher dunkler Verlauf unter den Knöpfen: der Boden darf leuchten, die Schrift bleibt lesbar
+	var grad = Gradient.new()
+	grad.set_color(0, Color(0, 0, 0, 0.0))
+	grad.set_color(1, Color(0, 0, 0, 0.72))
+	var gt = GradientTexture2D.new()
+	gt.gradient = grad
+	gt.fill_from = Vector2(0, 0)
+	gt.fill_to = Vector2(0, 0.45)
+	gt.width = 4
+	gt.height = 256
+	var shade = TextureRect.new()
+	shade.texture = gt
+	shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	shade.stretch_mode = TextureRect.STRETCH_SCALE
+	shade.anchor_left = 0.0
+	shade.anchor_right = 1.0
+	shade.anchor_top = 0.48
+	shade.anchor_bottom = 1.0
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(shade)
+	root.move_child(shade, dim.get_index())
 	# Hauptseite
 	var box = VBoxContainer.new()
 	box.add_theme_constant_override("separation", 20)
@@ -4307,7 +4520,7 @@ func _dot(r: int) -> ImageTexture:
 
 func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
-	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Textures: ambientCG (CC0) · “Jungle Tree” by gelmi.com.br, CC BY 4.0 · private use only"
+	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Textures: ambientCG (CC0) · Voices: Kokoro TTS (Apache 2.0) · Characters & start girl: John, 3D via Tripo AI · “Jungle Tree” by gelmi.com.br, CC BY 4.0 · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
 	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
 	ui.sl.res.text = "Resolution  %d %%" % int(round(float(cfg.res) * 100.0))
@@ -8154,6 +8367,11 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	if s.slowT > 0.0:
 		s.slowT -= dt
 	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow * (0.75 if s.slowT > 0.0 else 1.0) if racing or state == "done" else 0.0
+	if is_p and not fin.is_empty() and fin.get("fly", false):
+		# Siegerrunde: sanft ausrollen und schwebend stehen bleiben (für die Kamerafahrt)
+		s.ro = float(s.get("ro", 1.0)) * exp(-dt * 1.4)
+		s.spd *= s.ro
+		s.boost = 0.0
 	var fwd: float = s.spd * cos(s.vpsi)
 	s.z += fwd * dt
 	s.lat += s.spd * sin(s.vpsi) * dt
@@ -9716,6 +9934,8 @@ func _tunnel(dt: float) -> void:
 
 
 func _pose_all(dt: float) -> void:
+	if jleaf != null and cam != null:
+		jleaf.global_position = cam.global_position - cam.global_transform.basis.z * 9.0
 	var tt = Time.get_ticks_msec() / 1000.0
 	for i in range(ships.size()):
 		var s: Dictionary = ships[i]
@@ -9766,7 +9986,7 @@ func _pose_all(dt: float) -> void:
 			jc2 = Color(1.0, 0.85, 0.6)
 		var jk = (0.85 + 0.35 * spk + 1.2 * bo) * float(HX.jglow)
 		if i == 0 and not fin.is_empty() and fin.fly and fin.phase == 0:
-			jk *= 0.3   # Kamerafahrt ganz nah am Schiff: Düsen nicht blenden lassen
+			jk *= 0.75   # Kamerafahrt ganz nah am Schiff: Düsen glühen, blenden aber nicht
 		_sp(pjm[0], "jk", jk)
 		_sp(pjm[0], "jl", JL)
 		_sp(pjm[0], "jd", float(HX.jdia))
@@ -9815,7 +10035,7 @@ func _camera(dt: float) -> void:
 		return
 	if state == "kill" and _kc_cam():
 		return
-	if state == "done" and _fly_cam():
+	if state == "done" and _fly_cam(dt):
 		return
 	var g: Dictionary = _focus()
 	var f = T.frame(g.z)
@@ -9927,30 +10147,32 @@ func _comic_build(kind: String) -> void:
 			var k = 0
 			for i in [1, 2, 3, 0]:
 				var ch: Array = CHARS[i]
-				pn.append({"ch": ch, "img": _cm_img(ch[3] + "_" + str(1 if i == 0 else 0)), "line": _pick(CM_LINES[ch[3]]), "t0": 0.3 + k * 0.62, "fy": 0.45})
+				pn.append({"ch": ch, "img": _cm_img(ch[3] + "_" + str(1 if i == 0 else 0)), "line": _pick(CM_LINES[ch[3]]), "t0": 0.3 + k * 0.62, "fy": 0.45, "vo": "cv_%s_start" % ch[3] if k == 0 or k == 3 else ""})
 				k += 1
 			end = 0.3 + 4 * 0.62 + 1.0
 		"win":
 			var r: Array = CHARS[0]
-			pn.append({"ch": r, "img": _cm_img("ren_2"), "line": _pick(CM_WIN.ren), "t0": 0.25, "fy": 0.45, "big": true})
+			pn.append({"ch": r, "img": _cm_img("ren_2"), "line": _pick(CM_WIN.ren), "t0": 0.25, "fy": 0.45, "big": true, "vo": "cv_ren_win"})
 			var k2 = 0
+			var vk = randi() % 3   # nur einer der Verlierer meckert hörbar, sonst wird's ein Durcheinander
 			for i in [1, 2, 3]:
 				var ch2: Array = CHARS[i]
-				pn.append({"ch": ch2, "img": _cm_img(ch2[3] + "_1"), "line": _pick(CM_WIN[ch2[3]]), "t0": 0.8 + k2 * 0.3, "fy": 0.45})
+				pn.append({"ch": ch2, "img": _cm_img(ch2[3] + "_1"), "line": _pick(CM_WIN[ch2[3]]), "t0": 0.8 + k2 * 0.3, "fy": 0.45, "vo": "cv_%s_mad" % ch2[3] if k2 == vk else ""})
 				k2 += 1
 			stamp = ["VICTORY!", Color(1.0, 0.8, 0.2)]
 			hold = true
 		"lose":
 			var w: Array = CHARS[clampi(who, 1, 3)]
-			pn.append({"ch": w, "img": _cm_img(w[3] + "_2"), "line": _pick(CM_LOSE[w[3]]), "t0": 0.25, "fy": 0.45, "big": true})
-			pn.append({"ch": CHARS[0], "img": _cm_img("ren_1"), "line": _pick(CM_LOSE.ren), "t0": 0.85, "fy": 0.45})
+			pn.append({"ch": w, "img": _cm_img(w[3] + "_2"), "line": _pick(CM_LOSE[w[3]]), "t0": 0.25, "fy": 0.45, "big": true, "vo": "cv_%s_win" % w[3]})
+			pn.append({"ch": CHARS[0], "img": _cm_img("ren_1"), "line": _pick(CM_LOSE.ren), "t0": 1.9, "fy": 0.45, "vo": "cv_ren_lose"})
 			stamp = ["DEFEAT", Color(0.75, 0.75, 0.8)]
 			hold = true
 		"ko":
 			var v: Array = CHARS[clampi(who, 1, 3)]
-			pn.append({"ch": v, "img": _cm_img("ko_" + v[3]), "line": _pick(CM_KO[v[3]]), "t0": 0.0, "fy": 0.5, "noname": false})
+			pn.append({"ch": v, "img": _cm_img("ko_" + v[3]), "line": _pick(CM_KO[v[3]]), "t0": 0.0, "fy": 0.5, "noname": false, "vo": "cv_%s_ko" % v[3]})
 			stamp = ["K.O.!", Color(1.0, 0.85, 0.15)]
-			end = 2.6
+			end = 2.8
+			_snd("cm_crash", -3.0)
 	var ns = pn.size()
 	var st = pn[ns - 1].t0 + 0.5
 	cm = {"kind": kind, "who": who, "t": 0.0, "layer": layer, "c": c, "pn": pn, "end": end if end > 0.0 else 6.0,
@@ -9978,15 +10200,27 @@ func _comic_update(dt: float) -> void:
 	cm.t += dt
 	# Tschack: jedes Panel knallt mit einem Schlag rein
 	var pn: Array = cm.pn
+	# Geräusche je Panel: Wusch beim Reinfliegen, Schlag beim Aufprall, Plopp für die Blase, dazu die Stimme
 	for k in range(pn.size()):
-		if k > cm.hit and cm.t >= pn[k].t0 + 0.22 and cm.skip < 0.0:
-			cm.hit = k
-			_snd("land", -4.0, 1.25 + 0.08 * k)
+		var pd: Dictionary = pn[k]
+		if cm.skip >= 0.0:
+			break
+		if cm.t >= pd.t0 and not pd.get("s0", false):
+			pd.s0 = true
+			_snd("cm_whoosh", -8.0, randf_range(0.9, 1.15))
+		if cm.t >= pd.t0 + 0.22 and not pd.get("s1", false):
+			pd.s1 = true
+			_snd("cm_hit", -5.0, 1.0 + 0.06 * k)
 			cm.shake = 1.0
-	if cm.t >= cm.st + 0.15 and not cm.get("sth", false):
+		if cm.t >= pd.t0 + 0.34 and not pd.get("s2", false):
+			pd.s2 = true
+			_snd("cm_pop", -9.0, randf_range(0.95, 1.1))
+			if str(pd.get("vo", "")) != "":
+				_snd(pd.vo, 2.0)
+	if cm.t >= cm.st + 0.15 and not cm.get("sth", false) and cm.skip < 0.0:
 		cm.sth = true
 		cm.shake = 1.4
-		_snd("land", -2.0, 0.8)
+		_snd("cm_stamp", -2.0)
 	cm.shake = maxf(0.0, cm.get("shake", 0.0) - dt * 6.0)
 	var fin = cm.end if cm.skip < 0.0 else cm.skip + 0.25
 	if cm.t > fin:
@@ -10231,11 +10465,28 @@ func _fin_update(dt: float) -> void:
 	if OS.get_environment("FINT") != "" and fin.t >= float(OS.get_environment("FINT")):
 		get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
 		get_tree().quit()
-	var fly_t = 4.8
+	var fly_t = FLY_T
+	if fin.fly and fin.phase == 0 and fin.t >= 6.6 and not fin.has("lbl"):
+		# an den Düsen: Platz und Zeit einblenden
+		var cl = CanvasLayer.new()
+		cl.layer = 9
+		add_child(cl)
+		var l = _lbl(str(hud.res.text).replace("  ·  ", "\n"), 84)
+		l.add_theme_color_override("font_color", Color(1.0, 0.86, 0.35))
+		l.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+		l.add_theme_constant_override("outline_size", 14)
+		l.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		l.offset_top = 260
+		l.modulate.a = 0.0
+		cl.add_child(l)
+		create_tween().tween_property(l, "modulate:a", 1.0, 0.4)
+		fin.lbl = cl
 	if fin.phase == 0:
 		var wait = fly_t if fin.fly else 1.2
 		if fin.t >= wait:
 			fin.phase = 1
+			if fin.has("lbl") and is_instance_valid(fin.lbl):
+				(fin.lbl as Node).queue_free()
 			_comic_start("win" if fin.win else "lose", fin.who)
 	elif fin.phase == 1 and cm.is_empty():
 		fin.phase = 2
@@ -10246,23 +10497,36 @@ func _fin_update(dt: float) -> void:
 
 # Kamerafahrt in Schiffs-Koordinaten (Nase +z): ganz nah an die Düsen, an der Seite entlang über die 37,
 # um die Nase herum und dann hoch nach oben weg
-const FLY = [[0.0, Vector3(-0.45, 0.55, -1.7), Vector3(0.0, 0.12, -0.4)], [1.2, Vector3(-0.95, 0.4, -0.75), Vector3(0.0, 0.12, -0.3)],
-	[2.4, Vector3(-0.95, 0.4, 0.35), Vector3(0.0, 0.12, 0.1)], [3.4, Vector3(-0.1, 0.35, 1.5), Vector3(0.0, 0.12, 0.0)],
-	[4.8, Vector3(0.0, 2.8, 0.1), Vector3(0.0, 0.0, 0.0)]]
+const FLY = [[0.0, Vector3(-0.8, 0.9, -2.9), Vector3(0.0, 0.12, -0.3)], [1.5, Vector3(-1.9, 0.6, -0.2), Vector3(0.0, 0.12, 0.0)],
+	[2.9, Vector3(-0.6, 0.45, 2.6), Vector3(0.0, 0.12, 0.2)], [4.3, Vector3(-1.6, 0.4, 0.3), Vector3(0.0, 0.12, -0.1)],
+	[5.7, Vector3(-1.0, 0.35, -1.6), Vector3(0.0, 0.13, -0.5)], [7.0, Vector3(-0.3, 0.3, -2.0), Vector3(0.0, 0.14, -0.72)],
+	[9.0, Vector3(-0.28, 0.3, -2.05), Vector3(0.0, 0.14, -0.72)]]
+const FLY_T = 8.6   # danach kommt die Comic-Seite
 
 
-func _fly_cam() -> bool:
+func _fly_cam(dt: float) -> bool:
 	if fin.is_empty() or not fin.fly or fin.phase != 0:
 		return false
 	var nd: Node3D = ships[0].node
-	var xf = nd.global_transform
+	# geglättete Schiffslage: Schweben und Nachfedern reißen die Kamera nicht mit
+	var cur: Transform3D = nd.global_transform
+	if not fin.has("cx"):
+		fin.cx = cur
+	var sm: Transform3D = fin.cx
+	var k = 1.0 - exp(-dt / 0.35)
+	var q0 = sm.basis.get_rotation_quaternion()
+	var q1 = cur.basis.get_rotation_quaternion()
+	sm = Transform3D(Basis(q0.slerp(q1, k)), sm.origin.lerp(cur.origin, 1.0 - exp(-dt / 0.12)))
+	fin.cx = sm
+	var xf = sm
 	var t: float = fin.t
-	var k = 0
-	while k < FLY.size() - 2 and t > FLY[k + 1][0]:
-		k += 1
-	var u = clampf((t - FLY[k][0]) / (FLY[k + 1][0] - FLY[k][0]), 0.0, 1.0)
-	var pos = _cr(FLY, k, u, 1)
-	var tg = _cr(FLY, k, u, 2)
+	var ki = 0
+	while ki < FLY.size() - 2 and t > FLY[ki + 1][0]:
+		ki += 1
+	var u = clampf((t - FLY[ki][0]) / (FLY[ki + 1][0] - FLY[ki][0]), 0.0, 1.0)
+	u = u * u * (3.0 - 2.0 * u) * 0.35 + u * 0.65   # weich anfahren und abbremsen, ohne stehenzubleiben
+	var pos = _cr(FLY, ki, u, 1)
+	var tg = _cr(FLY, ki, u, 2)
 	var wp: Vector3 = xf * pos
 	var wt: Vector3 = xf * tg
 	var up: Vector3 = xf.basis.y.normalized()
