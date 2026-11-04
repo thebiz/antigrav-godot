@@ -47,7 +47,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -4092,6 +4092,13 @@ func _menu() -> void:
 		btp.text = "Tips: On"
 		_toast("Tips will show again"))
 	trow.add_child(btr)
+	var bcm = _btn("Comic intro: " + ("On" if int(cfg.get("comic", 1)) == 1 else "Off"))
+	bcm.add_theme_font_size_override("font_size", 30)
+	bcm.pressed.connect(func():
+		cfg.comic = 1 - int(cfg.get("comic", 1))
+		_save_cfg()
+		bcm.text = "Comic intro: " + ("On" if int(cfg.comic) == 1 else "Off"))
+	sp.add_child(bcm)
 	var blv = _btn("Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off"))
 	blv.add_theme_font_size_override("font_size", 30)
 	blv.pressed.connect(func():
@@ -4268,6 +4275,8 @@ func _start() -> void:
 	t_state = 0.0
 	ui.root.visible = false
 	hud.layer.visible = true
+	if int(cfg.get("comic", 1)) == 1 and not free_ride and rpf.is_empty() and (shot_s in ["", "?"] or shot_s.contains("comic")):
+		_comic_start("start")
 
 
 var rtouch = {}
@@ -8637,6 +8646,10 @@ func _process(delta: float) -> void:
 			_shot()
 			return
 	var racing = state == "race"
+	if not cm.is_empty():
+		_comic_update(dt)
+		if state == "intro":
+			t_state = 0.0   # Vorbeiflug wartet, bis der Comic durch ist
 	if state == "intro" and t_state > INTRO_T:
 		state = "count"
 		t_state = 0.0
@@ -9739,3 +9752,225 @@ func _camera(dt: float) -> void:
 	cam.look_at(ta, uc)
 	cam.fov = 52.0 * (1.0 + 0.12 * minf(1.5, g.boost) + 0.1 * post_spd)
 	cam.rotate_object_local(Vector3(0, 0, 1), -g.u * 0.05)   # leichtes Mitneigen beim Lenken
+
+
+# ---------------------------------------------------------------- Comic: Manga-Panels mit den Fahrern (Cyber Gothic)
+# Fahrer: Name, Beiname, Farbe, Bildname (art/comic/<bild>_<0..2>.jpg: 0 ruhig/grinsend, 1 wütend/erschrocken, 2 Triumph)
+const CHARS = [
+	["REN", "RED DRAGON", Color(0.9, 0.1, 0.14), "ren"],
+	["VEGA", "THE CHAMPION", Color(0.66, 0.36, 1.0), "vega"],
+	["KATO", "THE WRECKER", Color(1.0, 0.48, 0.12), "kato"],
+	["MIRA", "THE TRICKSTER", Color(0.15, 0.95, 0.95), "mira"]]
+const CM_LINES = {
+	"ren": ["Stay out of my line.", "This one's mine.", "Watch the dragon fly."],
+	"vega": ["The crown stays\nwith me.", "Kneel, rookie.", "You race\nfor second."],
+	"kato": ["I'll scrap you,\nkid!", "Outta my way!", "Hope you brought\nspare parts!"],
+	"mira": ["Watch your step...\nhehe.", "I left you\na present.", "Catch me\nif you can~"]}
+var cm = {}
+var cm_tex = {}
+
+
+func _cm_img(k: String) -> Texture2D:
+	if not cm_tex.has(k):
+		cm_tex[k] = load("res://art/comic/" + k + ".jpg")
+	return cm_tex[k]
+
+
+func _comic_start(kind: String) -> void:
+	if not cm.is_empty():
+		_comic_end()
+	cm = {"pending": kind}   # erst bauen, wenn das Vorwärmen der Shader fertig ist (das räumt neue Knoten weg)
+
+
+func _comic_build(kind: String) -> void:
+	var layer = CanvasLayer.new()
+	layer.layer = 50
+	add_child(layer)
+	var c = Control.new()
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	c.mouse_filter = Control.MOUSE_FILTER_STOP
+	layer.add_child(c)
+	# Reihenfolge: die Rivalen protzen, Ren antwortet zum Schluss
+	var pn = []
+	for i in [1, 2, 3, 0]:
+		var ch: Array = CHARS[i]
+		var ex = 1 if i == 0 else 0
+		var lines: Array = CM_LINES[ch[3]]
+		pn.append({"ch": ch, "img": _cm_img(ch[3] + "_" + str(ex)), "line": lines[randi() % lines.size()]})
+	cm = {"kind": kind, "t": 0.0, "layer": layer, "c": c, "pn": pn, "end": 0.3 + pn.size() * 0.62 + 1.0, "skip": -1.0, "hit": -1}
+	c.draw.connect(_comic_draw)
+	c.gui_input.connect(func(ev):
+		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed and not cm.is_empty():
+			cm.skip = cm.t)
+
+
+func _comic_end() -> void:
+	if cm.is_empty():
+		return
+	if cm.has("layer") and is_instance_valid(cm.layer):
+		(cm.layer as CanvasLayer).queue_free()
+	cm = {}
+
+
+func _comic_update(dt: float) -> void:
+	if cm.has("pending"):
+		if warm_t < 0.0:
+			_comic_build(cm.pending)
+		return
+	if not is_instance_valid(cm.c):
+		cm = {}
+		return
+	cm.t += dt
+	# Tschack: jedes Panel knallt mit einem Schlag rein
+	var k = int(floor((cm.t - 0.3 - 0.2) / 0.62))
+	if k > cm.hit and k < cm.pn.size() and cm.skip < 0.0:
+		cm.hit = k
+		_snd("land", -4.0, 1.25 + 0.08 * k)
+		cm.shake = 1.0
+	cm.shake = maxf(0.0, cm.get("shake", 0.0) - dt * 6.0)
+	var fin = cm.end if cm.skip < 0.0 else cm.skip + 0.25
+	if cm.t > fin:
+		_comic_end()
+		return
+	cm.fade = clampf((fin - cm.t) / 0.25, 0.0, 1.0) if cm.t > fin - 0.25 else 1.0
+	(cm.c as Control).queue_redraw()
+
+
+func _ease_back(a: float) -> float:
+	var c1 = 1.9
+	var u = a - 1.0
+	return 1.0 + (c1 + 1.0) * u * u * u + c1 * u * u
+
+
+func _comic_draw() -> void:
+	if cm.is_empty():
+		return
+	var c: Control = cm.c
+	var sz: Vector2 = c.size
+	var W = sz.x
+	var H = sz.y
+	var t: float = cm.t
+	var fa: float = cm.get("fade", 1.0)
+	var font = c.get_theme_default_font()
+	var sh = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * 10.0 * cm.get("shake", 0.0)
+	# Hintergrund: schwarze Seite mit Speedlines aus der Mitte
+	c.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.03, 0.02, 0.03, 0.93 * fa))
+	var ctr = Vector2(W * 0.5, H * 0.47)
+	for i in range(64):
+		var a = i * TAU / 64.0 + sin(i * 7.3) * 0.04
+		var r0 = W * (0.35 + 0.25 * fmod(i * 0.618, 1.0))
+		c.draw_line(ctr + Vector2(cos(a), sin(a)) * r0, ctr + Vector2(cos(a), sin(a)) * W * 1.6, Color(0.55, 0.05, 0.08, 0.35 * fa), 2.0 + fmod(i * 1.7, 3.0))
+	var mg = W * 0.045
+	var top = H * 0.07
+	var bot = H * 0.93
+	var n: int = cm.pn.size()
+	var ph = (bot - top) / n
+	var gut = W * 0.016
+	var sl = W * 0.07   # Schräge der Trennlinien
+	for i in range(n):
+		var t0 = 0.3 + i * 0.62
+		var a = clampf((t - t0) / 0.3, 0.0, 1.0)
+		if a <= 0.0:
+			continue
+		var pd: Dictionary = cm.pn[i]
+		var ch: Array = pd.ch
+		var col: Color = ch[2]
+		var e = _ease_back(a)
+		var side = -1.0 if i % 2 == 0 else 1.0
+		var off = Vector2(side * (1.0 - e) * W * 1.1, 0.0) + sh
+		var y0 = top + i * ph
+		var y1 = y0 + ph
+		var s0 = sl * (1.0 if i % 2 == 0 else -1.0) if i > 0 else 0.0
+		var s1 = sl * (-1.0 if i % 2 == 0 else 1.0) if i < n - 1 else 0.0
+		var poly = PackedVector2Array([
+			Vector2(mg, y0 + gut + s0) + off, Vector2(W - mg, y0 + gut - s0) + off,
+			Vector2(W - mg, y1 - gut - s1) + off, Vector2(mg, y1 - gut + s1) + off])
+		# Bild: füllt das Panel, langsamer Zoom und Schwenk (Ken Burns)
+		var img: Texture2D = pd.img
+		var isz = img.get_size()
+		var bw = W - 2.0 * mg
+		var bh = ph + 2.0 * sl
+		var cover = maxf(bw / isz.x, bh / isz.y)
+		var zt = clampf((t - t0) / 3.0, 0.0, 1.0)
+		var zoom = cover * (1.06 - 0.05 * zt)
+		var pc = Vector2(W * 0.5, (y0 + y1) * 0.5) + off + Vector2(side * W * 0.03 * zt, 0.0)
+		var uvs = PackedVector2Array()
+		for pt in poly:
+			uvs.append(((pt - pc) / zoom + isz * Vector2(0.5, 0.45)) / isz)
+		var cs = PackedColorArray()
+		var fl = clampf(1.0 - (t - t0 - 0.3) / 0.12, 0.0, 1.0) if t > t0 + 0.3 else 0.0   # Aufblitzen beim Aufprall
+		for _k in range(4):
+			cs.append(Color(1.0 + fl * 2.0, 1.0 + fl * 2.0, 1.0 + fl * 2.0, fa))
+		c.draw_polygon(poly, cs, uvs, img)
+		# Rahmen: dick schwarz, innen eine feine Linie in der Fahrerfarbe
+		var cl = poly.duplicate()
+		cl.append(poly[0])
+		c.draw_polyline(cl, Color(0, 0, 0, fa), W * 0.014, true)
+		var inner = PackedVector2Array()
+		var pm = (poly[0] + poly[2]) * 0.5
+		for pt in cl:
+			inner.append(pt + (pm - pt).normalized() * W * 0.012)
+		c.draw_polyline(inner, Color(col, 0.9 * fa), 2.0, true)
+		# Name groß in der Ecke, schräg gesetzt
+		var nx = mg + W * 0.04 if side > 0.0 else W - mg - W * 0.04
+		var ny = y1 - gut - W * 0.05 - (s1 if side > 0.0 else -s1)
+		var fs = int(W * 0.105)
+		var nm: String = ch[0]
+		var nw = font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var npos = Vector2(nx if side > 0.0 else nx - nw, ny) + off
+		c.draw_set_transform(npos, -0.06, Vector2.ONE)
+		c.draw_string_outline(font, Vector2.ZERO, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, int(W * 0.022), Color(0, 0, 0, fa))
+		c.draw_string(font, Vector2.ZERO, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, fa))
+		var fs2 = int(W * 0.032)
+		var sub: String = ch[1]
+		c.draw_string_outline(font, Vector2(4, fs2 * 1.3), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, fs2, int(W * 0.012), Color(0, 0, 0, fa))
+		c.draw_string(font, Vector2(4, fs2 * 1.3), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, fs2, Color(1, 1, 1, fa))
+		c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		# Sprechblase: ploppt kurz nach dem Panel auf, Spitze zeigt zum Gesicht
+		var b = clampf((t - t0 - 0.32) / 0.18, 0.0, 1.0)
+		if b > 0.0:
+			var bs = _ease_back(b)
+			var fs3 = int(W * 0.04)
+			var lines: PackedStringArray = str(pd.line).split("\n")
+			var tw = 0.0
+			for ln in lines:
+				tw = maxf(tw, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, fs3).x)
+			var rx = tw * 0.5 + W * 0.05
+			var ry = lines.size() * fs3 * 0.62 + W * 0.035
+			var bc = Vector2(W - mg - rx - W * 0.03 if side > 0.0 else mg + rx + W * 0.03, y0 + gut + ry + W * 0.035 + absf(s0)) + off
+			var face = pc + Vector2(-side * W * 0.04, -ph * 0.05)
+			var dirf = (face - bc).normalized()
+			var tip = bc + dirf * (maxf(rx, ry) + W * 0.07)
+			var tb = Vector2(-dirf.y, dirf.x) * W * 0.03
+			var ell = PackedVector2Array()
+			for k2 in range(28):
+				var an = k2 * TAU / 28.0
+				ell.append(bc + Vector2(cos(an) * rx, sin(an) * ry) * bs)
+			var tail = PackedVector2Array([bc + tb * bs + dirf * ry * 0.6 * bs, tip * bs + bc * (1.0 - bs), bc - tb * bs + dirf * ry * 0.6 * bs])
+			var ol = W * 0.009
+			c.draw_colored_polygon(tail, Color(0, 0, 0, fa))
+			var big = PackedVector2Array()
+			for pt in ell:
+				big.append(bc + (pt - bc) * (1.0 + ol / maxf(rx, 1.0)))
+			c.draw_colored_polygon(big, Color(0, 0, 0, fa))
+			c.draw_colored_polygon(ell, Color(0.97, 0.96, 0.93, fa))
+			var tin = PackedVector2Array([tail[0].lerp(bc, 0.15), tail[1].lerp(bc, 0.12), tail[2].lerp(bc, 0.15)])
+			c.draw_colored_polygon(tin, Color(0.97, 0.96, 0.93, fa))
+			if bs > 0.6:
+				for j in range(lines.size()):
+					var lw = font.get_string_size(lines[j], HORIZONTAL_ALIGNMENT_LEFT, -1, fs3).x
+					var ly = bc.y - (lines.size() - 1) * fs3 * 0.55 + j * fs3 * 1.1 + fs3 * 0.35
+					c.draw_string(font, Vector2(bc.x - lw * 0.5, ly), lines[j], HORIZONTAL_ALIGNMENT_LEFT, -1, fs3, Color(0.05, 0.03, 0.03, fa))
+	# Schluss: großer Stempel quer über die Seite
+	var tz = t - (0.3 + n * 0.62 + 0.15)
+	if tz > 0.0:
+		var e2 = _ease_back(clampf(tz / 0.22, 0.0, 1.0))
+		var fs4 = int(W * 0.21)
+		var txt = "RACE!"
+		var tw2 = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs4).x
+		c.draw_set_transform(Vector2(W * 0.5, H * 0.5) + sh, -0.12, Vector2.ONE * lerpf(2.4, 1.0, e2))
+		c.draw_string_outline(font, Vector2(-tw2 * 0.5, fs4 * 0.35), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs4, int(W * 0.035), Color(0, 0, 0, fa))
+		c.draw_string(font, Vector2(-tw2 * 0.5, fs4 * 0.35), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs4, Color(0.95, 0.08, 0.12, fa))
+		c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var fs5 = int(W * 0.026)
+	c.draw_string(font, Vector2(W * 0.5 - W * 0.08, H - W * 0.03), "tap to skip", HORIZONTAL_ALIGNMENT_LEFT, -1, fs5, Color(1, 1, 1, 0.45 * fa))
