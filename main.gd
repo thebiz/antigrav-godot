@@ -14,13 +14,21 @@ const SHIPS = [
 	["res://ships/qirex.glb", "Qirex", false, "“WipeOut – Qirex” by Nobby76, CC BY 4.0"],
 	["res://ships/assegai/scene.gltf", "Assegai", false, "“WipeOut – Assegai” by Nobby76, CC BY 4.0"],
 	["res://ships/apex.glb", "Apex", false, "“Apex Wipeout Anti-grav Racer” by rafta, CC BY-NC 4.0"],
-	["res://ships/rhsx/scene.gltf", "RHS-X", true, "“RHS-X” by Hassan Bassassi, CC BY 4.0"]]
+	["res://ships/rhsx/scene.gltf", "RHS-X", true, "“RHS-X” by Hassan Bassassi, CC BY 4.0"],
+	["res://ships/r37.glb", "R-37", false, "“R-37” design by John Dammbacher, 3D via Tripo AI"]]
 # Düsen je Schiff (im Schiffsraum: x, Höhe, z, Radius) – nachgemessen an den Modellen
 const JETS = [
 	[[0.0, 0.148, -0.76, 0.05], [-0.09, 0.1, -0.74, 0.03], [0.09, 0.1, -0.74, 0.03]],
 	[[0.0, 0.133, -0.77, 0.05], [-0.09, 0.1, -0.74, 0.03], [0.09, 0.1, -0.74, 0.03]],
 	[[-0.08, 0.075, -0.75, 0.042], [0.08, 0.075, -0.75, 0.042]],
-	[[0.0, 0.11, -0.76, 0.05], [-0.184, 0.139, -0.72, 0.03], [0.184, 0.139, -0.72, 0.03]]]
+	[[0.0, 0.11, -0.76, 0.05], [-0.184, 0.139, -0.72, 0.03], [0.184, 0.139, -0.72, 0.03]],
+	[[-0.069, 0.145, -0.72, 0.042], [0.069, 0.145, -0.72, 0.042]]]
+# Behang (Cyber Gothic): je Schiff Ketten mit Anhängern, schwingen frei (Punkt im Schiffsraum, Glieder: Art + Länge)
+const DANG = {4: [
+	[Vector3(-0.245, 0.054, -0.245), [["link", 0.022], ["link", 0.022], ["knot", 0.024], ["tassel", 0.06]]],
+	[Vector3(0.245, 0.054, -0.245), [["link", 0.022], ["link", 0.022], ["knot", 0.024], ["tassel", 0.06]]],
+	[Vector3(-0.344, 0.077, -0.505), [["link", 0.026], ["link", 0.026], ["link", 0.026], ["link", 0.026], ["spike", 0.05]]],
+	[Vector3(0.344, 0.077, -0.505), [["link", 0.026], ["link", 0.026], ["link", 0.026], ["link", 0.026], ["spike", 0.05]]]]}
 const CFG_PATH = "user://settings.cfg"
 
 # Lenkung wie in der HTML-Version (von John abgestimmt)
@@ -658,7 +666,8 @@ const FXS = {
 	"ship": [["height", "Hover height", 0.2, 8.0, 1.0], ["bob", "Hover bob", 0.0, 10.0, 1.0], ["bank", "Lean in curves", 0.0, 6.0, 1.0], ["pitch", "Nose pitch", 0.0, 8.0, 1.0],
 		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0], ["steer", "Steering lag", 0.2, 8.0, 1.0],
 		["steerk", "Steering strength", 0.3, 3.0, 1.0], ["grip", "Grip", 0.2, 4.0, 1.0], ["drift", "Drift", 0.0, 4.0, 0.0],
-		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0], ["trim", "Nose trim (down +)", -1.0, 1.0, 0.0]],
+		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0], ["trim", "Nose trim (down +)", -1.0, 1.0, 0.0],
+		["swing", "Tassel swing", 0.0, 3.0, 1.0], ["wind", "Tassel wind", 0.0, 3.0, 1.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -2927,8 +2936,165 @@ func _ship_node(idx: int) -> Node3D:
 	root.set_meta("haze", hz)
 	root.set_meta("hazen", hzn)
 	root.set_meta("light", lt)
+	root.set_meta("dg", _dangle_build(root, idx))
 	add_child(root)
 	return root
+
+
+# ---------------------------------------------------------------- Behang: Ketten, Knoten, Quasten
+var _dg_mats = {}
+func _dg_mat(k: String) -> StandardMaterial3D:
+	if _dg_mats.has(k):
+		return _dg_mats[k]
+	var m = StandardMaterial3D.new()
+	match k:
+		"chain":
+			m.albedo_color = Color(0.06, 0.06, 0.07)
+			m.metallic = 1.0
+			m.roughness = 0.28
+		"gold":
+			m.albedo_color = Color(0.95, 0.68, 0.28)
+			m.metallic = 1.0
+			m.roughness = 0.25
+		"red":
+			m.albedo_color = Color(0.62, 0.02, 0.05)
+			m.roughness = 0.85
+			m.emission_enabled = true
+			m.emission = Color(0.5, 0.0, 0.03)
+			m.emission_energy_multiplier = 0.35
+		"gem":
+			m.albedo_color = Color(1.0, 0.05, 0.1)
+			m.emission_enabled = true
+			m.emission = Color(1.0, 0.04, 0.12)
+			m.emission_energy_multiplier = 3.0
+	_dg_mats[k] = m
+	return m
+
+
+func _dangle_build(root: Node3D, idx: int) -> Array:
+	var out = []
+	for d in DANG.get(idx, []):
+		var segs: Array = d[1]
+		var ms = []
+		for k in range(segs.size()):
+			var kind: String = segs[k][0]
+			var ln: float = segs[k][1]
+			var parts = []
+			match kind:
+				"link":
+					var t = TorusMesh.new()
+					t.inner_radius = ln * 0.32
+					t.outer_radius = ln * 0.5
+					t.rings = 8
+					t.ring_segments = 5
+					parts.append([t, "chain", 0])
+				"knot":
+					var t2 = TorusMesh.new()
+					t2.inner_radius = ln * 0.22
+					t2.outer_radius = ln * 0.5
+					t2.rings = 10
+					t2.ring_segments = 5
+					parts.append([t2, "gold", 0])
+					parts.append([_lowsphere(ln * 0.28, 8, 4), "gold", 1])
+				"tassel":
+					var c = CylinderMesh.new()
+					c.top_radius = ln * 0.3
+					c.bottom_radius = ln * 0.09
+					c.height = 1.0
+					c.radial_segments = 8
+					c.rings = 1
+					parts.append([c, "red", 2])
+				"spike":
+					var c2 = CylinderMesh.new()
+					c2.top_radius = 0.0
+					c2.bottom_radius = ln * 0.22
+					c2.height = 1.0
+					c2.radial_segments = 4
+					c2.rings = 1
+					parts.append([c2, "chain", 2])
+					parts.append([_lowsphere(ln * 0.12, 8, 4), "gem", 1])
+			var mis = []
+			for pt in parts:
+				var mi = MeshInstance3D.new()
+				mi.mesh = pt[0]
+				mi.material_override = _dg_mat(pt[1])
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				mi.top_level = true
+				root.add_child(mi)
+				mis.append([mi, pt[2]])
+			ms.append(mis)
+		out.append({"a": d[0], "segs": segs, "ms": ms, "p": [], "pp": [], "la": Vector3.ZERO})
+	return out
+
+
+# Verlet: Punkte in Weltkoordinaten, Aufhängung folgt dem Schiff. Schwerkraft zeigt zur Fahrbahn,
+# Fahrtwind zieht die Quasten nach hinten, Trägheit lässt sie beim Lenken und Bremsen ausschwingen.
+func _dangle_step(nd: Node3D, dt: float) -> void:
+	var dg: Array = nd.get_meta("dg", [])
+	if dg.is_empty() or dt <= 0.0:
+		return
+	var SX: Dictionary = fx.ship
+	var xf: Transform3D = nd.global_transform
+	var sc = xf.basis.get_scale().x
+	var dn: Vector3 = -xf.basis.y.normalized()
+	var g: Vector3 = dn * 9.0 * float(SX.swing)
+	var fw: Vector3 = xf.basis.z.normalized()
+	var xi: Transform3D = xf.affine_inverse()
+	for d in dg:
+		var a: Vector3 = xf * d.a
+		var segs: Array = d.segs
+		var n = segs.size()
+		if d.p.is_empty() or a.distance_to(d.la) > 4.0:
+			d.p = [a]
+			for k in range(n):
+				d.p.append(d.p[k] + (dn - fw * 0.3).normalized() * float(segs[k][1]) * sc)
+			d.pp = d.p.duplicate()
+			d.la = a
+		var sv: Vector3 = (a - d.la) / dt
+		d.la = a
+		var wind: Vector3 = -sv * 0.25 * float(SX.wind)
+		var damp = pow(0.04, dt)   # Restschwung relativ zum Schiff nach 1 s noch 4 %
+		var p: Array = d.p
+		var pp: Array = d.pp
+		p[0] = a
+		for k in range(1, n + 1):
+			var v: Vector3 = p[k] - pp[k]
+			var vr: Vector3 = v - sv * dt
+			v = sv * dt + vr * damp
+			pp[k] = p[k]
+			p[k] = p[k] + v + (g + wind) * dt * dt
+		for _it in range(2):
+			for k in range(1, n + 1):
+				var e: Vector3 = p[k] - p[k - 1]
+				var l = e.length()
+				var ln = float(segs[k - 1][1]) * sc
+				p[k] = p[k - 1] + (e / l * ln if l > 1e-6 else dn * ln)
+				# nicht durch die Fahrbahn: unter dem Schiff bleibt eine Handbreit Luft
+				var lp: Vector3 = xi * p[k]
+				if lp.y < -0.1:
+					lp.y = -0.1
+					p[k] = xf * lp
+		# Darstellung: jedes Glied zwischen zwei Punkten, Kettenglieder abwechselnd um 90° gedreht
+		for k in range(n):
+			var p0: Vector3 = p[k]
+			var p1: Vector3 = p[k + 1]
+			var e2: Vector3 = p1 - p0
+			var l2 = maxf(e2.length(), 1e-5)
+			var y: Vector3 = e2 / l2
+			var ref: Vector3 = fw if absf(y.dot(fw)) < 0.9 else xf.basis.x.normalized()
+			var x: Vector3 = y.cross(ref).normalized()
+			if k % 2 == 1:
+				x = x.rotated(y, PI * 0.5)
+			var z: Vector3 = x.cross(y)
+			for mm in d.ms[k]:
+				var mi: MeshInstance3D = mm[0]
+				match mm[1]:
+					0:   # Ring: liegt in der Ebene von Glied-Richtung und x, Ringachse = z
+						mi.global_transform = Transform3D(Basis(y * sc * 1.3, z * sc, x * sc * 0.6), (p0 + p1) * 0.5)
+					1:   # Kugel am unteren Ende
+						mi.global_transform = Transform3D(Basis(x * sc, y * sc, z * sc), p1)
+					2:   # Kegel/Quaste: Mesh-Achse y von p0 nach p1, Höhe 1 auf die Gliedlänge
+						mi.global_transform = Transform3D(Basis(x * sc, y * l2, z * sc), (p0 + p1) * 0.5)
 
 
 # Plasmastrahl: heller blauweißer Kern, violetter Rand, wandernde Schockringe, schnelles Flackern
@@ -9461,6 +9627,8 @@ func _pose_all(dt: float) -> void:
 		var pitch_t = -float(s.get("pit", 0.0)) + float(SX.trim) * 0.25
 		if absf(pitch_t) > 0.0001:
 			nd.rotate_object_local(Vector3(1, 0, 0), pitch_t)
+		if nd.visible and (cam == null or cam.global_position.distance_squared_to(pos) < 1600.0):
+			_dangle_step(nd, dt)
 		var HX: Dictionary = fx.haze
 		# Plasmastrahl: Länge/Breite/Helligkeit nach Tempo und Boost
 		var spk = clampf(s.spd / maxf(1.0, base_spd), 0.0, 1.6)
