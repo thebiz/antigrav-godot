@@ -23,6 +23,8 @@ const JETS = [
 	[[-0.08, 0.075, -0.75, 0.042], [0.08, 0.075, -0.75, 0.042]],
 	[[0.0, 0.11, -0.76, 0.05], [-0.184, 0.139, -0.72, 0.03], [0.184, 0.139, -0.72, 0.03]],
 	[[-0.069, 0.145, -0.72, 0.042], [0.069, 0.145, -0.72, 0.042]]]
+# Antigrav-Ringe unter dem Rumpf (wie Räder: zwei vorn, zwei hinten): Position, Radius
+const RINGS = {4: [[Vector3(0.23, 0.03, 0.3), 0.075], [Vector3(-0.23, 0.03, 0.3), 0.075], [Vector3(0.17, 0.03, -0.47), 0.08], [Vector3(-0.17, 0.03, -0.47), 0.08]]}
 # Behang (Cyber Gothic): je Schiff Ketten mit Anhängern, schwingen frei (Punkt im Schiffsraum, Glieder: Art + Länge)
 const DANG = {4: [
 	[Vector3(-0.245, 0.054, -0.245), [["link", 0.022], ["link", 0.022], ["knot", 0.024], ["tassel", 0.06]]],
@@ -2937,8 +2939,100 @@ func _ship_node(idx: int) -> Node3D:
 	root.set_meta("hazen", hzn)
 	root.set_meta("light", lt)
 	root.set_meta("dg", _dangle_build(root, idx))
+	root.set_meta("rings", _rings_build(root, idx))
 	add_child(root)
 	return root
+
+
+# ---------------------------------------------------------------- Antigrav-Ringe: dunkles Gehäuse, leuchtender Ring, Lichtschein auf der Fahrbahn
+const RING_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform vec3 c=vec3(.2,.95,1.);uniform float k=1.;
+void fragment(){ALBEDO=c*k*1.8;}"""
+const POOL_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform vec3 c=vec3(.2,.95,1.);uniform float k=1.;
+void fragment(){
+	float d=length(UV-.5)*2.;
+	float a=smoothstep(1.,0.,d)*.55+exp(-pow((d-.42)*7.,2.))*.9;
+	ALBEDO=c*k*a*.55;
+}"""
+
+
+func _rings_build(root: Node3D, idx: int) -> Array:
+	var out = []
+	var hm = StandardMaterial3D.new()
+	hm.albedo_color = Color(0.05, 0.05, 0.06)
+	hm.metallic = 1.0
+	hm.roughness = 0.35
+	for r in RINGS.get(idx, []):
+		var p: Vector3 = r[0]
+		var rad: float = r[1]
+		var hs = MeshInstance3D.new()
+		var cy = CylinderMesh.new()
+		cy.top_radius = rad * 0.95
+		cy.bottom_radius = rad * 1.02
+		cy.height = 0.022
+		cy.radial_segments = 16
+		cy.rings = 1
+		hs.mesh = cy
+		hs.material_override = hm
+		hs.position = p + Vector3(0, 0.012, 0)
+		root.add_child(hs)
+		var rg = MeshInstance3D.new()
+		var tm = TorusMesh.new()
+		tm.inner_radius = rad * 0.72
+		tm.outer_radius = rad * 0.92
+		tm.rings = 20
+		tm.ring_segments = 6
+		rg.mesh = tm
+		var rm = _shader_mat(RING_CODE)
+		rg.material_override = rm
+		rg.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		rg.position = p - Vector3(0, 0.008, 0)
+		rg.scale = Vector3(1.0, 0.35, 1.0)
+		root.add_child(rg)
+		var pl = MeshInstance3D.new()
+		var q = QuadMesh.new()
+		q.size = Vector2.ONE * rad * 4.5
+		q.orientation = PlaneMesh.FACE_Y
+		pl.mesh = q
+		var pm = _shader_mat(POOL_CODE)
+		pl.material_override = pm
+		pl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		pl.position = Vector3(p.x, -0.15, p.z)
+		root.add_child(pl)
+		out.append([rm, pm, pl, signf(p.x)])
+	if not out.is_empty():
+		var ol = OmniLight3D.new()
+		ol.light_color = Color(0.25, 0.9, 1.0)
+		ol.omni_range = 1.4
+		ol.light_energy = 0.8
+		ol.position = Vector3(0, -0.05, -0.08)
+		ol.shadow_enabled = false
+		root.add_child(ol)
+		root.set_meta("rlight", ol)
+	return out
+
+
+func _rings_step(nd: Node3D, s: Dictionary, hov: float) -> void:
+	var rs: Array = nd.get_meta("rings", [])
+	if rs.is_empty():
+		return
+	var tt = Time.get_ticks_msec() / 1000.0
+	var bo = clampf(s.boost, 0.0, 1.0)
+	var sum = 0.0
+	for i in range(rs.size()):
+		var r: Array = rs[i]
+		var k = (0.78 + 0.22 * sin(tt * 7.0 + i * 1.7)) * (1.0 + 1.4 * bo) * (1.0 + 0.8 * maxf(0.0, r[3] * float(s.u)))
+		_sp(r[0], "k", k)
+		_sp(r[1], "k", k)
+		(r[2] as Node3D).position.y = -hov + 0.012
+		sum += k
+	var ol: OmniLight3D = nd.get_meta("rlight")
+	ol.light_energy = 0.35 * sum / rs.size() * _newr("ship", 1.0)
 
 
 # ---------------------------------------------------------------- Behang: Ketten, Knoten, Quasten
@@ -3565,10 +3659,10 @@ func _hud() -> void:
 	var b2 = _btn("RACE AGAIN")
 	b2.pressed.connect(func():
 		restart = true
-		get_tree().reload_current_scene())
+		_reload())
 	bx.add_child(b2)
 	var b3 = _btn("MENU")
-	b3.pressed.connect(func(): get_tree().reload_current_scene())
+	b3.pressed.connect(func(): _reload())
 	bx.add_child(b3)
 	# Leistungsbericht in die Zwischenablage – zum Einfügen im Chat
 	var b4 = _btn("COPY PERFORMANCE REPORT")
@@ -4013,7 +4107,7 @@ func _menu() -> void:
 			if int(cfg.look) != q:
 				cfg.look = q
 				_save_cfg()
-				get_tree().reload_current_scene())
+				_reload())
 		lr.add_child(b)
 		ui.look.append(b)
 	# Boost- und Waffenfelder: feste Positionen oder bei jedem Rennen neu verteilt
@@ -4034,7 +4128,7 @@ func _menu() -> void:
 			if int(cfg.pads) != q:
 				cfg.pads = q
 				_save_cfg()
-				get_tree().reload_current_scene())
+				_reload())
 		pr.add_child(b)
 		ui.pads.append(b)
 	# Bildrate anzeigen (mit Zeit für Grafikkarte/Prozessor) und auf 60 begrenzen (gleichmäßiger, Handy bleibt kühler)
@@ -4069,7 +4163,7 @@ func _menu() -> void:
 	bbn.add_theme_font_size_override("font_size", 30)
 	bbn.pressed.connect(func():
 		bench_req = true
-		get_tree().reload_current_scene())
+		_reload())
 	sp.add_child(bbn)
 	var trow = HBoxContainer.new()
 	trow.add_theme_constant_override("separation", 12)
@@ -4181,7 +4275,7 @@ func _show_replays(on: bool) -> void:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(func():
 			pending_rp = path
-			get_tree().reload_current_scene())
+			_reload())
 		row.add_child(b)
 		var x = _btn("✕")
 		x.custom_minimum_size = Vector2(100, 0)
@@ -7200,7 +7294,7 @@ func _replay_end() -> void:
 	fx_gen += 1
 	if not rpf.is_empty():
 		# Replay aus der Liste: zurück ins Menü
-		get_tree().reload_current_scene()
+		_reload()
 		return
 	state = "done"
 	t_state = 5.0
@@ -7585,8 +7679,10 @@ func _warm_step(delta: float) -> void:
 		l.modulate = Color(1, 1, 1, 0.5)
 		warm_cover.add_child(l)
 		add_child(warm_cover)
+		_ld_show(0.4)
 		return
 	warm_t += delta
+	_ld_set(0.4 + 0.6 * clampf(warm_t / 0.9, 0.0, 1.0))
 	if warm_before.is_empty():
 		warm_before = get_children()
 		warm = true
@@ -7640,6 +7736,7 @@ func _warm_step(delta: float) -> void:
 	live_bursts = 0
 	warm_cover.queue_free()
 	warm_t = -1.0
+	_ld_hide()
 
 
 # ---------------------------------------------------------------- Kill-Cam: Zeitlupe, wenn du einen Gegner erledigst – erst seitlich bis zum Treffer,
@@ -7752,8 +7849,11 @@ func _kc_end() -> void:
 	if quake2 == null:
 		_rset("qs2", 0.0)
 	hud.top.text = kc.top
+	var vic: int = kc.victim
 	kc = {}
 	state = "race"
+	if int(cfg.get("comic", 1)) == 1 and vic >= 1 and vic <= 3:
+		_comic_start("ko", vic)
 	hud.layer.visible = true
 	kco.layer.visible = false
 	AudioServer.playback_speed_scale = 1.0
@@ -8201,7 +8301,7 @@ func _go_back() -> void:
 		elif state == "lab":
 			_lab_close()
 		else:
-			get_tree().reload_current_scene()
+			_reload()
 
 
 # ---------------------------------------------------------------- Leistungstest: feste Szene, jeder Effekt einmal aus
@@ -8646,6 +8746,7 @@ func _process(delta: float) -> void:
 			_shot()
 			return
 	var racing = state == "race"
+	_fin_update(dt)
 	if not cm.is_empty():
 		_comic_update(dt)
 		if state == "intro":
@@ -8764,26 +8865,23 @@ func _process(delta: float) -> void:
 		state = "done"
 		t_state = 0.0
 		hud.res.text = ""   # die große rote Meldung und die Tabelle zeigen es schon
-		_show_resb()
+		_fin_flow(4, true)
 		_records_end(false)
 	elif racing and kc_pending.is_empty() and _all_out():
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
 		_snd("win")
-		_show_resb()
 		hud.res.text = "1st  ·  LAST ONE STANDING\n%s" % _fmt(race_t)
-		_victory()
+		_fin_flow(1)
 		_records_end(false)
 	elif racing and g.z >= finish and not free_ride:
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
 		_snd("win")
-		_show_resb()
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
-		if place == 1:
-			_victory()
+		_fin_flow(place)
 		_records_end(true)
 	_board_update(dt)
 	_resb_arm(dt)
@@ -9050,7 +9148,7 @@ func _lab_park() -> void:
 
 func _lab_close() -> void:
 	_fx_save()
-	get_tree().reload_current_scene()
+	_reload()
 
 
 func _lab_style() -> void:
@@ -9463,7 +9561,7 @@ func _shot() -> void:
 					var fs = d.get_files()
 					fs.sort()
 					pending_rp = "user://replays/" + fs[fs.size() - 1]
-					get_tree().reload_current_scene()
+					_reload()
 					return
 			if shot_n == 2 and p.size() > 2:
 				_start()
@@ -9475,6 +9573,17 @@ func _shot() -> void:
 				get_tree().quit()
 			if p.size() > 3 and p[3].begins_with("go"):
 				return
+			if shot_n == 60 and shot_s.contains("finwin"):
+				state = "done"
+				t_state = 0.0
+				_fin_flow(1)
+			if shot_n == 60 and shot_s.contains("finlose"):
+				state = "done"
+				t_state = 0.0
+				ships[2].fin = 1.0
+				_fin_flow(3)
+			if shot_n == 60 and shot_s.contains(",ko"):
+				_comic_start("ko", 1)
 			if shot_n >= 2 and p.size() > 2 and p[2].begins_with("st"):
 				var v = float(p[2].substr(2))   # Start-Mädel testen: Zeit ab Countdown-Beginn
 				state = "count" if v < 3.0 else "race"
@@ -9642,6 +9751,7 @@ func _pose_all(dt: float) -> void:
 			nd.rotate_object_local(Vector3(1, 0, 0), pitch_t)
 		if nd.visible and (cam == null or cam.global_position.distance_squared_to(pos) < 1600.0):
 			_dangle_step(nd, dt)
+			_rings_step(nd, s, 0.16 * float(SX.height) + s.h + bob)
 		var HX: Dictionary = fx.haze
 		# Plasmastrahl: Länge/Breite/Helligkeit nach Tempo und Boost
 		var spk = clampf(s.spd / maxf(1.0, base_spd), 0.0, 1.6)
@@ -9655,6 +9765,8 @@ func _pose_all(dt: float) -> void:
 			jc = OR
 			jc2 = Color(1.0, 0.85, 0.6)
 		var jk = (0.85 + 0.35 * spk + 1.2 * bo) * float(HX.jglow)
+		if i == 0 and not fin.is_empty() and fin.fly and fin.phase == 0:
+			jk *= 0.3   # Kamerafahrt ganz nah am Schiff: Düsen nicht blenden lassen
 		_sp(pjm[0], "jk", jk)
 		_sp(pjm[0], "jl", JL)
 		_sp(pjm[0], "jd", float(HX.jdia))
@@ -9702,6 +9814,8 @@ func _camera(dt: float) -> void:
 	if state == "replay" and _rp_cam(dt):
 		return
 	if state == "kill" and _kc_cam():
+		return
+	if state == "done" and _fly_cam():
 		return
 	var g: Dictionary = _focus()
 	var f = T.frame(g.z)
@@ -9756,6 +9870,7 @@ func _camera(dt: float) -> void:
 
 # ---------------------------------------------------------------- Comic: Manga-Panels mit den Fahrern (Cyber Gothic)
 # Fahrer: Name, Beiname, Farbe, Bildname (art/comic/<bild>_<0..2>.jpg: 0 ruhig/grinsend, 1 wütend/erschrocken, 2 Triumph)
+# Index = Platz in ships[] (0 = du als Ren, 1 Vega, 2 Kato, 3 Mira)
 const CHARS = [
 	["REN", "RED DRAGON", Color(0.9, 0.1, 0.14), "ren"],
 	["VEGA", "THE CHAMPION", Color(0.66, 0.36, 1.0), "vega"],
@@ -9766,6 +9881,12 @@ const CM_LINES = {
 	"vega": ["The crown stays\nwith me.", "Kneel, rookie.", "You race\nfor second."],
 	"kato": ["I'll scrap you,\nkid!", "Outta my way!", "Hope you brought\nspare parts!"],
 	"mira": ["Watch your step...\nhehe.", "I left you\na present.", "Catch me\nif you can~"]}
+const CM_WIN = {"ren": ["Too slow.", "The dragon\nflies first."], "vega": ["Impossible!", "This isn't\nover!"],
+	"kato": ["ARGH!", "Lucky shot,\nkid!"], "mira": ["Hmpf. Rigged!", "No fair!"]}
+const CM_LOSE = {"ren": ["Next time...", "Tch."], "vega": ["As expected.", "Bow to the\nchampion."],
+	"kato": ["HAHA! Eat\nmy dust!", "Who's the\nboss now?"], "mira": ["Byeee~", "Too easy!"]}
+const CM_KO = {"vega": ["My crown...!", "You'll pay\nfor this!"], "kato": ["MY BABY!!", "Who's paying\nfor that?!"],
+	"mira": ["Hmpf!", "Not cool!"]}
 var cm = {}
 var cm_tex = {}
 
@@ -9776,37 +9897,71 @@ func _cm_img(k: String) -> Texture2D:
 	return cm_tex[k]
 
 
-func _comic_start(kind: String) -> void:
+func _pick(a: Array):
+	return a[randi() % a.size()]
+
+
+# kind: start | win | lose | ko · who: Gewinner (lose) bzw. Opfer (ko)
+func _comic_start(kind: String, who := 0) -> void:
 	if not cm.is_empty():
 		_comic_end()
-	cm = {"pending": kind}   # erst bauen, wenn das Vorwärmen der Shader fertig ist (das räumt neue Knoten weg)
+	cm = {"pending": kind, "who": who}   # erst bauen, wenn das Vorwärmen der Shader fertig ist (das räumt neue Knoten weg)
 
 
 func _comic_build(kind: String) -> void:
+	var who: int = cm.get("who", 0)
 	var layer = CanvasLayer.new()
 	layer.layer = 50
 	add_child(layer)
 	var c = Control.new()
 	c.set_anchors_preset(Control.PRESET_FULL_RECT)
-	c.mouse_filter = Control.MOUSE_FILTER_STOP
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE if kind == "ko" else Control.MOUSE_FILTER_STOP
 	layer.add_child(c)
-	# Reihenfolge: die Rivalen protzen, Ren antwortet zum Schluss
 	var pn = []
-	for i in [1, 2, 3, 0]:
-		var ch: Array = CHARS[i]
-		var ex = 1 if i == 0 else 0
-		var lines: Array = CM_LINES[ch[3]]
-		pn.append({"ch": ch, "img": _cm_img(ch[3] + "_" + str(ex)), "line": lines[randi() % lines.size()]})
-	cm = {"kind": kind, "t": 0.0, "layer": layer, "c": c, "pn": pn, "end": 0.3 + pn.size() * 0.62 + 1.0, "skip": -1.0, "hit": -1}
+	var stamp = ["RACE!", Color(0.95, 0.08, 0.12)]
+	var end = 0.0
+	var hold = false
+	match kind:
+		"start":
+			# die Rivalen protzen, Ren antwortet zum Schluss
+			var k = 0
+			for i in [1, 2, 3, 0]:
+				var ch: Array = CHARS[i]
+				pn.append({"ch": ch, "img": _cm_img(ch[3] + "_" + str(1 if i == 0 else 0)), "line": _pick(CM_LINES[ch[3]]), "t0": 0.3 + k * 0.62, "fy": 0.45})
+				k += 1
+			end = 0.3 + 4 * 0.62 + 1.0
+		"win":
+			var r: Array = CHARS[0]
+			pn.append({"ch": r, "img": _cm_img("ren_2"), "line": _pick(CM_WIN.ren), "t0": 0.25, "fy": 0.45, "big": true})
+			var k2 = 0
+			for i in [1, 2, 3]:
+				var ch2: Array = CHARS[i]
+				pn.append({"ch": ch2, "img": _cm_img(ch2[3] + "_1"), "line": _pick(CM_WIN[ch2[3]]), "t0": 0.8 + k2 * 0.3, "fy": 0.45})
+				k2 += 1
+			stamp = ["VICTORY!", Color(1.0, 0.8, 0.2)]
+			hold = true
+		"lose":
+			var w: Array = CHARS[clampi(who, 1, 3)]
+			pn.append({"ch": w, "img": _cm_img(w[3] + "_2"), "line": _pick(CM_LOSE[w[3]]), "t0": 0.25, "fy": 0.45, "big": true})
+			pn.append({"ch": CHARS[0], "img": _cm_img("ren_1"), "line": _pick(CM_LOSE.ren), "t0": 0.85, "fy": 0.45})
+			stamp = ["DEFEAT", Color(0.75, 0.75, 0.8)]
+			hold = true
+		"ko":
+			var v: Array = CHARS[clampi(who, 1, 3)]
+			pn.append({"ch": v, "img": _cm_img("ko_" + v[3]), "line": _pick(CM_KO[v[3]]), "t0": 0.0, "fy": 0.5, "noname": false})
+			stamp = ["K.O.!", Color(1.0, 0.85, 0.15)]
+			end = 2.6
+	var ns = pn.size()
+	var st = pn[ns - 1].t0 + 0.5
+	cm = {"kind": kind, "who": who, "t": 0.0, "layer": layer, "c": c, "pn": pn, "end": end if end > 0.0 else 6.0,
+		"skip": -1.0, "hit": -1, "stamp": stamp, "st": st, "hold": hold}
 	c.draw.connect(_comic_draw)
 	c.gui_input.connect(func(ev):
-		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed and not cm.is_empty():
+		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed and not cm.is_empty() and cm.t > 0.6:
 			cm.skip = cm.t)
 
 
 func _comic_end() -> void:
-	if cm.is_empty():
-		return
 	if cm.has("layer") and is_instance_valid(cm.layer):
 		(cm.layer as CanvasLayer).queue_free()
 	cm = {}
@@ -9822,11 +9977,16 @@ func _comic_update(dt: float) -> void:
 		return
 	cm.t += dt
 	# Tschack: jedes Panel knallt mit einem Schlag rein
-	var k = int(floor((cm.t - 0.3 - 0.2) / 0.62))
-	if k > cm.hit and k < cm.pn.size() and cm.skip < 0.0:
-		cm.hit = k
-		_snd("land", -4.0, 1.25 + 0.08 * k)
-		cm.shake = 1.0
+	var pn: Array = cm.pn
+	for k in range(pn.size()):
+		if k > cm.hit and cm.t >= pn[k].t0 + 0.22 and cm.skip < 0.0:
+			cm.hit = k
+			_snd("land", -4.0, 1.25 + 0.08 * k)
+			cm.shake = 1.0
+	if cm.t >= cm.st + 0.15 and not cm.get("sth", false):
+		cm.sth = true
+		cm.shake = 1.4
+		_snd("land", -2.0, 0.8)
 	cm.shake = maxf(0.0, cm.get("shake", 0.0) - dt * 6.0)
 	var fin = cm.end if cm.skip < 0.0 else cm.skip + 0.25
 	if cm.t > fin:
@@ -9842,6 +10002,44 @@ func _ease_back(a: float) -> float:
 	return 1.0 + (c1 + 1.0) * u * u * u + c1 * u * u
 
 
+# Panel-Umrisse je Layout in Pixeln (vier Ecken, im Uhrzeigersinn ab oben links) und Einflugseite
+func _cm_layout(kind: String, n: int, W: float, H: float) -> Array:
+	var mg = W * 0.045
+	var gut = W * 0.016
+	var sl = W * 0.07
+	var out = []
+	match kind:
+		"start":
+			var top = H * 0.07
+			var ph = (H * 0.86) / n
+			for i in range(n):
+				var y0 = top + i * ph
+				var y1 = y0 + ph
+				var s0 = (sl * (1.0 if i % 2 == 0 else -1.0)) if i > 0 else 0.0
+				var s1 = (sl * (-1.0 if i % 2 == 0 else 1.0)) if i < n - 1 else 0.0
+				out.append([[Vector2(mg, y0 + gut + s0), Vector2(W - mg, y0 + gut - s0), Vector2(W - mg, y1 - gut - s1), Vector2(mg, y1 - gut + s1)], -1.0 if i % 2 == 0 else 1.0])
+		"win", "lose":
+			var yb = H * 0.6
+			out.append([[Vector2(mg, H * 0.1), Vector2(W - mg, H * 0.1), Vector2(W - mg, yb - sl - gut), Vector2(mg, yb + sl - gut)], -1.0])
+			var m = n - 1
+			var y2 = H * 0.88
+			for i in range(m):
+				var xa = mg + (W - 2.0 * mg) * i / m
+				var xb = mg + (W - 2.0 * mg) * (i + 1) / m
+				var ga = gut if i > 0 else 0.0
+				var gb = gut if i < m - 1 else 0.0
+				var ta = yb + sl - 2.0 * sl * (xa - mg) / (W - 2.0 * mg) + gut
+				var tb = yb + sl - 2.0 * sl * (xb - mg) / (W - 2.0 * mg) + gut
+				var k = W * 0.03
+				out.append([[Vector2(xa + ga + (k if i > 0 else 0.0), ta), Vector2(xb - gb + (k if i < m - 1 else 0.0), tb), Vector2(xb - gb - (k if i < m - 1 else 0.0), y2), Vector2(xa + ga - (k if i > 0 else 0.0), y2)], 1.0 if i % 2 == 0 else -1.0])
+		"ko":
+			var pw = W - 2.0 * mg
+			var y0k = H * 0.13
+			var h = pw * 0.6
+			out.append([[Vector2(mg, y0k), Vector2(W - mg, y0k + sl * 0.5), Vector2(W - mg, y0k + h), Vector2(mg, y0k + h - sl * 0.5)], 1.0])
+	return out
+
+
 func _comic_draw() -> void:
 	if cm.is_empty():
 		return
@@ -9851,126 +10049,380 @@ func _comic_draw() -> void:
 	var H = sz.y
 	var t: float = cm.t
 	var fa: float = cm.get("fade", 1.0)
+	var kind: String = cm.kind
 	var font = c.get_theme_default_font()
 	var sh = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * 10.0 * cm.get("shake", 0.0)
-	# Hintergrund: schwarze Seite mit Speedlines aus der Mitte
-	c.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.03, 0.02, 0.03, 0.93 * fa))
-	var ctr = Vector2(W * 0.5, H * 0.47)
-	for i in range(64):
-		var a = i * TAU / 64.0 + sin(i * 7.3) * 0.04
-		var r0 = W * (0.35 + 0.25 * fmod(i * 0.618, 1.0))
-		c.draw_line(ctr + Vector2(cos(a), sin(a)) * r0, ctr + Vector2(cos(a), sin(a)) * W * 1.6, Color(0.55, 0.05, 0.08, 0.35 * fa), 2.0 + fmod(i * 1.7, 3.0))
-	var mg = W * 0.045
-	var top = H * 0.07
-	var bot = H * 0.93
-	var n: int = cm.pn.size()
-	var ph = (bot - top) / n
-	var gut = W * 0.016
-	var sl = W * 0.07   # Schräge der Trennlinien
-	for i in range(n):
-		var t0 = 0.3 + i * 0.62
-		var a = clampf((t - t0) / 0.3, 0.0, 1.0)
+	# Hintergrund: schwarze Seite mit Speedlines aus der Mitte (beim K.o. nur ein Hauch, das Rennen läuft weiter)
+	if kind != "ko":
+		c.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.03, 0.02, 0.03, 0.93 * fa * clampf(t / 0.15, 0.0, 1.0)))
+		var ctr = Vector2(W * 0.5, H * 0.47)
+		var lc = Color(0.55, 0.05, 0.08) if kind != "win" else Color(0.7, 0.5, 0.08)
+		for i in range(64):
+			var a = i * TAU / 64.0 + sin(i * 7.3) * 0.04
+			var r0 = W * (0.35 + 0.25 * fmod(i * 0.618, 1.0))
+			c.draw_line(ctr + Vector2(cos(a), sin(a)) * r0, ctr + Vector2(cos(a), sin(a)) * W * 1.6, Color(lc, 0.35 * fa), 2.0 + fmod(i * 1.7, 3.0))
+	var pn: Array = cm.pn
+	var lay = _cm_layout(kind, pn.size(), W, H)
+	for i in range(pn.size()):
+		var pd: Dictionary = pn[i]
+		var a = clampf((t - pd.t0) / 0.3, 0.0, 1.0)
 		if a <= 0.0:
 			continue
-		var pd: Dictionary = cm.pn[i]
-		var ch: Array = pd.ch
-		var col: Color = ch[2]
-		var e = _ease_back(a)
-		var side = -1.0 if i % 2 == 0 else 1.0
-		var off = Vector2(side * (1.0 - e) * W * 1.1, 0.0) + sh
-		var y0 = top + i * ph
-		var y1 = y0 + ph
-		var s0 = sl * (1.0 if i % 2 == 0 else -1.0) if i > 0 else 0.0
-		var s1 = sl * (-1.0 if i % 2 == 0 else 1.0) if i < n - 1 else 0.0
-		var poly = PackedVector2Array([
-			Vector2(mg, y0 + gut + s0) + off, Vector2(W - mg, y0 + gut - s0) + off,
-			Vector2(W - mg, y1 - gut - s1) + off, Vector2(mg, y1 - gut + s1) + off])
-		# Bild: füllt das Panel, langsamer Zoom und Schwenk (Ken Burns)
-		var img: Texture2D = pd.img
-		var isz = img.get_size()
-		var bw = W - 2.0 * mg
-		var bh = ph + 2.0 * sl
-		var cover = maxf(bw / isz.x, bh / isz.y)
-		var zt = clampf((t - t0) / 3.0, 0.0, 1.0)
-		var zoom = cover * (1.06 - 0.05 * zt)
-		var pc = Vector2(W * 0.5, (y0 + y1) * 0.5) + off + Vector2(side * W * 0.03 * zt, 0.0)
-		var uvs = PackedVector2Array()
-		for pt in poly:
-			uvs.append(((pt - pc) / zoom + isz * Vector2(0.5, 0.45)) / isz)
-		var cs = PackedColorArray()
-		var fl = clampf(1.0 - (t - t0 - 0.3) / 0.12, 0.0, 1.0) if t > t0 + 0.3 else 0.0   # Aufblitzen beim Aufprall
-		for _k in range(4):
-			cs.append(Color(1.0 + fl * 2.0, 1.0 + fl * 2.0, 1.0 + fl * 2.0, fa))
-		c.draw_polygon(poly, cs, uvs, img)
-		# Rahmen: dick schwarz, innen eine feine Linie in der Fahrerfarbe
-		var cl = poly.duplicate()
-		cl.append(poly[0])
-		c.draw_polyline(cl, Color(0, 0, 0, fa), W * 0.014, true)
-		var inner = PackedVector2Array()
-		var pm = (poly[0] + poly[2]) * 0.5
-		for pt in cl:
-			inner.append(pt + (pm - pt).normalized() * W * 0.012)
-		c.draw_polyline(inner, Color(col, 0.9 * fa), 2.0, true)
-		# Name groß in der Ecke, schräg gesetzt
-		var nx = mg + W * 0.04 if side > 0.0 else W - mg - W * 0.04
-		var ny = y1 - gut - W * 0.05 - (s1 if side > 0.0 else -s1)
-		var fs = int(W * 0.105)
-		var nm: String = ch[0]
-		var nw = font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var npos = Vector2(nx if side > 0.0 else nx - nw, ny) + off
-		c.draw_set_transform(npos, -0.06, Vector2.ONE)
-		c.draw_string_outline(font, Vector2.ZERO, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, int(W * 0.022), Color(0, 0, 0, fa))
-		c.draw_string(font, Vector2.ZERO, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, fa))
-		var fs2 = int(W * 0.032)
-		var sub: String = ch[1]
-		c.draw_string_outline(font, Vector2(4, fs2 * 1.3), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, fs2, int(W * 0.012), Color(0, 0, 0, fa))
-		c.draw_string(font, Vector2(4, fs2 * 1.3), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, fs2, Color(1, 1, 1, fa))
-		c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		# Sprechblase: ploppt kurz nach dem Panel auf, Spitze zeigt zum Gesicht
-		var b = clampf((t - t0 - 0.32) / 0.18, 0.0, 1.0)
-		if b > 0.0:
-			var bs = _ease_back(b)
-			var fs3 = int(W * 0.04)
-			var lines: PackedStringArray = str(pd.line).split("\n")
-			var tw = 0.0
-			for ln in lines:
-				tw = maxf(tw, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, fs3).x)
-			var rx = tw * 0.5 + W * 0.05
-			var ry = lines.size() * fs3 * 0.62 + W * 0.035
-			var bc = Vector2(W - mg - rx - W * 0.03 if side > 0.0 else mg + rx + W * 0.03, y0 + gut + ry + W * 0.035 + absf(s0)) + off
-			var face = pc + Vector2(-side * W * 0.04, -ph * 0.05)
-			var dirf = (face - bc).normalized()
-			var tip = bc + dirf * (maxf(rx, ry) + W * 0.07)
-			var tb = Vector2(-dirf.y, dirf.x) * W * 0.03
-			var ell = PackedVector2Array()
-			for k2 in range(28):
-				var an = k2 * TAU / 28.0
-				ell.append(bc + Vector2(cos(an) * rx, sin(an) * ry) * bs)
-			var tail = PackedVector2Array([bc + tb * bs + dirf * ry * 0.6 * bs, tip * bs + bc * (1.0 - bs), bc - tb * bs + dirf * ry * 0.6 * bs])
-			var ol = W * 0.009
-			c.draw_colored_polygon(tail, Color(0, 0, 0, fa))
-			var big = PackedVector2Array()
-			for pt in ell:
-				big.append(bc + (pt - bc) * (1.0 + ol / maxf(rx, 1.0)))
-			c.draw_colored_polygon(big, Color(0, 0, 0, fa))
-			c.draw_colored_polygon(ell, Color(0.97, 0.96, 0.93, fa))
-			var tin = PackedVector2Array([tail[0].lerp(bc, 0.15), tail[1].lerp(bc, 0.12), tail[2].lerp(bc, 0.15)])
-			c.draw_colored_polygon(tin, Color(0.97, 0.96, 0.93, fa))
-			if bs > 0.6:
-				for j in range(lines.size()):
-					var lw = font.get_string_size(lines[j], HORIZONTAL_ALIGNMENT_LEFT, -1, fs3).x
-					var ly = bc.y - (lines.size() - 1) * fs3 * 0.55 + j * fs3 * 1.1 + fs3 * 0.35
-					c.draw_string(font, Vector2(bc.x - lw * 0.5, ly), lines[j], HORIZONTAL_ALIGNMENT_LEFT, -1, fs3, Color(0.05, 0.03, 0.03, fa))
+		_cm_panel(c, font, pd, lay[i][0], lay[i][1], t, a, sh, fa, W, kind)
 	# Schluss: großer Stempel quer über die Seite
-	var tz = t - (0.3 + n * 0.62 + 0.15)
+	var tz = t - cm.st
 	if tz > 0.0:
 		var e2 = _ease_back(clampf(tz / 0.22, 0.0, 1.0))
-		var fs4 = int(W * 0.21)
-		var txt = "RACE!"
+		var fs4 = int(W * (0.21 if kind == "start" else 0.17))
+		var txt: String = cm.stamp[0]
 		var tw2 = font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs4).x
-		c.draw_set_transform(Vector2(W * 0.5, H * 0.5) + sh, -0.12, Vector2.ONE * lerpf(2.4, 1.0, e2))
+		var sp = {"start": Vector2(0.5, 0.5), "win": Vector2(0.5, 0.6), "lose": Vector2(0.5, 0.6), "ko": Vector2(0.62, 0.13 + (W - W * 0.09) * 0.6 / H)}[kind]
+		c.draw_set_transform(Vector2(W, H) * sp + sh, -0.12, Vector2.ONE * lerpf(2.4, 1.0, e2))
 		c.draw_string_outline(font, Vector2(-tw2 * 0.5, fs4 * 0.35), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs4, int(W * 0.035), Color(0, 0, 0, fa))
-		c.draw_string(font, Vector2(-tw2 * 0.5, fs4 * 0.35), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs4, Color(0.95, 0.08, 0.12, fa))
+		c.draw_string(font, Vector2(-tw2 * 0.5, fs4 * 0.35), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs4, Color(cm.stamp[1], fa))
 		c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	var fs5 = int(W * 0.026)
-	c.draw_string(font, Vector2(W * 0.5 - W * 0.08, H - W * 0.03), "tap to skip", HORIZONTAL_ALIGNMENT_LEFT, -1, fs5, Color(1, 1, 1, 0.45 * fa))
+	if kind != "ko":
+		var fs5 = int(W * 0.026)
+		var hint = "tap to continue" if cm.hold else "tap to skip"
+		var hw = font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs5).x
+		c.draw_string(font, Vector2(W * 0.5 - hw * 0.5, H - W * 0.03), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs5, Color(1, 1, 1, 0.45 * fa))
+	# weißer Blitz beim Übergang von der Kamerafahrt
+	if kind == "win" and t < 0.2:
+		c.draw_rect(Rect2(Vector2.ZERO, sz), Color(1, 1, 1, 1.0 - t / 0.2))
+
+
+func _cm_panel(c: Control, font: Font, pd: Dictionary, base: Array, side: float, t: float, a: float, sh: Vector2, fa: float, W: float, kind: String) -> void:
+	var ch: Array = pd.ch
+	var col: Color = ch[2]
+	var e = _ease_back(a)
+	var off = Vector2(side * (1.0 - e) * W * 1.1, 0.0) + sh
+	if kind == "ko":
+		off = Vector2(0.0, -(1.0 - e) * W * 1.2) + sh
+	var poly = PackedVector2Array()
+	for pt in base:
+		poly.append(pt + off)
+	var mn = poly[0]
+	var mx = poly[0]
+	for pt in poly:
+		mn = Vector2(minf(mn.x, pt.x), minf(mn.y, pt.y))
+		mx = Vector2(maxf(mx.x, pt.x), maxf(mx.y, pt.y))
+	var bw = mx.x - mn.x
+	var bh = mx.y - mn.y
+	# Bild: füllt das Panel, langsamer Zoom und Schwenk (Ken Burns)
+	var img: Texture2D = pd.img
+	var isz = img.get_size()
+	var cover = maxf(bw / isz.x, bh / isz.y)
+	var zt = clampf((t - pd.t0) / 3.0, 0.0, 1.0)
+	var zoom = cover * (1.06 - 0.05 * zt)
+	var pc = (mn + mx) * 0.5 + Vector2(side * W * 0.02 * zt, 0.0)
+	var uvs = PackedVector2Array()
+	for pt in poly:
+		uvs.append(((pt - pc) / zoom + isz * Vector2(0.5, pd.fy)) / isz)
+	var cs = PackedColorArray()
+	var fl = clampf(1.0 - (t - pd.t0 - 0.3) / 0.12, 0.0, 1.0) if t > pd.t0 + 0.3 else 0.0   # Aufblitzen beim Aufprall
+	for _k in range(4):
+		cs.append(Color(1.0 + fl * 2.0, 1.0 + fl * 2.0, 1.0 + fl * 2.0, fa))
+	c.draw_polygon(poly, cs, uvs, img)
+	# Rahmen: dick schwarz, innen eine feine Linie in der Fahrerfarbe
+	var cl = poly.duplicate()
+	cl.append(poly[0])
+	c.draw_polyline(cl, Color(0, 0, 0, fa), W * 0.014, true)
+	var inner = PackedVector2Array()
+	var pm = (mn + mx) * 0.5
+	for pt in cl:
+		inner.append(pt + (pm - pt).normalized() * W * 0.012)
+	c.draw_polyline(inner, Color(col, 0.9 * fa), 2.0, true)
+	var small = bw < W * 0.5
+	# Name in der unteren Ecke, schräg gesetzt
+	if kind != "ko":
+		var fs = int(bw * (0.2 if small else 0.115))
+		var nm: String = ch[0]
+		var nw = font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var by = poly[3].y if side > 0.0 else poly[2].y
+		var nx = poly[3].x + bw * 0.05 if side > 0.0 else poly[2].x - bw * 0.05 - nw
+		var npos = Vector2(nx, by - bw * (0.07 if small else 0.06))
+		c.draw_set_transform(npos, -0.06, Vector2.ONE)
+		c.draw_string_outline(font, Vector2.ZERO, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, int(W * (0.016 if small else 0.022)), Color(0, 0, 0, fa))
+		c.draw_string(font, Vector2.ZERO, nm, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, fa))
+		if not small:
+			var fs2 = int(W * 0.032)
+			var sub: String = ch[1]
+			c.draw_string_outline(font, Vector2(4, fs2 * 1.3), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, fs2, int(W * 0.012), Color(0, 0, 0, fa))
+			c.draw_string(font, Vector2(4, fs2 * 1.3), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, fs2, Color(1, 1, 1, fa))
+		c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Sprechblase: ploppt kurz nach dem Panel auf, Spitze zeigt zum Gesicht
+	var b = clampf((t - pd.t0 - 0.32) / 0.18, 0.0, 1.0)
+	if b <= 0.0:
+		return
+	var bs = _ease_back(b)
+	var fs3 = int(W * (0.034 if small else 0.04))
+	var lines: PackedStringArray = str(pd.line).split("\n")
+	var tw = 0.0
+	for ln in lines:
+		tw = maxf(tw, font.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, fs3).x)
+	var rx = tw * 0.5 + W * (0.035 if small else 0.05)
+	var ry = lines.size() * fs3 * 0.62 + W * 0.03
+	var topy = minf(poly[0].y, poly[1].y)
+	var bc: Vector2
+	if small:
+		bc = Vector2(pm.x, topy + ry + W * 0.02)
+	else:
+		bc = Vector2(mx.x - rx - W * 0.03 if side > 0.0 else mn.x + rx + W * 0.03, topy + ry + W * 0.035)
+	var face = pc + Vector2(-side * W * 0.04, -bh * 0.05) if not small else pm + Vector2(0, bh * 0.1)
+	var dirf = (face - bc).normalized()
+	var tip = bc + dirf * (maxf(rx, ry) * 0.9 + W * (0.04 if small else 0.07))
+	var tb = Vector2(-dirf.y, dirf.x) * W * 0.025
+	var ell = PackedVector2Array()
+	for k2 in range(28):
+		var an = k2 * TAU / 28.0
+		ell.append(bc + Vector2(cos(an) * rx, sin(an) * ry) * bs)
+	var tail = PackedVector2Array([bc + tb * bs + dirf * ry * 0.6 * bs, tip * bs + bc * (1.0 - bs), bc - tb * bs + dirf * ry * 0.6 * bs])
+	var ol = W * 0.009
+	c.draw_colored_polygon(tail, Color(0, 0, 0, fa))
+	var big = PackedVector2Array()
+	for pt in ell:
+		big.append(bc + (pt - bc) * (1.0 + ol / maxf(rx, 1.0)))
+	c.draw_colored_polygon(big, Color(0, 0, 0, fa))
+	c.draw_colored_polygon(ell, Color(0.97, 0.96, 0.93, fa))
+	var tin = PackedVector2Array([tail[0].lerp(bc, 0.15), tail[1].lerp(bc, 0.12), tail[2].lerp(bc, 0.15)])
+	c.draw_colored_polygon(tin, Color(0.97, 0.96, 0.93, fa))
+	if bs > 0.6:
+		for j in range(lines.size()):
+			var lw = font.get_string_size(lines[j], HORIZONTAL_ALIGNMENT_LEFT, -1, fs3).x
+			var ly = bc.y - (lines.size() - 1) * fs3 * 0.55 + j * fs3 * 1.1 + fs3 * 0.35
+			c.draw_string(font, Vector2(bc.x - lw * 0.5, ly), lines[j], HORIZONTAL_ALIGNMENT_LEFT, -1, fs3, Color(0.05, 0.03, 0.03, fa))
+
+
+# ---------------------------------------------------------------- Zieleinlauf: Kamerafahrt ums Siegerschiff, dann Comic, dann Ergebnis
+var fin = {}
+
+
+func _fin_flow(place: int, out := false) -> void:
+	if int(cfg.get("comic", 1)) != 1 or not rpf.is_empty():
+		_show_resb()
+		if place == 1 and not out:
+			_victory()
+		return
+	var win = place == 1 and not out
+	var who = 0
+	if not win:
+		# Sieger: wer am schnellsten im Ziel war, sonst wer vorne liegt
+		var best = 1e9
+		var bz = -1e9
+		for i in range(1, ships.size()):
+			var o: Dictionary = ships[i]
+			if o.fin > 0.0 and o.fin < best:
+				best = o.fin
+				who = i
+		if who == 0:
+			for i in range(1, ships.size()):
+				if not ships[i].out and ships[i].z > bz:
+					bz = ships[i].z
+					who = i
+		who = maxi(who, 1)
+	fin = {"t": 0.0, "win": win, "who": who, "fly": win and not ships[0].out, "phase": 0}
+	hud.layer.visible = false
+
+
+func _fin_update(dt: float) -> void:
+	if fin.is_empty():
+		return
+	fin.t += dt
+	if OS.get_environment("FINT") != "" and fin.t >= float(OS.get_environment("FINT")):
+		get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
+		get_tree().quit()
+	var fly_t = 4.8
+	if fin.phase == 0:
+		var wait = fly_t if fin.fly else 1.2
+		if fin.t >= wait:
+			fin.phase = 1
+			_comic_start("win" if fin.win else "lose", fin.who)
+	elif fin.phase == 1 and cm.is_empty():
+		fin.phase = 2
+		hud.layer.visible = true
+		_show_resb()
+		fin = {}
+
+
+# Kamerafahrt in Schiffs-Koordinaten (Nase +z): ganz nah an die Düsen, an der Seite entlang über die 37,
+# um die Nase herum und dann hoch nach oben weg
+const FLY = [[0.0, Vector3(-0.45, 0.55, -1.7), Vector3(0.0, 0.12, -0.4)], [1.2, Vector3(-0.95, 0.4, -0.75), Vector3(0.0, 0.12, -0.3)],
+	[2.4, Vector3(-0.95, 0.4, 0.35), Vector3(0.0, 0.12, 0.1)], [3.4, Vector3(-0.1, 0.35, 1.5), Vector3(0.0, 0.12, 0.0)],
+	[4.8, Vector3(0.0, 2.8, 0.1), Vector3(0.0, 0.0, 0.0)]]
+
+
+func _fly_cam() -> bool:
+	if fin.is_empty() or not fin.fly or fin.phase != 0:
+		return false
+	var nd: Node3D = ships[0].node
+	var xf = nd.global_transform
+	var t: float = fin.t
+	var k = 0
+	while k < FLY.size() - 2 and t > FLY[k + 1][0]:
+		k += 1
+	var u = clampf((t - FLY[k][0]) / (FLY[k + 1][0] - FLY[k][0]), 0.0, 1.0)
+	var pos = _cr(FLY, k, u, 1)
+	var tg = _cr(FLY, k, u, 2)
+	var wp: Vector3 = xf * pos
+	var wt: Vector3 = xf * tg
+	var up: Vector3 = xf.basis.y.normalized()
+	if (wt - wp).normalized().abs().dot(up.abs()) > 0.98:
+		up = xf.basis.z.normalized()
+	cam.global_position = wp
+	cam.look_at(wt, up)
+	cam.fov = 50.0
+	return true
+
+
+# Catmull-Rom zwischen den Stützpunkten k und k+1 (Spalte col der Tabelle)
+func _cr(P: Array, k: int, u: float, col: int) -> Vector3:
+	var p0: Vector3 = P[maxi(k - 1, 0)][col]
+	var p1: Vector3 = P[k][col]
+	var p2: Vector3 = P[k + 1][col]
+	var p3: Vector3 = P[mini(k + 2, P.size() - 1)][col]
+	var u2 = u * u
+	var u3 = u2 * u
+	return 0.5 * ((2.0 * p1) + (-p0 + p2) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u3)
+
+
+# ---------------------------------------------------------------- Ladebildschirm: Manga-Splash, Drachenschuppen-Balken, Spruch
+# hängt am Fenster (nicht an der Szene), damit er das Neuladen überlebt
+static var ld: CanvasLayer = null
+
+
+func _ld_show(p: float) -> void:
+	if ld != null and is_instance_valid(ld):
+		_ld_set(p)
+		return
+	ld = CanvasLayer.new()
+	ld.layer = 100
+	var box = Control.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.mouse_filter = Control.MOUSE_FILTER_STOP
+	ld.add_child(box)
+	var bg = ColorRect.new()
+	bg.color = Color(0.02, 0.015, 0.02)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.add_child(bg)
+	var who = randi() % 4
+	var ch: Array = CHARS[who]
+	var tr = TextureRect.new()
+	tr.texture = _cm_img("load_" + ch[3])
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	tr.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.add_child(tr)
+	var q = RichTextLabel.new()
+	q.bbcode_enabled = true
+	q.fit_content = true
+	q.scroll_active = false
+	q.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	q.add_theme_font_size_override("normal_font_size", 34)
+	q.add_theme_constant_override("outline_size", 8)
+	q.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	var line: String = _pick(CM_LINES[ch[3]]).replace("\n", " ")
+	q.text = "[center][color=#%s]%s:[/color]  “%s”[/center]" % [ch[2].to_html(false), ch[0], line]
+	q.anchor_left = 0.06
+	q.anchor_right = 0.94
+	q.anchor_top = 0.84
+	q.anchor_bottom = 0.84
+	q.offset_bottom = 60
+	box.add_child(q)
+	# Balken: dunkler Rahmen, darin rote Schuppen, die sich füllen
+	var fr = ColorRect.new()
+	fr.color = Color(0.0, 0.0, 0.0, 0.9)
+	fr.anchor_left = 0.1
+	fr.anchor_right = 0.9
+	fr.anchor_top = 0.905
+	fr.anchor_bottom = 0.905
+	fr.offset_top = -4
+	fr.offset_bottom = 26
+	box.add_child(fr)
+	var edge = ReferenceRect.new()
+	edge.border_color = Color(0.85, 0.1, 0.14)
+	edge.border_width = 2.0
+	edge.editor_only = false
+	edge.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fr.add_child(edge)
+	var fill = TextureRect.new()
+	fill.texture = _scale_tex()
+	fill.stretch_mode = TextureRect.STRETCH_TILE
+	fill.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	fill.anchor_top = 0.0
+	fill.anchor_bottom = 1.0
+	fill.anchor_left = 0.0
+	fill.anchor_right = 0.0
+	fill.offset_left = 4
+	fill.offset_top = 4
+	fill.offset_bottom = -4
+	fr.add_child(fill)
+	var lb = Label.new()
+	lb.text = "LOADING"
+	lb.add_theme_font_size_override("font_size", 22)
+	lb.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
+	lb.anchor_left = 0.1
+	lb.anchor_right = 0.9
+	lb.anchor_top = 0.935
+	lb.anchor_bottom = 0.935
+	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(lb)
+	ld.set_meta("fill", fill)
+	ld.set_meta("box", box)
+	get_tree().root.add_child(ld)
+	_ld_set(p)
+
+
+func _ld_set(p: float) -> void:
+	if ld == null or not is_instance_valid(ld):
+		return
+	var fill: TextureRect = ld.get_meta("fill")
+	var pp = maxf(float(ld.get_meta("p", 0.0)), clampf(p, 0.0, 1.0))
+	ld.set_meta("p", pp)
+	fill.anchor_right = pp
+	fill.offset_right = -4.0 * pp
+
+
+func _ld_hide() -> void:
+	if ld == null or not is_instance_valid(ld):
+		return
+	_ld_set(1.0)
+	var box: Control = ld.get_meta("box")
+	var l = ld
+	ld = null
+	var tw = create_tween()
+	tw.tween_interval(0.15)
+	tw.tween_property(box, "modulate:a", 0.0, 0.35)
+	tw.tween_callback(l.queue_free)
+
+
+var _scale_t: ImageTexture = null
+func _scale_tex() -> ImageTexture:
+	if _scale_t != null:
+		return _scale_t
+	# Drachenschuppen: Halbkreise versetzt, heller Rand oben, dunkle Fuge
+	var im = Image.create(24, 22, false, Image.FORMAT_RGBA8)
+	for y in range(22):
+		for x in range(24):
+			var best = 99.0
+			for cy in [0.0, 11.0, 22.0]:
+				var ox = 12.0 if int(cy) % 22 == 11 else 0.0
+				for cx in [ox - 24.0, ox, ox + 24.0]:
+					var d = Vector2(x + 0.5 - cx, (y + 0.5 - cy) * 1.15).length()
+					if y + 0.5 >= cy - 2.0:
+						best = minf(best, d)
+			var e = clampf((best - 8.5) / 2.5, 0.0, 1.0)
+			var hl = clampf(1.0 - best / 12.0, 0.0, 1.0)
+			var c = Color(0.62, 0.03, 0.06).lerp(Color(0.95, 0.2, 0.18), hl * 0.6).lerp(Color(0.15, 0.0, 0.02), e)
+			im.set_pixel(x, y, c)
+	_scale_t = ImageTexture.create_from_image(im)
+	return _scale_t
+
+
+# Neu laden mit Ladebildschirm: erst das Bild zeigen, dann die Szene bauen (das hängt ein paar Sekunden)
+func _reload() -> void:
+	_ld_show(0.12)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_ld_set(0.3)
+	await get_tree().process_frame
+	get_tree().reload_current_scene()
