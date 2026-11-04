@@ -6434,6 +6434,12 @@ var live_srv: TCPServer
 var live_cons = []
 var live_lbl: Label
 var live_sv = 0.0
+var live_seen = 99.0   # Sekunden seit der letzten Anfrage vom PC (die Seite meldet sich alle 2 s)
+
+
+# PC hat die Regler-Seite offen: am Handy alles ausblenden, nur die Szene im Vollbild
+func _live_pc() -> bool:
+	return live_srv != null and live_seen < 5.0
 
 
 func _live_addr() -> String:
@@ -6470,9 +6476,15 @@ func _live_poll(dt: float) -> void:
 		live_lbl.modulate = Color(0.6, 1.0, 0.8, 0.8)
 		live_lbl.position = Vector2(36, 196)
 		(hud.fire as Control).get_parent().add_child(live_lbl)
+	live_seen += dt
+	var pc = _live_pc()
 	if live_lbl != null:
-		live_lbl.visible = true
+		live_lbl.visible = not pc
 		live_lbl.text = "LIVE  " + _live_addr()
+	if state == "lab" and lab.has("cl") and is_instance_valid(lab.cl):
+		var cl: CanvasLayer = lab.cl
+		if cl.visible == pc:
+			cl.visible = not pc
 	while live_srv.is_connection_available():
 		var c = live_srv.take_connection()
 		if c != null:
@@ -6494,6 +6506,7 @@ func _live_poll(dt: float) -> void:
 		if txt.contains("\r\n\r\n"):
 			var line = txt.get_slice("\r\n", 0)
 			var path = line.get_slice(" ", 1)
+			live_seen = 0.0
 			_live_answer(c, path)
 			c.disconnect_from_host()
 			live_cons.remove_at(i)
@@ -6538,6 +6551,8 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 			elif state == "menu":
 				free_ride = true
 				_start()
+		_live_send(c, "text/plain", "ok")
+	elif path.begins_with("/ping"):
 		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/set?"):
 		var q = {}
@@ -6665,6 +6680,7 @@ document.getElementById('bs').onclick=e=>{sup=!sup;if(sup)mega=false;upd();};
 document.getElementById('bm').onclick=e=>{mega=!mega;if(mega)sup=false;upd();};
 function upd(){document.getElementById('bs').className=sup?'on':'';document.getElementById('bm').className=mega?'on':'';}
 document.getElementById('fire').onclick=()=>fetch('/fire?g='+D[cur].g+'&s='+(sup?1:0)+'&m='+(mega?1:0)).then(()=>st.textContent='ausgelöst: '+D[cur].n);
+setInterval(()=>fetch('/ping').catch(()=>{}),2000);
 document.getElementById('drive').onclick=()=>fetch('/drive').then(()=>st.textContent='weiter im Free ride');
 function show(i){cur=i;if(pv.checked)fetch('/tab?g='+D[i].g);document.querySelectorAll('#tabs button').forEach((b,j)=>b.className=j==i?'on':'');
  const m=document.getElementById('m');m.innerHTML='';const T=D[i];
