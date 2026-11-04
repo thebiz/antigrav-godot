@@ -38,7 +38,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": ""}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -101,6 +101,8 @@ func _ready() -> void:
 	T.J = _jungle()   # eigene Streckenführung im Dschungel
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
+	if OS.get_cmdline_user_args().has("--live"):
+		cfg.live = 1
 	if OS.get_cmdline_user_args().has("--howto"):
 		_show_help.call_deferred(true)
 	if OS.get_cmdline_user_args().has("--records"):
@@ -3893,6 +3895,15 @@ func _menu() -> void:
 		btp.text = "Tips: On"
 		_toast("Tips will show again"))
 	trow.add_child(btr)
+	var blv = _btn("Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off"))
+	blv.add_theme_font_size_override("font_size", 30)
+	blv.pressed.connect(func():
+		cfg.live = 1 - int(cfg.live)
+		_save_cfg()
+		blv.text = "Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off")
+		if int(cfg.live) == 1:
+			_toast("Open " + _live_addr() + " in the PC browser (same Wi-Fi)"))
+	sp.add_child(blv)
 	var back = _btn("Done", true)
 	back.pressed.connect(func(): _show_settings(false))
 	sp.add_child(back)
@@ -5889,6 +5900,173 @@ func _show_help(on: bool) -> void:
 	var bb = _btn("Back", true)
 	bb.pressed.connect(func(): _show_help(false))
 	vb.add_child(bb)
+
+
+# ================================================================ Live-Regler vom PC (gleiches WLAN)
+# Das Spiel öffnet einen kleinen Webserver (Port 8080). Im PC-Browser erscheinen alle FX-Lab-Regler;
+# jede Änderung wirkt sofort im laufenden Rennen und wird auf dem Handy gespeichert.
+const LIVE_PORT = 8080
+var live_srv: TCPServer
+var live_cons = []
+var live_lbl: Label
+var live_sv = 0.0
+
+
+func _live_addr() -> String:
+	var best = ""
+	for a in IP.get_local_addresses():
+		if a.contains(":"):
+			continue
+		if a.begins_with("192.168.") or a.begins_with("10.") or a.begins_with("172."):
+			best = a
+			if a.begins_with("192.168."):
+				break
+	return "http://%s:%d" % [best if best != "" else "?", LIVE_PORT]
+
+
+func _live_poll(dt: float) -> void:
+	var on = int(cfg.get("live", 0)) == 1
+	if not on:
+		if live_srv != null:
+			live_srv.stop()
+			live_srv = null
+			live_cons.clear()
+		if live_lbl != null:
+			live_lbl.visible = false
+		return
+	if live_srv == null:
+		live_srv = TCPServer.new()
+		if live_srv.listen(LIVE_PORT) != OK:
+			live_srv = null
+			return
+	# kleine Adresse oben links, damit man sie am PC eintippen kann
+	if live_lbl == null and hud.has("fire"):
+		live_lbl = Label.new()
+		live_lbl.add_theme_font_size_override("font_size", 20)
+		live_lbl.modulate = Color(0.6, 1.0, 0.8, 0.8)
+		live_lbl.position = Vector2(36, 196)
+		(hud.fire as Control).get_parent().add_child(live_lbl)
+	if live_lbl != null:
+		live_lbl.visible = true
+		live_lbl.text = "LIVE  " + _live_addr()
+	while live_srv.is_connection_available():
+		var c = live_srv.take_connection()
+		if c != null:
+			live_cons.append({"c": c, "b": PackedByteArray(), "t": 0.0})
+	for i in range(live_cons.size() - 1, -1, -1):
+		var e = live_cons[i]
+		var c: StreamPeerTCP = e.c
+		c.poll()
+		e.t += dt
+		if c.get_status() != StreamPeerTCP.STATUS_CONNECTED or e.t > 3.0:
+			live_cons.remove_at(i)
+			continue
+		var n = c.get_available_bytes()
+		if n > 0:
+			var r = c.get_data(n)
+			if r[0] == OK:
+				e.b.append_array(r[1])
+		var txt = e.b.get_string_from_utf8()
+		if txt.contains("\r\n\r\n"):
+			var line = txt.get_slice("\r\n", 0)
+			var path = line.get_slice(" ", 1)
+			_live_answer(c, path)
+			c.disconnect_from_host()
+			live_cons.remove_at(i)
+	if live_sv > 0.0:
+		live_sv -= dt
+		if live_sv <= 0.0:
+			_fx_save()
+
+
+func _live_send(c: StreamPeerTCP, ctype: String, body: String) -> void:
+	var b = body.to_utf8_buffer()
+	var h = "HTTP/1.1 200 OK\r\nContent-Type: %s; charset=utf-8\r\nContent-Length: %d\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n" % [ctype, b.size()]
+	c.put_data(h.to_utf8_buffer())
+	c.put_data(b)
+
+
+func _live_answer(c: StreamPeerTCP, path: String) -> void:
+	if path.begins_with("/fx"):
+		# alle Reiter mit Reglern und aktuellen Werten
+		var tabs = []
+		for t in FXT:
+			var its = []
+			for it in FXS[t[0]]:
+				its.append({"k": it[0], "n": it[1], "lo": it[2], "hi": it[3], "d": it[4], "v": float(fx[t[0]][it[0]])})
+			tabs.append({"g": t[0], "n": t[1], "it": its})
+		_live_send(c, "application/json", JSON.stringify(tabs))
+	elif path.begins_with("/set?"):
+		var q = {}
+		for kv in path.substr(5).split("&"):
+			q[kv.get_slice("=", 0)] = kv.get_slice("=", 1).uri_decode()
+		var g = str(q.get("g", ""))
+		var k = str(q.get("k", ""))
+		if FXS.has(g) and fx[g].has(k):
+			for it in FXS[g]:
+				if it[0] == k:
+					fx[g][k] = clampf(float(q.get("v", "0")), it[2], it[3])
+			_fx_changed(g, k)
+			live_sv = 0.8
+		_live_send(c, "text/plain", "ok")
+	else:
+		_live_send(c, "text/html", LIVE_HTML)
+
+
+# nach einer Regleränderung (FX Lab oder PC): Wirkung sofort sichtbar machen
+func _fx_changed(t: String, key: String) -> void:
+	if t == "env":
+		if key in ["city", "dens", "bh", "bw", "bd"]:
+			_city_fill()
+		_env_apply()
+	if t == "pillar":
+		_pillar_apply()
+	if t == "jungle":
+		_jungle_apply()
+	if t == "ship":
+		_nav_apply()
+	if t == "city":
+		if key == "mega":
+			_city_fill()
+		_city_apply()
+	if t == "sound":
+		_start_bus_apply()
+
+
+const LIVE_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AntiGrav Live</title><style>
+body{margin:0;background:#07080d;color:#e8ecf5;font:15px system-ui,sans-serif}
+header{position:sticky;top:0;background:#0b0d16ee;padding:12px 16px;border-bottom:1px solid #223}
+h1{margin:0 0 8px;font-size:18px;letter-spacing:.08em;color:#5ee8ff}
+#tabs{display:flex;flex-wrap:wrap;gap:6px}
+#tabs button{background:#151a2a;color:#cfd8ea;border:1px solid #2a3350;border-radius:8px;padding:6px 10px;cursor:pointer}
+#tabs button.on{background:#ef6a2e;border-color:#ffb08a;color:#fff}
+main{padding:12px 16px;max-width:900px}
+.r{display:grid;grid-template-columns:200px 1fr 70px 34px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid #141a28}
+.r input{width:100%;accent-color:#ef6a2e}.v{text-align:right;font-variant-numeric:tabular-nums;color:#9fb0cc}
+.r button{background:#151a2a;color:#9fb0cc;border:1px solid #2a3350;border-radius:6px;cursor:pointer}
+#st{font-size:12px;color:#6c7a96;margin-top:6px}
+</style></head><body><header><h1>ANTIGRAV · LIVE TUNING</h1><div id="tabs"></div><div id="st">verbinde …</div></header><main id="m"></main>
+<script>
+let D=[],cur=0,tm={};
+const st=document.getElementById('st');
+function fmt(it,v){if(it.k.indexOf('hue')>=0)return Math.round(v*360)+'°';return Math.round(v*100)+' %';}
+function send(g,k,v){clearTimeout(tm[g+k]);tm[g+k]=setTimeout(()=>{fetch('/set?g='+g+'&k='+k+'&v='+v).then(()=>st.textContent='gesendet: '+k+' = '+v).catch(()=>st.textContent='keine Verbindung');},40);}
+function show(i){cur=i;document.querySelectorAll('#tabs button').forEach((b,j)=>b.className=j==i?'on':'');
+ const m=document.getElementById('m');m.innerHTML='';const T=D[i];
+ T.it.forEach(it=>{const r=document.createElement('div');r.className='r';
+  const l=document.createElement('div');l.textContent=it.n;const s=document.createElement('input');s.type='range';
+  s.min=it.lo;s.max=it.hi;s.step=(it.k=='shape'||it.k=='city'||it.k=='life')?1:0.001;s.value=it.v;
+  const v=document.createElement('div');v.className='v';v.textContent=fmt(it,it.v);
+  const z=document.createElement('button');z.textContent='↺';z.title='Standard';
+  s.oninput=()=>{it.v=+s.value;v.textContent=fmt(it,it.v);send(T.g,it.k,s.value);};
+  z.onclick=()=>{s.value=it.d;s.oninput();};
+  r.append(l,s,v,z);m.append(r);});}
+fetch('/fx').then(r=>r.json()).then(d=>{D=d;const t=document.getElementById('tabs');
+ d.forEach((T,i)=>{const b=document.createElement('button');b.textContent=T.n;b.onclick=()=>show(i);t.append(b);});
+ const ship=d.findIndex(T=>T.g=='ship');show(ship>=0?ship:0);st.textContent='verbunden – Änderungen wirken sofort';})
+ .catch(()=>st.textContent='keine Verbindung zum Spiel');
+</script></body></html>"""
 
 
 # Zielerfassung der Lenkrakete: ein Neon-Zeichen in der 3D-Welt um den Gegner (leuchtet wie die Leitplanken),
@@ -8091,6 +8269,7 @@ func _process(delta: float) -> void:
 		flash_rect.visible = false   # unsichtbare Vollbild-Fläche nicht jedes Bild zeichnen
 	t_state += dt
 	_measure(delta)
+	_live_poll(dt)
 	_duck(delta / maxf(0.01, Engine.time_scale))
 	_perf(delta)
 	var g: Dictionary = ships[0]
