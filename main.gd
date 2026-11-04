@@ -4,6 +4,7 @@ extends Node3D
 
 # gespeichertes Replay, das nach dem Neuladen der Szene abgespielt werden soll (bleibt über reload_current_scene erhalten)
 static var pending_rp = ""
+static var pending_free = false   # nach dem FX Lab gleich wieder ins Free ride (Live-Regler vom PC)
 static var restart = false
 static var bench_req = false   # Leistungstest: nach dem Neuladen direkt starten   # „Race again“: nach dem Neuladen direkt losfahren
 
@@ -103,6 +104,15 @@ func _ready() -> void:
 		bench_req = true
 	if OS.get_cmdline_user_args().has("--free"):
 		free_ride = true
+	if pending_free:
+		pending_free = false
+		free_ride = true
+		_start.call_deferred()
+	if OS.get_environment("SHOTAFTER") != "":
+		# Testbild nach N Sekunden (zum Prüfen am Rechner)
+		get_tree().create_timer(float(OS.get_environment("SHOTAFTER"))).timeout.connect(func():
+			get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
+			get_tree().quit())
 	if OS.get_cmdline_user_args().has("--settings"):
 		_show_settings.call_deferred(true)
 		if OS.get_environment("SHOTPATH") != "":
@@ -6028,6 +6038,25 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 				its.append({"k": it[0], "n": it[1], "lo": it[2], "hi": it[3], "d": it[4], "v": float(fx[t[0]][it[0]])})
 			tabs.append({"g": t[0], "n": t[1], "it": its})
 		_live_send(c, "application/json", JSON.stringify(tabs))
+	elif path.begins_with("/tab?") or path.begins_with("/fire?") or path.begins_with("/drive"):
+		var q2 = {}
+		var qi = path.find("?")
+		if qi >= 0:
+			for kv in path.substr(qi + 1).split("&"):
+				q2[kv.get_slice("=", 0)] = kv.get_slice("=", 1).uri_decode()
+		if path.begins_with("/tab?"):
+			_live_view(str(q2.get("g", "")))
+		elif path.begins_with("/fire?"):
+			_live_fire(str(q2.get("g", "")), str(q2.get("s", "0")) == "1", str(q2.get("m", "0")) == "1")
+		else:
+			# weiterfahren: FX Lab schließen und direkt wieder ins Free ride
+			if state == "lab":
+				pending_free = true
+				_lab_close.call_deferred()
+			elif state == "menu":
+				free_ride = true
+				_start()
+		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/set?"):
 		var q = {}
 		for kv in path.substr(5).split("&"):
@@ -6039,10 +6068,53 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 				if it[0] == k:
 					fx[g][k] = clampf(float(q.get("v", "0")), it[2], it[3])
 			_fx_changed(g, k)
+			_live_sync_lab(g, k)
 			live_sv = 0.8
 		_live_send(c, "text/plain", "ok")
 	else:
 		_live_send(c, "text/html", LIVE_HTML)
+
+
+# Vorschau am Handy: passende FX-Lab-Ansicht zum Reiter öffnen
+func _live_view(t: String) -> void:
+	if not FXS.has(t) or state == "kill" or state == "replay":
+		return
+	if state != "lab":
+		_settings_close_all()
+		_lab_open()
+	_lab_tab(t)
+
+
+func _settings_close_all() -> void:
+	if ui.has("setp") and (ui.setp as Control).visible:
+		_show_settings(false)
+
+
+# Auslösen vom PC: im FX Lab den Test des Reiters, im Rennen/Free ride die passende Waffe direkt vor dem Schiff
+const LIVE_W = {"boom": "rak", "rak": "rak", "gb": "rak", "lock": "lenk", "mine": "mine", "quake": "beben", "wall": "wand",
+	"shield": "schild", "orbs": "orbs", "haze": "turbo", "ship": "turbo"}
+
+
+func _live_fire(t: String, sup: bool, mega: bool) -> void:
+	var g: Dictionary = ships[0]
+	if state == "lab":
+		if lab.get("tab", "") != t and FXS.has(t):
+			_lab_tab(t)
+		lab.sup = sup or mega
+		if mega and LIVE_W.has(t):
+			g.wpn = LIVE_W[t]
+			g.sup = true
+			g.mega = true
+			_fire()
+		else:
+			_lab_fire()
+	elif state == "race" and LIVE_W.has(t):
+		g.wpn = LIVE_W[t]
+		g.sup = sup or mega
+		g.mega = mega
+		_fire()
+	elif t == "sound":
+		_start_play(false)
 
 
 # nach einer Regleränderung (FX Lab oder PC): Wirkung sofort sichtbar machen
@@ -6063,6 +6135,19 @@ func _fx_changed(t: String, key: String) -> void:
 		_city_apply()
 	if t == "sound":
 		_start_bus_apply()
+		if state == "lab":
+			lab.sndre = 0.45
+
+
+# Regler im offenen FX Lab mitziehen, wenn am PC verstellt
+func _live_sync_lab(t: String, k: String) -> void:
+	if state != "lab" or lab.get("tab", "") != t or not lab.has("sls"):
+		return
+	var i = 0
+	for it in FXS[t]:
+		if it[0] == k and i < lab.sls.size():
+			(lab.sls[i] as HSlider).set_value_no_signal(float(fx[t][k]))
+		i += 1
 
 
 const LIVE_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -6078,13 +6163,28 @@ main{padding:12px 16px;max-width:900px}
 .r input{width:100%;accent-color:#ef6a2e}.v{text-align:right;font-variant-numeric:tabular-nums;color:#9fb0cc}
 .r button{background:#151a2a;color:#9fb0cc;border:1px solid #2a3350;border-radius:6px;cursor:pointer}
 #st{font-size:12px;color:#6c7a96;margin-top:6px}
-</style></head><body><header><h1>ANTIGRAV · LIVE TUNING</h1><div id="tabs"></div><div id="st">verbinde …</div></header><main id="m"></main>
+#bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+#bar button{background:#151a2a;color:#e8ecf5;border:1px solid #2a3350;border-radius:8px;padding:7px 12px;cursor:pointer}
+#bar button.on{background:#2a6;border-color:#7fe0b0}#bar #fire{background:#ef6a2e;border-color:#ffb08a;font-weight:600}
+#bar label{display:flex;gap:6px;align-items:center;color:#cfd8ea}
+</style></head><body><header><h1>ANTIGRAV · LIVE TUNING</h1><div id="tabs"></div>
+<div id="bar"><label><input type="checkbox" id="pv"> Vorschau am Handy</label>
+<button id="fire">Auslösen</button><button id="bs">Super</button><button id="bm">Mega</button><button id="drive">Weiterfahren (Free ride)</button></div>
+<div id="st">verbinde …</div></header><main id="m"></main>
 <script>
 let D=[],cur=0,tm={};
 const st=document.getElementById('st');
 function fmt(it,v){if(it.k.indexOf('hue')>=0)return Math.round(v*360)+'°';return Math.round(v*100)+' %';}
 function send(g,k,v){clearTimeout(tm[g+k]);tm[g+k]=setTimeout(()=>{fetch('/set?g='+g+'&k='+k+'&v='+v).then(()=>st.textContent='gesendet: '+k+' = '+v).catch(()=>st.textContent='keine Verbindung');},40);}
-function show(i){cur=i;document.querySelectorAll('#tabs button').forEach((b,j)=>b.className=j==i?'on':'');
+let sup=false,mega=false;
+const pv=document.getElementById('pv');pv.checked=localStorage.getItem('pv')=='1';
+pv.onchange=()=>{localStorage.setItem('pv',pv.checked?'1':'0');if(pv.checked)fetch('/tab?g='+D[cur].g);};
+document.getElementById('bs').onclick=e=>{sup=!sup;if(sup)mega=false;upd();};
+document.getElementById('bm').onclick=e=>{mega=!mega;if(mega)sup=false;upd();};
+function upd(){document.getElementById('bs').className=sup?'on':'';document.getElementById('bm').className=mega?'on':'';}
+document.getElementById('fire').onclick=()=>fetch('/fire?g='+D[cur].g+'&s='+(sup?1:0)+'&m='+(mega?1:0)).then(()=>st.textContent='ausgelöst: '+D[cur].n);
+document.getElementById('drive').onclick=()=>fetch('/drive').then(()=>st.textContent='weiter im Free ride');
+function show(i){cur=i;if(pv.checked)fetch('/tab?g='+D[i].g);document.querySelectorAll('#tabs button').forEach((b,j)=>b.className=j==i?'on':'');
  const m=document.getElementById('m');m.innerHTML='';const T=D[i];
  T.it.forEach(it=>{const r=document.createElement('div');r.className='r';
   const l=document.createElement('div');l.textContent=it.n;const s=document.createElement('input');s.type='range';
@@ -8745,6 +8845,8 @@ func _lab_copy() -> void:
 func _lab_grp(t: String) -> String:
 	if t in ["shield", "orbs", "haze"]:
 		return "near"
+	if t in ["env", "jungle"]:
+		return "wide"   # weit über die Strecke bis zum Horizont: Himmel, Berge, Nebel, Bäume
 	if t == "city":
 		return "city"
 	if t in ["ship", "pillar"]:
@@ -8810,7 +8912,7 @@ func _lab_val(it: Array, v: float) -> String:
 
 func _lab_tab(t: String) -> void:
 	if lab.has("tab") and _lab_grp(lab.tab) != _lab_grp(t):
-		var V = {"near": [0.35, 0.22, 5.5], "ship": [0.55, 0.2, 6.0], "pillar": [0.45, 0.12, 6.5], "city": [0.25, 0.08, 80.0]}.get(_lab_grp(t), [0.35, 0.22, 12.0])
+		var V = {"near": [0.35, 0.22, 5.5], "ship": [0.55, 0.2, 6.0], "pillar": [0.45, 0.12, 6.5], "city": [0.25, 0.08, 80.0], "wide": [0.0, 0.06, 14.0]}.get(_lab_grp(t), [0.35, 0.22, 12.0])
 		lab.yaw = V[0]
 		lab.pit = V[1]
 		lab.dist = V[2]
@@ -9089,7 +9191,7 @@ func _lab_step(dt: float) -> void:
 	_tunnel(dt)
 	_pose_all(dt)
 	# Kamera kreist um die Teststelle bzw. fliegt im Reiter „Ship“ mit dem Gleiter mit
-	var tzz = {"near": LZ + 0.3, "ship": g.z + 0.3, "pillar": LZ + 5.0, "city": LZ + 2.0}.get(grp, LZ + 7.0)
+	var tzz = {"near": LZ + 0.3, "ship": g.z + 0.3, "pillar": LZ + 5.0, "city": LZ + 2.0, "wide": LZ + 30.0}.get(grp, LZ + 7.0)
 	var tll = g.lat if grp == "ship" else 0.0
 	if grp == "ship" and absf(lab.get("tz", tzz) - tzz) < 3.0:
 		lab.tz = tzz
@@ -9097,7 +9199,7 @@ func _lab_step(dt: float) -> void:
 		lab.tz = lerpf(lab.get("tz", LZ + 7.0), tzz, 1.0 - exp(-dt / 0.3))
 	lab.tl = lerpf(lab.get("tl", 0.0), tll, 1.0 - exp(-dt / 0.15))
 	var f = T.frame(lab.tz)
-	var tg: Vector3 = f.c + f.rr * lab.tl + f.uu * {"near": 0.4, "ship": 0.4, "pillar": 1.1, "city": 3.0}.get(grp, 0.8)
+	var tg: Vector3 = f.c + f.rr * lab.tl + f.uu * {"near": 0.4, "ship": 0.4, "pillar": 1.1, "city": 3.0, "wide": 3.5}.get(grp, 0.8)
 	if grp == "city" and not holos.is_empty() and (holos[0].n as Node3D).visible:
 		# Reiter „City“: um die Hologramm-Tänzerin kreisen
 		var hn: Node3D = holos[0].n
