@@ -101,6 +101,8 @@ func _ready() -> void:
 	T.J = _jungle()   # eigene Streckenführung im Dschungel
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
+	if OS.get_cmdline_user_args().has("--free"):
+		free_ride = true
 	if OS.get_cmdline_user_args().has("--settings"):
 		_show_settings.call_deferred(true)
 		if OS.get_environment("SHOTPATH") != "":
@@ -646,7 +648,7 @@ const FXS = {
 	"ship": [["height", "Hover height", 0.2, 8.0, 1.0], ["bob", "Hover bob", 0.0, 10.0, 1.0], ["bank", "Lean in curves", 0.0, 6.0, 1.0], ["pitch", "Nose pitch", 0.0, 8.0, 1.0],
 		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0], ["steer", "Steering lag", 0.2, 8.0, 1.0],
 		["steerk", "Steering strength", 0.3, 3.0, 1.0], ["grip", "Grip", 0.2, 4.0, 1.0], ["drift", "Drift", 0.0, 4.0, 0.0],
-		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0]],
+		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0], ["trim", "Nose trim (down +)", -1.0, 1.0, 0.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -3711,6 +3713,12 @@ func _menu() -> void:
 	var go = _btn("START RACE", true)
 	go.pressed.connect(_start)
 	box.add_child(go)
+	var bfr = _btn("Free ride – no rivals, endless laps")
+	bfr.add_theme_font_size_override("font_size", 28)
+	bfr.pressed.connect(func():
+		free_ride = true
+		_start())
+	box.add_child(bfr)
 	var rrow = HBoxContainer.new()
 	rrow.add_theme_constant_override("separation", 16)
 	box.add_child(rrow)
@@ -4067,7 +4075,16 @@ func _pick_ship(d: int) -> void:
 	_refresh_ui()
 
 
+var free_ride = false   # freies Fahren: keine Gegner, kein Schaden, keine Rundenzahl – zum Einstellen in Ruhe
+
+
 func _start() -> void:
+	if free_ride:
+		for i in range(1, ships.size()):
+			ships[i].out = true
+			(ships[i].node as Node3D).visible = false
+			ships[i].z = -9999.0
+		hud.plbox.visible = false
 	for i in range(1, ships.size()):
 		ships[i].sk = (1.0 + (i - 1) * 0.035) * float(cfg.ai)
 		ships[i].sk0 = ships[i].sk
@@ -4984,6 +5001,8 @@ func _prot(o: Dictionary) -> bool:
 
 
 func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
+	if free_ride:
+		return
 	if o.out or state != "race":
 		return
 	if o.shield > 0.0 and float(o.get("mshield", 0.0)) > 0.0:
@@ -5640,7 +5659,7 @@ var tip_w = {}
 
 
 func _tip(id: String, text: String) -> void:
-	if int(cfg.get("tips", 1)) != 1 or state != "race" or not rpf.is_empty():
+	if int(cfg.get("tips", 1)) != 1 or state != "race" or not rpf.is_empty() or free_ride:
 		return
 	var seen: PackedStringArray = str(cfg.get("tseen", "")).split(",", false)
 	if seen.has(id):
@@ -6789,7 +6808,7 @@ func _rev(ev: Array) -> void:
 
 
 func _record(dt: float) -> void:
-	if not (state == "race" or (state == "done" and t_state < 5.0)):
+	if free_ride or not (state == "race" or (state == "done" and t_state < 5.0)):
 		return
 	rec_clk += dt
 	rec_acc += dt
@@ -8477,7 +8496,7 @@ func _process(delta: float) -> void:
 		hud.res.text = "1st  ·  LAST ONE STANDING\n%s" % _fmt(race_t)
 		_victory()
 		_records_end(false)
-	elif racing and g.z >= finish:
+	elif racing and g.z >= finish and not free_ride:
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
@@ -9107,6 +9126,8 @@ func _lab_step(dt: float) -> void:
 # Nur zum Testen am Rechner: godot -- --shot=Pfad,z  → setzt dich an die Stelle z und speichert ein Bild
 var shot_n = 0
 func _all_out() -> bool:
+	if free_ride:
+		return false
 	for i in range(1, ships.size()):
 		if not ships[i].out:
 			return false
@@ -9334,8 +9355,10 @@ func _pose_all(dt: float) -> void:
 		up = dir.cross(x).normalized()
 		var nd: Node3D = s.node
 		nd.global_transform = Transform3D(Basis(x, up, dir), pos)
-		if absf(s.get("pit", 0.0)) > 0.0001:
-			nd.rotate_object_local(Vector3(1, 0, 0), -s.pit)   # Nase hoch beim Gasgeben
+		# Nase hoch beim Gasgeben; „Nose trim“ kippt die ganze Grundhaltung nach vorn (Nase Richtung Boden)
+		var pitch_t = -float(s.get("pit", 0.0)) + float(SX.trim) * 0.25
+		if absf(pitch_t) > 0.0001:
+			nd.rotate_object_local(Vector3(1, 0, 0), pitch_t)
 		var HX: Dictionary = fx.haze
 		# Plasmastrahl: Länge/Breite/Helligkeit nach Tempo und Boost
 		var spk = clampf(s.spd / maxf(1.0, base_spd), 0.0, 1.6)
