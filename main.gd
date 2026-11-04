@@ -101,6 +101,15 @@ func _ready() -> void:
 	T.J = _jungle()   # eigene Streckenführung im Dschungel
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
+	if OS.get_cmdline_user_args().has("--settings"):
+		_show_settings.call_deferred(true)
+		if OS.get_environment("SHOTPATH") != "":
+			get_tree().create_timer(4.0).timeout.connect(func():
+				var sc: ScrollContainer = ui.setp
+				sc.scroll_vertical = int(OS.get_environment("SCROLL").to_int())
+				await get_tree().create_timer(0.5).timeout
+				get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
+				get_tree().quit())
 	if OS.get_cmdline_user_args().has("--live"):
 		cfg.live = 1
 	if OS.get_cmdline_user_args().has("--howto"):
@@ -3736,17 +3745,21 @@ func _menu() -> void:
 	ui.credit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(ui.credit)
 	# Einstellungen
+	# scrollbar, damit auch die unteren Einträge auf jedem Bildschirm erreichbar sind
+	var setsc = ScrollContainer.new()
+	setsc.anchor_left = 0.06
+	setsc.anchor_right = 0.94
+	setsc.anchor_top = 0.03
+	setsc.anchor_bottom = 0.97
+	setsc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	setsc.scroll_deadzone = 14
+	setsc.visible = false
+	root.add_child(setsc)
+	ui.setp = setsc
 	var sp = VBoxContainer.new()
 	sp.add_theme_constant_override("separation", 14)
-	sp.anchor_left = 0.06
-	sp.anchor_right = 0.94
-	sp.anchor_top = 1.0
-	sp.anchor_bottom = 1.0
-	sp.offset_top = -1530
-	sp.offset_bottom = -70
-	sp.visible = false
-	root.add_child(sp)
-	ui.setp = sp
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	setsc.add_child(sp)
 	sp.add_theme_constant_override("separation", 8)
 	var top = HBoxContainer.new()
 	top.add_theme_constant_override("separation", 16)
