@@ -6451,6 +6451,183 @@ func _show_help(on: bool) -> void:
 	vb.add_child(bb)
 
 
+# Erklärungen zu den Reglern (Tooltip auf der Live-Seite am PC)
+const FX_INFO = {
+	"boom.size": "Größe der ganzen Explosion. Höher = größerer Feuerball.",
+	"boom.fire": "Menge und Helligkeit des Feuers. Höher = mehr Flammen.",
+	"boom.after": "Kleine Nach-Explosionen rund um den Knall. Höher = mehr Feuerbälle.",
+	"boom.smoke": "Wie viel Rauch aufsteigt. 0 = gar kein Rauch.",
+	"boom.slife": "Wie lange der Rauch stehen bleibt. Höher = Rauch hält länger.",
+	"boom.sparks": "Anzahl der Funken. Höher = mehr Funkenregen.",
+	"boom.debris": "Metallsplitter, die herumfliegen. 0 = keine Splitter.",
+	"boom.dglow": "Wie stark die Splitter glühen. Höher = hellere Splitter.",
+	"boom.ring": "Leuchtender Druckwellen-Ring am Boden. 0 = kein Ring.",
+	"boom.light": "Lichtblitz, der die Umgebung beleuchtet. Höher = heller.",
+	"boom.flash": "Weißer Blitz über dem ganzen Bildschirm. 0 = kein Blitz.",
+	"boom.shake": "Wie stark die Kamera wackelt. 0 = ruhig.",
+	"boom.hue": "Dreht die Farbe der Explosion im Farbkreis.",
+	"mine.size": "Größe der Minen auf der Strecke.",
+	"mine.glow": "Wie hell die Minen leuchten. Höher = besser sichtbar.",
+	"mine.blink": "Wie schnell die Minen blinken.",
+	"mine.life": "Wie viele Sekunden eine Mine liegen bleibt.",
+	"mine.boom": "Größe der Explosion, wenn man eine Mine trifft.",
+	"mine.hue": "Dreht die Farbe der Minen.",
+	"quake.height": "Höhe der Erdbebenwelle. Höher = Schiffe fliegen höher.",
+	"quake.speed": "Wie schnell die Welle über die Strecke läuft.",
+	"quake.dur": "Wie weit die Welle läuft, bevor sie verebbt.",
+	"quake.glow": "Wie hell die Welle leuchtet.",
+	"quake.sparks": "Funken und Splitter an der Welle.",
+	"quake.shake": "Kamerawackeln beim Beben. 0 = ruhig.",
+	"quake.hue": "Dreht die Farbe der Welle.",
+	"gb.scale": "Größe des ganzen Schwarzen Lochs auf einmal.",
+	"gb.size": "Wie weit das Loch Schiffe anzieht. Höher = zieht von weiter her.",
+	"gb.time": "Wie lange das Schwarze Loch bestehen bleibt.",
+	"gb.core": "Größe des schwarzen Kerns.",
+	"gb.dark": "Wie schwarz der Kern ist. Niedriger = durchscheinender.",
+	"gb.rimw": "Breite des leuchtenden Rands.",
+	"gb.rimb": "Helligkeit des leuchtenden Rands.",
+	"gb.rimh": "Farbe des Rands.",
+	"gb.wave": "Stärke der Schockkugel beim Entstehen. 0 = keine Kugel.",
+	"gb.wthick": "Dicke der Schockkugel.",
+	"gb.wspeed": "Wie schnell sich die Schockkugel ausbreitet.",
+	"gb.wsize": "Wie groß die Schockkugel wird.",
+	"gb.whue": "Farbe der Schockkugel.",
+	"gb.gring": "Leuchtring am Boden unter dem Loch.",
+	"gb.sparks": "Funken, die ins Loch gesaugt werden.",
+	"gb.light": "Licht, das vom Loch ausgeht.",
+	"gb.lens": "Wie stark das Loch den Raum dahinter verzerrt.",
+	"gb.shake": "Kamerawackeln. 0 = ruhig.",
+	"gb.hue": "Dreht alle Farben des Schwarzen Lochs zusammen.",
+	"rak.size": "Größe der Raketen.",
+	"rak.speed": "Wie schnell die Raketen fliegen.",
+	"rak.light": "Wie hell der Antrieb der Rakete leuchtet.",
+	"rak.hue": "Dreht die Farbe der Raketen.",
+	"jungle.trees": "Wie viele Bäume am Rand stehen. Weniger = schneller auf dem Handy.",
+	"jungle.under": "Menge an Büschen und Farnen. Weniger = schneller.",
+	"jungle.flies": "Anzahl der Glühwürmchen.",
+	"jungle.fsize": "Größe der Glühwürmchen.",
+	"jungle.mush": "Wie stark die Pilze leuchten.",
+	"jungle.wall": "Höhe der Erdwände an der Strecke. Wirkt erst nach Neustart.",
+	"jungle.meteor": "Wie oft Sternschnuppen am Himmel erscheinen.",
+	"jungle.far": "Sichtbarkeit der fernen Berge.",
+	"lock.shape": "Form der Zielmarkierung um den Gegner.",
+	"lock.size": "Größe der Zielmarkierung.",
+	"lock.thick": "Linienstärke der Markierung.",
+	"lock.glow": "Wie hell die Markierung leuchtet.",
+	"lock.spin": "Wie schnell sich die Markierung dreht.",
+	"lock.hue": "Farbe, solange noch nicht eingerastet.",
+	"lock.lhue": "Farbe, sobald das Ziel erfasst ist.",
+	"lock.time": "Wie lange es dauert, bis das Ziel erfasst ist. Höher = länger warten.",
+	"lock.vol": "Lautstärke des Piepsens.",
+	"lock.pitch": "Tonhöhe des Piepsens.",
+	"wall.height": "Höhe des Kraftfelds.",
+	"wall.dur": "Wie lange das Kraftfeld steht.",
+	"wall.bolts": "Blitze im Kraftfeld. 0 = keine Blitze.",
+	"wall.glow": "Helligkeit des Kraftfelds.",
+	"wall.hue": "Dreht die Farbe des Kraftfelds.",
+	"shield.size": "Größe der Schutzblase ums Schiff.",
+	"shield.glow": "Wie hell der Schild leuchtet.",
+	"shield.edge": "Wie scharf der Rand der Blase ist.",
+	"shield.flicker": "Wie stark der Schild flackert.",
+	"shield.hue": "Dreht die Farbe des Schilds.",
+	"orbs.shue": "Farbe der Super-Kugeln.",
+	"orbs.sglow": "Helligkeit der Super-Kugeln.",
+	"orbs.size": "Größe der Kugeln.",
+	"orbs.radius": "Wie weit die Kugeln um das Schiff kreisen.",
+	"orbs.speed": "Wie schnell die Kugeln kreisen.",
+	"orbs.trail": "Länge der Leuchtspur hinter den Kugeln.",
+	"orbs.glow": "Helligkeit der Kugeln.",
+	"orbs.hue": "Dreht die Farbe der Kugeln.",
+	"haze.jglow": "Helligkeit des Plasmastrahls hinter den Düsen.",
+	"haze.jlen": "Länge des Plasmastrahls.",
+	"haze.jwid": "Breite des Plasmastrahls.",
+	"haze.jboost": "Wie viel größer der Strahl beim Boost wird.",
+	"haze.jdia": "Leuchtende Ringe im Strahl. 0 = keine Ringe.",
+	"haze.jhue": "Dreht die Farbe des Plasmas.",
+	"haze.amp": "Stärke des Hitzeflimmerns hinter dem Schiff. 0 = aus.",
+	"haze.fine": "Feinheit des Flimmerns. Höher = feiner.",
+	"haze.speed": "Wie schnell das Flimmern wabert.",
+	"haze.size": "Größe der flimmernden Fläche.",
+	"haze.len": "Wie weit hinter dem Schiff es flimmert.",
+	"haze.boost": "Wie viel stärker es beim Boost flimmert.",
+	"pillar.speed": "Wie schnell sich die Ringe der Waffensäule drehen.",
+	"pillar.size": "Größe der Ringe.",
+	"pillar.glow": "Helligkeit der Ringe.",
+	"pillar.squash": "Wie stark die Säule beim Durchfliegen gummiartig nachgibt.",
+	"pillar.soft": "Wie weich die Säule zurückfedert.",
+	"pillar.beam": "Lichtsäule, die nach oben leuchtet.",
+	"ship.height": "Wie hoch das Schiff über der Strecke schwebt.",
+	"ship.bob": "Leichtes Auf und Ab beim Schweben. 0 = ganz ruhig.",
+	"ship.bank": "Wie stark sich das Schiff in Kurven zur Seite neigt (nur Optik).",
+	"ship.pitch": "Wie stark die Nase beim Gasgeben hochgeht (nur Optik).",
+	"ship.wobble": "Wie lange Neigen und Nicken nachfedern. 0 = kein Nachfedern.",
+	"ship.stiff": "Wie schnell das Schiff seine Neigung annimmt. Höher = straffer.",
+	"ship.steer": "Trägheit der Lenkung: wie lange das Schiff braucht, um auf deinen Finger zu reagieren. Niedriger = reagiert sofort, höher = träger und weicher.",
+	"ship.steerk": "Lenkkraft bei vollem Einschlag: wie schnell sich das Schiff dreht. Höher = engere Kurven, aber nervöser.",
+	"ship.grip": "Wie stark das Schiff in die Richtung fliegt, in die die Nase zeigt. Höher = folgt der Nase sofort, niedriger = rutscht weiter geradeaus.",
+	"ship.drift": "Wie stark das Schiff in Kurven seitlich wegdriftet. 0 = kein Driften.",
+	"ship.nav": "Helligkeit der roten und grünen Positionslichter.",
+	"ship.navb": "Wie schnell die Positionslichter blinken.",
+	"ship.trim": "Grundhaltung: plus = Nase zeigt mehr zum Boden, minus = Nase höher.",
+	"ship.weight": "Gewicht der Ketten und Quasten. Höher = hängen straff nach unten.",
+	"ship.swing": "Wie lange Ketten und Quasten nachschwingen. Höher = pendeln länger.",
+	"ship.wind": "Wie stark der Fahrtwind die Quasten nach hinten zieht.",
+	"ship.breeze": "Leichte Brise, die immer weht, auch im Stand. 0 = windstill.",
+	"steer.ptime": "Wie lange du halten musst, bis die Lenkung voll greift (die Drück-Kurve läuft über diese Zeit). Kürzer = schnell volle Kraft, länger = feiner dosierbar.",
+	"steer.rtime": "Wie lange die Lenkung nach dem Loslassen noch nachwirkt (die Loslass-Kurve läuft über diese Zeit). 0 = stoppt sofort.",
+	"steer.delay": "Verzögerung zwischen Tippen und Lenken. Normalerweise 0 lassen, höher fühlt sich schwammig an.",
+	"env.city": "Hochhäuser neben der Strecke an oder aus.",
+	"env.dens": "Wie viele Gebäude stehen. Weniger = schneller auf dem Handy.",
+	"env.bh": "Höhe der Gebäude.",
+	"env.bw": "Breite der Gebäude.",
+	"env.bd": "Wie weit die Gebäude von der Strecke entfernt stehen.",
+	"env.win": "Wie viele Fenster leuchten.",
+	"env.hue_w": "Dreht die Farbe der Fenster.",
+	"env.edge": "Neonkanten an den Gebäuden.",
+	"env.hue_s": "Dreht die Farbe des Himmels.",
+	"env.skyb": "Helligkeit des Himmels.",
+	"env.stars": "Wie viele Sterne zu sehen sind.",
+	"env.skyline": "Ferne Skyline am Horizont.",
+	"env.skyl": "Ferne Skyline am Horizont.",
+	"env.fog": "Wie dicht der Nebel in der Ferne ist.",
+	"env.hue_f": "Dreht die Farbe des Nebels.",
+	"env.moon": "Größe bzw. Helligkeit des Mondes. 0 = kein Mond.",
+	"env.beams": "Lichtsäulen, die in den Himmel strahlen.",
+	"env.lamps": "Lichter entlang der Strecke.",
+	"env.nlight": "Wie stark sich die Neonlichter auf der Fahrbahn spiegeln.",
+	"env.gloss": "Glanz der Fahrbahn.",
+	"env.wet": "Nasse, spiegelnde Fahrbahn. 0 = trocken.",
+	"city.holo": "Riesige Hologramm-Figuren in der Stadt an oder aus.",
+	"city.hsize": "Größe der Hologramme.",
+	"city.hflick": "Wie stark die Hologramme flackern und glitchen.",
+	"city.hhue": "Dreht die Farbe der Hologramme.",
+	"city.signs": "Neon-Schilder an den Häusern.",
+	"city.search": "Suchscheinwerfer am Himmel.",
+	"city.cars": "Fliegende Autos über der Stadt.",
+	"city.mega": "Besonders hohe Mega-Türme.",
+	"sound.vol": "Lautstärke dieses Geräuschs.",
+	"sound.pitch": "Tonhöhe. Höher = heller, niedriger = tiefer.",
+	"sound.bass": "Tiefe Töne verstärken.",
+	"sound.treble": "Hohe Töne verstärken.",
+	"sound.grit": "Rauheit, Verzerrung. 0 = sauber.",
+	"sound.echo": "Stärke des Echos.",
+	"sound.etime": "Abstand zwischen den Echos.",
+	"sound.reverb": "Hall wie in einem großen Raum.",
+	"sound.room": "Wie groß der Raum für den Hall klingt.",
+	"sound.rumble": "Tiefes Grollen des Triebwerks.",
+	"sound.beeps": "Lautstärke der ursprünglichen Countdown-Pieptöne.",
+	"sound.synth": "Lautstärke der Synthesizer-Pieptöne.",
+	"sound.spitch": "Tonhöhe der Synthesizer-Töne.",
+	"sound.sshape": "Klangfarbe der Synthesizer-Töne (weich bis kantig).",
+	"sound.sweep": "Aufsteigender Ton beim GO."
+}
+# Lenk-Voreinstellungen zum Vergleichen: [Name, Anlaufzeit, Ausklingzeit, Steering lag, Steering strength, Grip, Drück-Kurve]
+const STEER_PRE = [
+	["Ruhig", 0.9, 0.2, 1.8, 0.85, 0.9, [[0.0, 0.3, 0.0, 0.0, 0.35, 0.0], [1.0, 1.0, -0.35, -0.2, 0.0, 0.0]]],
+	["Mittel", 0.56, 0.12, 1.0, 1.0, 1.0, [[0.0, 0.55, 0.0, 0.0, 0.4, 0.0], [1.0, 1.0, -0.3, -0.25, 0.0, 0.0]]],
+	["Scharf", 0.25, 0.05, 0.45, 1.3, 1.3, [[0.0, 0.8, 0.0, 0.0, 0.3, 0.12], [1.0, 1.0, -0.3, 0.0, 0.0, 0.0]]]]
+
+
 # ================================================================ Lenkkurven (Bézier, am PC einstellbar)
 # Jede Kurve: Ankerpunkte [x, y, Griff-ein dx, dy, Griff-aus dx, dy] von x = 0 bis 1.
 # press: x = Haltedauer / Anlaufzeit → Lenkkraft · release: x = Zeit seit Loslassen / Ausklingzeit → Rest der Lenkung
@@ -6623,7 +6800,7 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 		for t in FXT:
 			var its = []
 			for it in FXS[t[0]]:
-				its.append({"k": it[0], "n": it[1], "lo": it[2], "hi": it[3], "d": it[4], "v": float(fx[t[0]][it[0]])})
+				its.append({"k": it[0], "n": it[1], "lo": it[2], "hi": it[3], "d": it[4], "v": float(fx[t[0]][it[0]]), "i": FX_INFO.get(t[0] + "." + it[0], "")})
 			tabs.append({"g": t[0], "n": t[1], "it": its})
 		_live_send(c, "application/json", JSON.stringify(tabs))
 	elif path.begins_with("/tab?") or path.begins_with("/fire?") or path.begins_with("/drive"):
@@ -6646,6 +6823,30 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 				_start()
 		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/ping"):
+		_live_send(c, "text/plain", "ok")
+	elif path.begins_with("/sst"):
+		# wo du gerade auf den Lenkkurven bist (für die Live-Linie im Editor)
+		var SD: Dictionary = fx.steer
+		_live_send(c, "application/json", JSON.stringify({"b": steer_btn, "px": clampf(btn_t / maxf(0.05, float(SD.ptime)), 0.0, 1.0) if steer_btn != 0 else -1.0,
+			"rx": clampf(rel_t / maxf(0.001, float(SD.rtime)), 0.0, 1.0) if steer_btn == 0 and rel_t < float(SD.rtime) else -1.0, "s": last_steer}))
+	elif path.begins_with("/preset?"):
+		var pi = clampi(int(path.get_slice("=", 1)), 0, STEER_PRE.size() - 1)
+		var pr: Array = STEER_PRE[pi]
+		fx.steer.ptime = pr[1]
+		fx.steer.rtime = pr[2]
+		fx.steer.delay = 0.0
+		fx.ship.steer = pr[3]
+		fx.ship.steerk = pr[4]
+		fx.ship.grip = pr[5]
+		curves.press = (pr[6] as Array).duplicate(true)
+		curves.release = (CURVE_DEF.release as Array).duplicate(true)
+		for k in curves:
+			curve_lut[k] = _curve_bake(curves[k])
+		_curves_save()
+		for k in ["steer", "steerk", "grip"]:
+			_live_sync_lab("ship", k)
+		live_sv = 0.5
+		_toast("Steering: " + str(pr[0]))
 		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/curve"):
 		var qi2 = path.find("?d=")
@@ -6768,6 +6969,11 @@ main{padding:12px 16px;max-width:900px}
 #bar button{background:#151a2a;color:#e8ecf5;border:1px solid #2a3350;border-radius:8px;padding:7px 12px;cursor:pointer}
 #bar button.on{background:#2a6;border-color:#7fe0b0}#bar #fire{background:#ef6a2e;border-color:#ffb08a;font-weight:600}
 #bar label{display:flex;gap:6px;align-items:center;color:#cfd8ea}
+.ii{display:inline-flex;width:17px;height:17px;border-radius:50%;border:1px solid #5ee8ff;color:#5ee8ff;font-size:11px;align-items:center;justify-content:center;cursor:help;position:relative;margin-left:7px;font-style:italic;font-weight:600;vertical-align:middle}
+.ii:hover::after,.ii.show::after{content:attr(data-t);position:absolute;left:24px;top:-8px;width:320px;background:#151a2a;border:1px solid #5ee8ff;color:#e8ecf5;padding:9px 11px;border-radius:8px;font-size:13px;font-style:normal;font-weight:400;line-height:1.4;z-index:20;white-space:normal;box-shadow:0 6px 20px #0008}
+#pre{display:flex;gap:8px;margin:4px 0 14px;align-items:center;flex-wrap:wrap}
+#pre button{background:#151a2a;color:#e8ecf5;border:1px solid #2a3350;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:14px}
+#pre button:hover{border-color:#ef6a2e}
 </style></head><body><header><h1>ANTIGRAV · LIVE TUNING</h1><div id="tabs"></div>
 <div id="bar"><label><input type="checkbox" id="pv"> Vorschau am Handy</label>
 <button id="fire">Auslösen</button><button id="bs">Super</button><button id="bm">Mega</button><button id="drive">Weiterfahren (Free ride)</button></div>
@@ -6786,10 +6992,16 @@ function upd(){document.getElementById('bs').className=sup?'on':'';document.getE
 document.getElementById('fire').onclick=()=>fetch('/fire?g='+D[cur].g+'&s='+(sup?1:0)+'&m='+(mega?1:0)).then(()=>st.textContent='ausgelöst: '+D[cur].n);
 setInterval(()=>fetch('/ping').catch(()=>{}),2000);
 document.getElementById('drive').onclick=()=>fetch('/drive').then(()=>st.textContent='weiter im Free ride');
-function show(i){cur=i;if(pv.checked)fetch('/tab?g='+D[i].g);document.querySelectorAll('#tabs button').forEach((b,j)=>b.className=j==i?'on':'');
+let ssT=null,SS=null,EDS=[];
+function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D[i].g);document.querySelectorAll('#tabs button').forEach((b,j)=>b.className=j==i?'on':'');
  const m=document.getElementById('m');m.innerHTML='';const T=D[i];
+ if(T.g=='steer'){const pr=document.createElement('div');pr.id='pre';const lb=document.createElement('span');lb.textContent='Voreinstellung zum Vergleichen:';lb.style.color='#9fb0cc';pr.append(lb);
+  ['Ruhig','Mittel','Scharf'].forEach((n,k)=>{const b=document.createElement('button');b.textContent=n;b.onclick=()=>fetch('/preset?n='+k).then(()=>reloadAll(n));pr.append(b);});
+  const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t='Setzt Lenkkurve, Anlaufzeit, Ausklingzeit und im Reiter Ship auch Steering lag, Steering strength und Grip auf einen festen Satz. Fahr mit jeder Voreinstellung eine Runde und sag, welche am nächsten dran ist.';pr.append(ii);m.append(pr);
+  ssT=setInterval(()=>fetch('/sst').then(r=>r.json()).then(d=>{SS=d;EDS.forEach(f=>f());}).catch(()=>{}),120);}
  T.it.forEach(it=>{const r=document.createElement('div');r.className='r';
-  const l=document.createElement('div');l.textContent=it.n;const s=document.createElement('input');s.type='range';
+  const l=document.createElement('div');l.textContent=it.n;
+  if(it.i){const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t=it.i;ii.onclick=e=>{ii.classList.toggle('show');};l.append(ii);}const s=document.createElement('input');s.type='range';
   s.min=it.lo;s.max=it.hi;s.step=(it.k=='shape'||it.k=='city'||it.k=='life')?1:0.001;s.value=it.v;
   const v=document.createElement('div');v.className='v';v.textContent=fmt(it,it.v);
   const z=document.createElement('button');z.textContent='↺';z.title='Standard';
@@ -6798,6 +7010,7 @@ function show(i){cur=i;if(pv.checked)fetch('/tab?g='+D[i].g);document.querySelec
   r.append(l,s,v,z);m.append(r);});
  if(T.g=='steer')curveUI(m);}
 let CV=null,CD=null;
+function reloadAll(n){fetch('/fx').then(r=>r.json()).then(d=>{D=d;fetch('/curve').then(r=>r.json()).then(c=>{CV=c.cur;CD=c.def;show(cur);st.textContent='Voreinstellung: '+n;});});}
 function sendCurve(){clearTimeout(tm.cv);tm.cv=setTimeout(()=>fetch('/curve?d='+encodeURIComponent(JSON.stringify(CV))).then(()=>st.textContent='Lenkkurve gesendet').catch(()=>st.textContent='keine Verbindung'),60);}
 function curveUI(m){
  if(!CV){fetch('/curve').then(r=>r.json()).then(d=>{CV=d.cur;CD=d.def;curveUI(m);});return;}
@@ -6810,10 +7023,13 @@ function cvEd(m,name,title,xl,yl){
  hint.textContent='Punkte ziehen · Doppelklick auf freie Stelle = neuer Punkt · Doppelklick auf Punkt = löschen · kleine Kreise = Bézier-Griffe';w.append(hint);
  const rb=document.createElement('button');rb.textContent='↺ Standardkurve';rb.style.cssText='margin-top:6px;background:#151a2a;color:#cfd8ea;border:1px solid #2a3350;border-radius:6px;padding:5px 10px;cursor:pointer';w.append(rb);
  m.append(w);
- const g=c.getContext('2d'),L=46,R=16,T=16,B=40,W=c.width-L-R,H=c.height-T-B;
+ const g=c.getContext('2d'),L=58,R=30,T=30,B=48,W=c.width-L-R,H=c.height-T-B;
  const X=x=>L+x*W,Y=y=>T+(1-y)*H,IX=px=>(px-L)/W,IY=py=>1-(py-T)/H;
  let drag=null;
  const P=()=>CV[name];
+ function yAt(x){const p=P();let best=null;for(let i=0;i<p.length-1;i++){const a=p[i],b=p[i+1];
+  for(let j=0;j<=40;j++){const t=j/40,u=1-t;const qx=u*u*u*a[0]+3*u*u*t*(a[0]+a[4])+3*u*t*t*(b[0]+b[2])+t*t*t*b[0];
+   const qy=u*u*u*a[1]+3*u*u*t*(a[1]+a[5])+3*u*t*t*(b[1]+b[3])+t*t*t*b[1];if(best===null||Math.abs(qx-x)<Math.abs(best[0]-x))best=[qx,qy];}}return best?Math.max(0,Math.min(1,best[1])):0;}
  function draw(){g.clearRect(0,0,c.width,c.height);g.strokeStyle='#1a2236';g.lineWidth=1;
   for(let i=0;i<=10;i++){g.beginPath();g.moveTo(X(i/10),Y(0));g.lineTo(X(i/10),Y(1));g.stroke();g.beginPath();g.moveTo(X(0),Y(i/10));g.lineTo(X(1),Y(i/10));g.stroke();}
   g.fillStyle='#6c7a96';g.font='12px system-ui';g.fillText(xl,L,c.height-12);g.save();g.translate(14,T+H);g.rotate(-Math.PI/2);g.fillText(yl+'  0 … 100 %',0,0);g.restore();
@@ -6822,7 +7038,13 @@ function cvEd(m,name,title,xl,yl){
   p.forEach((a,i)=>{g.strokeStyle='#5ee8ff88';g.lineWidth=1;
    [[2,3],[4,5]].forEach(([u,v])=>{if((u==2&&i==0)||(u==4&&i==p.length-1))return;g.beginPath();g.moveTo(X(a[0]),Y(a[1]));g.lineTo(X(a[0]+a[u]),Y(a[1]+a[v]));g.stroke();
     g.beginPath();g.arc(X(a[0]+a[u]),Y(a[1]+a[v]),5,0,7);g.fillStyle='#0b0e18';g.fill();g.strokeStyle='#5ee8ff';g.stroke();});
-   g.beginPath();g.arc(X(a[0]),Y(a[1]),7,0,7);g.fillStyle='#ef6a2e';g.fill();g.strokeStyle='#fff';g.lineWidth=1.5;g.stroke();});}
+   g.beginPath();g.arc(X(a[0]),Y(a[1]),7,0,7);g.fillStyle='#ef6a2e';g.fill();g.strokeStyle='#fff';g.lineWidth=1.5;g.stroke();});
+  // Live-Linie: wo du beim Fahren gerade auf dieser Kurve bist
+  const lx=SS?(name=='press'?SS.px:SS.rx):-1;
+  if(lx>=0){g.strokeStyle='#7fe0b0';g.lineWidth=2;g.setLineDash([5,4]);g.beginPath();g.moveTo(X(lx),Y(0));g.lineTo(X(lx),Y(1));g.stroke();g.setLineDash([]);
+   const ly=yAt(lx);g.beginPath();g.arc(X(lx),Y(ly),9,0,7);g.fillStyle='#7fe0b0';g.fill();
+   g.fillStyle='#7fe0b0';g.font='bold 13px system-ui';g.fillText(Math.round(ly*100)+' %',X(lx)+12,Y(ly)-10);}}
+ EDS.push(draw);
  function pos(e){const r=c.getBoundingClientRect();return [(e.clientX-r.left)*c.width/r.width,(e.clientY-r.top)*c.height/r.height];}
  function hit(px,py){const p=P();for(let i=0;i<p.length;i++){const a=p[i];
    if(i>0&&Math.hypot(X(a[0]+a[2])-px,Y(a[1]+a[3])-py)<9)return [i,'in'];
@@ -6831,15 +7053,18 @@ function cvEd(m,name,title,xl,yl){
  const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
  c.onpointerdown=e=>{const [px,py]=pos(e);const h=hit(px,py);if(h){drag=h;c.setPointerCapture(e.pointerId);}};
  c.onpointermove=e=>{if(!drag)return;const [px,py]=pos(e);const p=P(),i=drag[0],a=p[i];const x=IX(px),y=IY(py);
-  if(drag[1]=='a'){if(i>0&&i<p.length-1)a[0]=cl(x,p[i-1][0]+0.01,p[i+1][0]-0.01);a[1]=cl(y,0,1);}
-  else if(drag[1]=='in'){a[2]=Math.min(0,x-a[0]);a[3]=y-a[1];}
-  else{a[4]=Math.max(0,x-a[0]);a[5]=y-a[1];}
+  if(drag[1]=='a'){if(i>0&&i<p.length-1)a[0]=cl(x,p[i-1][0]+0.01,p[i+1][0]-0.01);a[1]=cl(y,0,1);
+   a[2]=Math.max(-a[0],a[2]);a[4]=Math.min(1-a[0],a[4]);a[3]=cl(a[1]+a[3],-0.08,1.08)-a[1];a[5]=cl(a[1]+a[5],-0.08,1.08)-a[1];}
+  else if(drag[1]=='in'){a[2]=Math.min(0,Math.max(-a[0],x-a[0]));a[3]=cl(y,-0.08,1.08)-a[1];}
+  else{a[4]=Math.max(0,Math.min(1-a[0],x-a[0]));a[5]=cl(y,-0.08,1.08)-a[1];}
   draw();sendCurve();};
  c.onpointerup=()=>{drag=null;};
  c.ondblclick=e=>{const [px,py]=pos(e);const h=hit(px,py);const p=P();
   if(h&&h[1]=='a'){if(h[0]>0&&h[0]<p.length-1){p.splice(h[0],1);draw();sendCurve();}return;}
-  const x=cl(IX(px),0.01,0.99),y=cl(IY(py),0,1);let k=1;while(k<p.length&&p[k][0]<x)k++;
-  p.splice(k,0,[x,y,-0.08,0,0.08,0]);draw();sendCurve();};
+  const x=cl(IX(px),0.02,0.98);let k=1;while(k<p.length&&p[k][0]<x)k++;
+  const y=yAt(x),ex=0.02,sl=(yAt(Math.min(1,x+ex))-yAt(Math.max(0,x-ex)))/(2*ex);
+  const hl=Math.max(0.03,Math.min(0.14,(x-p[k-1][0])*0.45,(p[k][0]-x)*0.45));
+  p.splice(k,0,[x,y,-hl,-hl*sl,hl,hl*sl]);draw();sendCurve();};
  rb.onclick=()=>{CV[name]=JSON.parse(JSON.stringify(CD[name]));draw();sendCurve();};
  draw();}
 fetch('/fx').then(r=>r.json()).then(d=>{D=d;const t=document.getElementById('tabs');
