@@ -49,7 +49,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 1}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -84,6 +84,10 @@ var t_state = 0.0
 var race_t = 0.0
 var steer_btn = 0
 var btn_t = 0.0
+var rel_t = 9.0      # Zeit seit dem Loslassen
+var rel_v = 0.0      # Lenkung beim Loslassen (klingt über die Loslass-Kurve ab)
+var last_steer = 0.0
+var st_hist = []     # gedrückte Seite mit Zeit, für die Eingabe-Verzögerung
 var touches = {}
 var hud = {}
 var cam_psi = 0.0
@@ -105,6 +109,7 @@ func _ready() -> void:
 	AudioServer.playback_speed_scale = 1.0
 	_load_cfg()
 	_fx_load()
+	_curves_load()
 	if OS.get_cmdline_user_args().has("--noir"):
 		cfg.look = 1
 	if OS.get_cmdline_user_args().has("--jungle"):
@@ -678,6 +683,7 @@ const FXS = {
 		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0], ["trim", "Nose trim (down +)", -1.0, 1.0, 0.0],
 		["weight", "Tassel weight", 0.1, 3.0, 1.0], ["swing", "Tassel swing", 0.1, 3.0, 1.0], ["wind", "Tassel wind (driving)", 0.0, 3.0, 1.0],
 		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0]],
+	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -692,7 +698,7 @@ const FXS = {
 		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
 		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
 }
-const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["lock", "Lock"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["jungle", "Jungle"], ["sound", "Sound"]]
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["lock", "Lock"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["steer", "Steering"], ["env", "World"], ["city", "City"], ["jungle", "Jungle"], ["sound", "Sound"]]
 var fx = {}
 
 
@@ -3758,6 +3764,14 @@ func _hud() -> void:
 	el.add_theme_font_size_override("font_size", 22)
 	hud.el = el
 	el.modulate = Color(1, 1, 1, 0.7)
+	# Cyber-Gothic-Anzeige: Tempo als Bogen aus Drachenschuppen, Energie in Spitzbogen-Fenstern
+	var gh = Control.new()
+	gh.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gh.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cl.add_child(gh)
+	gh.draw.connect(func(): _gh_draw(gh))
+	hud.gh = gh
+	hud.gs = 0.0   # geglättetes Tempo für die Anzeige
 	# Waffenknopf: runder Knopf, geladen = orange mit drehendem, pulsierendem Ring
 	var ring = Control.new()
 	ring.anchor_left = 0.5
@@ -3789,6 +3803,10 @@ func _hud() -> void:
 		var c = ring.size * 0.5
 		var pu = 0.5 + 0.5 * sin(t * 5.0)
 		var oc: Color = hud.get("wc", Color(1.0, 0.55, 0.15))
+		if int(cfg.get("hud", 1)) == 1:
+			_gh_medal(ring, c, t, oc)
+			_wicon(ring, c + Vector2(0, -42), 30.0, str(ships[0].wpn), Color(1, 1, 1, 0.95))
+			return
 		# pulsierender Außenring
 		ring.draw_arc(c, 112.0 + 9.0 * pu, 0.0, TAU, 64, Color(oc.r, oc.g, oc.b, 0.55 * (1.0 - pu) + 0.15), 3.0, true)
 		# drei drehende Bogenstücke
@@ -4406,6 +4424,13 @@ func _menu() -> void:
 		_save_cfg()
 		bcm.text = "Comic intro: " + ("On" if int(cfg.comic) == 1 else "Off"))
 	sp.add_child(bcm)
+	var bhd = _btn("HUD style: " + ("Cyber Gothic" if int(cfg.get("hud", 1)) == 1 else "Classic"))
+	bhd.add_theme_font_size_override("font_size", 30)
+	bhd.pressed.connect(func():
+		cfg.hud = 1 - int(cfg.get("hud", 1))
+		_save_cfg()
+		bhd.text = "HUD style: " + ("Cyber Gothic" if int(cfg.hud) == 1 else "Classic"))
+	sp.add_child(bhd)
 	var blv = _btn("Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off"))
 	blv.add_theme_font_size_override("font_size", 30)
 	blv.pressed.connect(func():
@@ -6426,6 +6451,74 @@ func _show_help(on: bool) -> void:
 	vb.add_child(bb)
 
 
+# ================================================================ Lenkkurven (Bézier, am PC einstellbar)
+# Jede Kurve: Ankerpunkte [x, y, Griff-ein dx, dy, Griff-aus dx, dy] von x = 0 bis 1.
+# press: x = Haltedauer / Anlaufzeit → Lenkkraft · release: x = Zeit seit Loslassen / Ausklingzeit → Rest der Lenkung
+const CURVE_PATH = "user://curves.json"
+const CURVE_DEF = {
+	"press": [[0.0, 0.55, 0.0, 0.0, 0.4, 0.0], [1.0, 1.0, -0.3, -0.25, 0.0, 0.0]],
+	"release": [[0.0, 1.0, 0.0, 0.0, 0.35, 0.0], [1.0, 0.0, -0.35, 0.0, 0.0, 0.0]]}
+var curves = {}
+var curve_lut = {}
+
+
+func _curves_load() -> void:
+	curves = CURVE_DEF.duplicate(true)
+	if FileAccess.file_exists(CURVE_PATH):
+		var d = JSON.parse_string(FileAccess.get_file_as_string(CURVE_PATH))
+		if d is Dictionary:
+			for k in ["press", "release"]:
+				if d.get(k) is Array and (d[k] as Array).size() >= 2:
+					curves[k] = d[k]
+	for k in curves:
+		curve_lut[k] = _curve_bake(curves[k])
+
+
+func _curves_save() -> void:
+	var f = FileAccess.open(CURVE_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(curves))
+
+
+# Bézier-Pfad in eine Tabelle mit 129 Werten umrechnen (x muss nach rechts laufen)
+func _curve_bake(pts: Array) -> PackedFloat32Array:
+	var xs = PackedFloat32Array()
+	var ys = PackedFloat32Array()
+	for i in range(pts.size() - 1):
+		var a: Array = pts[i]
+		var b: Array = pts[i + 1]
+		var p0 = Vector2(a[0], a[1])
+		var p1 = p0 + Vector2(a[4], a[5])
+		var p3 = Vector2(b[0], b[1])
+		var p2 = p3 + Vector2(b[2], b[3])
+		for j in range(33):
+			var t = j / 32.0
+			var u = 1.0 - t
+			var q = p0 * u * u * u + p1 * 3.0 * u * u * t + p2 * 3.0 * u * t * t + p3 * t * t * t
+			xs.append(maxf(q.x, xs[xs.size() - 1] if xs.size() > 0 else 0.0))
+			ys.append(clampf(q.y, 0.0, 1.0))
+	var lut = PackedFloat32Array()
+	lut.resize(129)
+	var k = 0
+	for i in range(129):
+		var x = i / 128.0
+		while k < xs.size() - 2 and xs[k + 1] < x:
+			k += 1
+		var dx = xs[k + 1] - xs[k]
+		var f = clampf((x - xs[k]) / dx, 0.0, 1.0) if dx > 1e-6 else 1.0
+		lut[i] = lerpf(ys[k], ys[k + 1], f)
+	return lut
+
+
+func _curve_at(k: String, x: float) -> float:
+	var lut: PackedFloat32Array = curve_lut.get(k, PackedFloat32Array())
+	if lut.is_empty():
+		return 1.0
+	var f = clampf(x, 0.0, 1.0) * 128.0
+	var i = mini(int(f), 127)
+	return lerpf(lut[i], lut[i + 1], f - i)
+
+
 # ================================================================ Live-Regler vom PC (gleiches WLAN)
 # Das Spiel öffnet einen kleinen Webserver (Port 8080). Im PC-Browser erscheinen alle FX-Lab-Regler;
 # jede Änderung wirkt sofort im laufenden Rennen und wird auf dem Handy gespeichert.
@@ -6474,7 +6567,7 @@ func _live_poll(dt: float) -> void:
 		live_lbl = Label.new()
 		live_lbl.add_theme_font_size_override("font_size", 20)
 		live_lbl.modulate = Color(0.6, 1.0, 0.8, 0.8)
-		live_lbl.position = Vector2(36, 196)
+		live_lbl.position = Vector2(36, 430)
 		(hud.fire as Control).get_parent().add_child(live_lbl)
 	live_seen += dt
 	var pc = _live_pc()
@@ -6554,6 +6647,17 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/ping"):
 		_live_send(c, "text/plain", "ok")
+	elif path.begins_with("/curve"):
+		var qi2 = path.find("?d=")
+		if qi2 >= 0:
+			var d = JSON.parse_string(path.substr(qi2 + 3).uri_decode())
+			if d is Dictionary:
+				for k in ["press", "release"]:
+					if d.get(k) is Array and (d[k] as Array).size() >= 2:
+						curves[k] = d[k]
+						curve_lut[k] = _curve_bake(curves[k])
+				_curves_save()
+		_live_send(c, "application/json", JSON.stringify({"cur": curves, "def": CURVE_DEF}))
 	elif path.begins_with("/set?"):
 		var q = {}
 		for kv in path.substr(5).split("&"):
@@ -6671,7 +6775,7 @@ main{padding:12px 16px;max-width:900px}
 <script>
 let D=[],cur=0,tm={};
 const st=document.getElementById('st');
-function fmt(it,v){if(it.k.indexOf('hue')>=0)return Math.round(v*360)+'°';return Math.round(v*100)+' %';}
+function fmt(it,v){if(it.k.indexOf('hue')>=0)return Math.round(v*360)+'°';if(['ptime','rtime','delay'].includes(it.k))return (+v).toFixed(2)+' s';return Math.round(v*100)+' %';}
 function send(g,k,v){clearTimeout(tm[g+k]);tm[g+k]=setTimeout(()=>{fetch('/set?g='+g+'&k='+k+'&v='+v).then(()=>st.textContent='gesendet: '+k+' = '+v).catch(()=>st.textContent='keine Verbindung');},40);}
 let sup=false,mega=false;
 const pv=document.getElementById('pv');pv.checked=localStorage.getItem('pv')=='1';
@@ -6691,7 +6795,53 @@ function show(i){cur=i;if(pv.checked)fetch('/tab?g='+D[i].g);document.querySelec
   const z=document.createElement('button');z.textContent='↺';z.title='Standard';
   s.oninput=()=>{it.v=+s.value;v.textContent=fmt(it,it.v);send(T.g,it.k,s.value);};
   z.onclick=()=>{s.value=it.d;s.oninput();};
-  r.append(l,s,v,z);m.append(r);});}
+  r.append(l,s,v,z);m.append(r);});
+ if(T.g=='steer')curveUI(m);}
+let CV=null,CD=null;
+function sendCurve(){clearTimeout(tm.cv);tm.cv=setTimeout(()=>fetch('/curve?d='+encodeURIComponent(JSON.stringify(CV))).then(()=>st.textContent='Lenkkurve gesendet').catch(()=>st.textContent='keine Verbindung'),60);}
+function curveUI(m){
+ if(!CV){fetch('/curve').then(r=>r.json()).then(d=>{CV=d.cur;CD=d.def;curveUI(m);});return;}
+ cvEd(m,'press','Lenkung beim Drücken','Haltedauer (bis „Press: ramp time“)','Lenkkraft');
+ cvEd(m,'release','Lenkung nach dem Loslassen','Zeit seit dem Loslassen (bis „Release: fade time“)','Restlenkung');}
+function cvEd(m,name,title,xl,yl){
+ const w=document.createElement('div');const h3=document.createElement('h3');h3.textContent=title;h3.style.cssText='color:#5ee8ff;margin:22px 0 6px;font-size:16px';w.append(h3);
+ const c=document.createElement('canvas');c.width=720;c.height=330;c.style.cssText='width:100%;max-width:720px;background:#0b0e18;border:1px solid #2a3350;border-radius:8px;touch-action:none;cursor:crosshair';w.append(c);
+ const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:#6c7a96;margin-top:4px';
+ hint.textContent='Punkte ziehen · Doppelklick auf freie Stelle = neuer Punkt · Doppelklick auf Punkt = löschen · kleine Kreise = Bézier-Griffe';w.append(hint);
+ const rb=document.createElement('button');rb.textContent='↺ Standardkurve';rb.style.cssText='margin-top:6px;background:#151a2a;color:#cfd8ea;border:1px solid #2a3350;border-radius:6px;padding:5px 10px;cursor:pointer';w.append(rb);
+ m.append(w);
+ const g=c.getContext('2d'),L=46,R=16,T=16,B=40,W=c.width-L-R,H=c.height-T-B;
+ const X=x=>L+x*W,Y=y=>T+(1-y)*H,IX=px=>(px-L)/W,IY=py=>1-(py-T)/H;
+ let drag=null;
+ const P=()=>CV[name];
+ function draw(){g.clearRect(0,0,c.width,c.height);g.strokeStyle='#1a2236';g.lineWidth=1;
+  for(let i=0;i<=10;i++){g.beginPath();g.moveTo(X(i/10),Y(0));g.lineTo(X(i/10),Y(1));g.stroke();g.beginPath();g.moveTo(X(0),Y(i/10));g.lineTo(X(1),Y(i/10));g.stroke();}
+  g.fillStyle='#6c7a96';g.font='12px system-ui';g.fillText(xl,L,c.height-12);g.save();g.translate(14,T+H);g.rotate(-Math.PI/2);g.fillText(yl+'  0 … 100 %',0,0);g.restore();
+  const p=P();g.strokeStyle='#ef6a2e';g.lineWidth=3;g.beginPath();g.moveTo(X(p[0][0]),Y(p[0][1]));
+  for(let i=0;i<p.length-1;i++){const a=p[i],b=p[i+1];g.bezierCurveTo(X(a[0]+a[4]),Y(a[1]+a[5]),X(b[0]+b[2]),Y(b[1]+b[3]),X(b[0]),Y(b[1]));}g.stroke();
+  p.forEach((a,i)=>{g.strokeStyle='#5ee8ff88';g.lineWidth=1;
+   [[2,3],[4,5]].forEach(([u,v])=>{if((u==2&&i==0)||(u==4&&i==p.length-1))return;g.beginPath();g.moveTo(X(a[0]),Y(a[1]));g.lineTo(X(a[0]+a[u]),Y(a[1]+a[v]));g.stroke();
+    g.beginPath();g.arc(X(a[0]+a[u]),Y(a[1]+a[v]),5,0,7);g.fillStyle='#0b0e18';g.fill();g.strokeStyle='#5ee8ff';g.stroke();});
+   g.beginPath();g.arc(X(a[0]),Y(a[1]),7,0,7);g.fillStyle='#ef6a2e';g.fill();g.strokeStyle='#fff';g.lineWidth=1.5;g.stroke();});}
+ function pos(e){const r=c.getBoundingClientRect();return [(e.clientX-r.left)*c.width/r.width,(e.clientY-r.top)*c.height/r.height];}
+ function hit(px,py){const p=P();for(let i=0;i<p.length;i++){const a=p[i];
+   if(i>0&&Math.hypot(X(a[0]+a[2])-px,Y(a[1]+a[3])-py)<9)return [i,'in'];
+   if(i<p.length-1&&Math.hypot(X(a[0]+a[4])-px,Y(a[1]+a[5])-py)<9)return [i,'out'];}
+  for(let i=0;i<p.length;i++){const a=p[i];if(Math.hypot(X(a[0])-px,Y(a[1])-py)<11)return [i,'a'];}return null;}
+ const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+ c.onpointerdown=e=>{const [px,py]=pos(e);const h=hit(px,py);if(h){drag=h;c.setPointerCapture(e.pointerId);}};
+ c.onpointermove=e=>{if(!drag)return;const [px,py]=pos(e);const p=P(),i=drag[0],a=p[i];const x=IX(px),y=IY(py);
+  if(drag[1]=='a'){if(i>0&&i<p.length-1)a[0]=cl(x,p[i-1][0]+0.01,p[i+1][0]-0.01);a[1]=cl(y,0,1);}
+  else if(drag[1]=='in'){a[2]=Math.min(0,x-a[0]);a[3]=y-a[1];}
+  else{a[4]=Math.max(0,x-a[0]);a[5]=y-a[1];}
+  draw();sendCurve();};
+ c.onpointerup=()=>{drag=null;};
+ c.ondblclick=e=>{const [px,py]=pos(e);const h=hit(px,py);const p=P();
+  if(h&&h[1]=='a'){if(h[0]>0&&h[0]<p.length-1){p.splice(h[0],1);draw();sendCurve();}return;}
+  const x=cl(IX(px),0.01,0.99),y=cl(IY(py),0,1);let k=1;while(k<p.length&&p[k][0]<x)k++;
+  p.splice(k,0,[x,y,-0.08,0,0.08,0]);draw();sendCurve();};
+ rb.onclick=()=>{CV[name]=JSON.parse(JSON.stringify(CD[name]));draw();sendCurve();};
+ draw();}
 fetch('/fx').then(r=>r.json()).then(d=>{D=d;const t=document.getElementById('tabs');
  d.forEach((T,i)=>{const b=document.createElement('button');b.textContent=T.n;b.onclick=()=>show(i);t.append(b);});
  const ship=d.findIndex(T=>T.g=='ship');show(ship>=0?ship:0);st.textContent='verbunden – Änderungen wirken sofort';})
@@ -6965,6 +7115,15 @@ func _weapons(dt: float, racing: bool) -> void:
 			var bar: MeshInstance3D = (o.node as Node3D).get_meta("bar")
 			bar.set_instance_shader_parameter("fill", o.en)
 			bar.visible = state == "race" and o.z - g.z > 1.5 and o.z - g.z < 40.0
+	var goth = int(cfg.get("hud", 1)) == 1
+	if hud.en_bg.visible == goth:
+		hud.en_bg.visible = not goth
+		hud.el.visible = not goth
+		hud.pg.position.y = 112
+	hud.gh.visible = goth
+	if goth:
+		hud.gs = lerpf(float(hud.gs), g.spd, 1.0 - exp(-get_process_delta_time() / 0.15))
+		hud.gh.queue_redraw()
 	hud.en.size.x = 300.0 * g.en
 	hud.el.text = "ENERGY  %d %%" % int(round(g.en * 100.0))
 	hud.en.color = Color(0.36, 1.0, 0.6) if g.en > 0.5 else (Color(1.0, 0.85, 0.25) if g.en > 0.25 else Color(1.0, 0.35, 0.3))
@@ -9003,14 +9162,32 @@ func _process(delta: float) -> void:
 		race_t += dt
 	# Lenkung mit Anlaufkurve
 	var b = _steer_input()
+	# Eingabe-Verzögerung (FX Lab „Steering“): es zählt, was vor „delay“ Sekunden gedrückt war
+	var now = Time.get_ticks_msec() / 1000.0
+	var SD: Dictionary = fx.steer
+	var dly = float(SD.delay)
+	st_hist.append([now, b])
+	while st_hist.size() > 2 and float(st_hist[1][0]) <= now - dly:
+		st_hist.pop_front()
+	if dly > 0.001:
+		b = int(st_hist[0][1]) if float(st_hist[0][0]) <= now - dly else 0
 	if b != steer_btn:
+		if steer_btn != 0 and b == 0:
+			rel_v = last_steer
+			rel_t = 0.0
 		steer_btn = b
 		btn_t = 0.0
 	btn_t += dt
 	var steer = 0.0
+	# Lenkkurven (am PC auf der Live-Seite einstellbar): Drücken = Kraft über die Haltedauer, Loslassen = Nachwirken
 	if b != 0:
-		var x = minf(1.0, btn_t / RAMP)
-		steer = b * (START + (1.0 - START) * pow(x, SHAPE))
+		steer = b * _curve_at("press", btn_t / maxf(0.05, float(SD.ptime)))
+	else:
+		rel_t += dt
+		var rt = float(SD.rtime)
+		if rt > 0.001 and rel_t < rt:
+			steer = rel_v * _curve_at("release", rel_t / rt)
+	last_steer = steer
 	_steer_glow(dt, steer)
 	if state == "done":
 		steer = clampf(-g.lat * 0.6 - g.vpsi * 2.0, -1.0, 1.0)
@@ -9418,6 +9595,8 @@ func _lab_val(it: Array, v: float) -> String:
 		return LK_SHAPES[clampi(int(round(v)), 0, LK_SHAPES.size() - 1)]
 	if k == "time":
 		return "%.1f s" % (1.3 * v)
+	if k in ["ptime", "rtime", "delay"]:
+		return "%.2f s" % v
 	return "%d %%" % int(round(v * 100.0)) if v >= 0.995 or v == 0.0 else "%.1f %%" % (v * 100.0)
 
 
@@ -10706,3 +10885,146 @@ func _reload() -> void:
 	_ld_set(0.3)
 	await get_tree().process_frame
 	get_tree().reload_current_scene()
+
+
+# ---------------------------------------------------------------- Cyber-Gothic-HUD
+# Tempo: Bogen aus 17 Schuppen über einem Spitzbogen; Boost lässt die Schuppen rot glühen und pulsieren.
+# Energie: zehn schmale Spitzbogen-Fenster darunter, unter 25 % flackern sie und bekommen Risse.
+func _gh_scale(c: Control, ctr: Vector2, a0: float, a1: float, r0: float, r1: float, col: Color, out: Color) -> void:
+	var am = (a0 + a1) * 0.5
+	var pts = PackedVector2Array()
+	for k in range(5):
+		var a = lerpf(a0, a1, k / 4.0)
+		pts.append(ctr + Vector2(cos(a), sin(a)) * r0)
+	pts.append(ctr + Vector2(cos(a1), sin(a1)) * (r1 - (r1 - r0) * 0.25))
+	pts.append(ctr + Vector2(cos(am), sin(am)) * (r1 + (r1 - r0) * 0.18))   # Schuppenspitze
+	pts.append(ctr + Vector2(cos(a0), sin(a0)) * (r1 - (r1 - r0) * 0.25))
+	c.draw_colored_polygon(pts, col)
+	var ol = pts.duplicate()
+	ol.append(pts[0])
+	c.draw_polyline(ol, out, 1.6, true)
+
+
+func _gh_lancet(c: Control, x: float, y: float, w: float, h: float, col: Color, out: Color, fill := true) -> void:
+	# schmales Spitzbogen-Fenster (unten gerade, oben spitz zulaufend)
+	var pts = PackedVector2Array([Vector2(x, y + h), Vector2(x, y + w * 0.6)])
+	for k in range(1, 7):
+		var u = k / 6.0
+		pts.append(Vector2(x + w * 0.5 * (1.0 - cos(u * PI * 0.5)), y + w * 0.6 * (1.0 - sin(u * PI * 0.5)) - w * 0.55 * u))
+	for k in range(5, -1, -1):
+		var u = k / 6.0
+		pts.append(Vector2(x + w - w * 0.5 * (1.0 - cos(u * PI * 0.5)), y + w * 0.6 * (1.0 - sin(u * PI * 0.5)) - w * 0.55 * u))
+	pts.append(Vector2(x + w, y + h))
+	if fill:
+		c.draw_colored_polygon(pts, col)
+	var ol = pts.duplicate()
+	ol.append(pts[0])
+	c.draw_polyline(ol, out, 1.5, true)
+
+
+func _gh_draw(c: Control) -> void:
+	if ships.is_empty() or not hud.has("gs"):
+		return
+	var g: Dictionary = ships[0]
+	var t = Time.get_ticks_msec() / 1000.0
+	var ctr = Vector2(186, 292)
+	var top = 1.6 * maxf(1.0, base_spd)
+	var fr = clampf(float(hud.gs) / top, 0.0, 1.0)
+	var bo = clampf(g.boost, 0.0, 1.0)
+	var n = 17
+	var a0 = PI * 1.02
+	var a1 = PI * 1.98
+	var lit = fr * n
+	# Rahmen: dunkler Spitzbogen hinter dem Bogen, feine Zierlinien
+	var frame = PackedVector2Array()
+	for k in range(33):
+		var a = lerpf(a0 - 0.1, a1 + 0.1, k / 32.0)
+		frame.append(ctr + Vector2(cos(a), sin(a)) * 152.0)
+	frame.append(ctr + Vector2(150, 28))
+	frame.append(ctr + Vector2(-150, 28))
+	c.draw_colored_polygon(frame, Color(0.02, 0.01, 0.03, 0.55))
+	var fo = frame.duplicate()
+	fo.append(frame[0])
+	c.draw_polyline(fo, Color(0.75, 0.1, 0.16, 0.7), 2.0, true)
+	c.draw_arc(ctr, 96.0, a0, a1, 40, Color(0.75, 0.1, 0.16, 0.45), 1.5, true)
+	c.draw_line(ctr + Vector2(0, -150), ctr + Vector2(0, -168), Color(0.85, 0.15, 0.2, 0.8), 2.0, true)   # Turmspitze
+	c.draw_circle(ctr + Vector2(0, -172), 3.5, Color(1.0, 0.25, 0.3, 0.9))
+	for k in range(n):
+		var sa = lerpf(a0, a1, float(k) / n) + 0.012
+		var sb = lerpf(a0, a1, float(k + 1) / n) - 0.012
+		var f = clampf(lit - k, 0.0, 1.0)
+		var base = Color(0.16, 0.12, 0.15, 0.75)
+		var hot = Color(0.95, 0.95, 1.0).lerp(Color(0.4, 0.95, 1.0), float(k) / n)
+		if bo > 0.02:
+			var pu = 0.6 + 0.4 * sin(t * 18.0 - k * 0.6)
+			hot = Color(1.0, 0.2 + 0.25 * pu, 0.18) * (1.0 + 0.6 * pu)
+		var col = base.lerp(hot, f)
+		col.a = 0.75 + 0.25 * f
+		_gh_scale(c, ctr, sa, sb, 104.0, 134.0 + 6.0 * f * bo, col, Color(0, 0, 0, 0.85))
+	# Tempo-Zahl in der Mitte
+	var font = c.get_theme_default_font()
+	var v = int(round(float(hud.gs) * 12.0))
+	var vs = str(v)
+	var fs = 54
+	var vw = font.get_string_size(vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var vc = Color(1.0, 0.35, 0.3) if bo > 0.02 else Color(0.92, 0.96, 1.0)
+	c.draw_string_outline(font, ctr + Vector2(-vw * 0.5, -30), vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 8, Color(0, 0, 0, 0.9))
+	c.draw_string(font, ctr + Vector2(-vw * 0.5, -30), vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, vc)
+	var ks = "BOOST" if bo > 0.02 else "KM/H"
+	var kw = font.get_string_size(ks, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	c.draw_string(font, ctr + Vector2(-kw * 0.5, -6), ks, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(vc, 0.75))
+	# Energie: zehn Fenster
+	var en = clampf(g.en, 0.0, 1.0)
+	var low = en <= 0.25 and not g.out
+	var ec = Color(0.36, 1.0, 0.6) if en > 0.5 else (Color(1.0, 0.85, 0.25) if en > 0.25 else Color(1.0, 0.25, 0.2))
+	var x0 = ctr.x - 132.0
+	var wsl = 24.0
+	for k in range(10):
+		var f2 = clampf(en * 10.0 - k, 0.0, 1.0)
+		var cc = Color(0.12, 0.1, 0.12, 0.7).lerp(ec, f2)
+		if low and f2 > 0.0:
+			cc.a *= 0.55 + 0.45 * float(fmod(t * 7.0 + k * 0.37, 1.0) < 0.6)
+		var xx = x0 + k * (wsl + 3.0)
+		_gh_lancet(c, xx, ctr.y + 40.0, wsl, 44.0, cc, Color(0, 0, 0, 0.9))
+		if low and k == int(en * 10.0):
+			# Riss quer durchs angebrochene Fenster
+			c.draw_polyline(PackedVector2Array([Vector2(xx + 3, ctr.y + 58), Vector2(xx + 11, ctr.y + 66), Vector2(xx + 8, ctr.y + 74), Vector2(xx + 20, ctr.y + 82)]), Color(0, 0, 0, 0.9), 2.0, true)
+	var es = "ENERGY  %d %%" % int(round(en * 100.0))
+	c.draw_string_outline(font, Vector2(x0, ctr.y + 110), es, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, 6, Color(0, 0, 0, 0.8))
+	c.draw_string(font, Vector2(x0, ctr.y + 110), es, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(ec, 0.85))
+
+
+# Waffen-Medaillon: Dornenkranz, Doppelring mit Zierpunkten, vier Spitzbögen; Super = gold, Mega = rot
+func _gh_medal(c: Control, ctr: Vector2, t: float, oc: Color) -> void:
+	var g: Dictionary = ships[0]
+	var col = oc
+	if g.get("mega", false):
+		col = Color(1.0, 0.15, 0.2)
+	elif g.get("sup", false):
+		col = Color(1.0, 0.8, 0.25)
+	var pu = 0.5 + 0.5 * sin(t * 5.0)
+	# Dornenkranz, dreht sich langsam
+	var sp = PackedVector2Array()
+	var nsp = 16
+	for k in range(nsp * 2 + 1):
+		var a = t * 0.4 + k * PI / nsp
+		var r = 124.0 + 8.0 * pu if k % 2 == 0 else 106.0
+		sp.append(ctr + Vector2(cos(a), sin(a)) * r)
+	c.draw_polyline(sp, Color(col, 0.75), 2.5, true)
+	c.draw_arc(ctr, 100.0, 0.0, TAU, 72, Color(col, 0.95), 5.0, true)
+	c.draw_arc(ctr, 90.0, 0.0, TAU, 72, Color(0, 0, 0, 0.6), 2.0, true)
+	c.draw_arc(ctr, 86.0, 0.0, TAU, 72, Color(col, 0.6), 2.0, true)
+	for k in range(24):
+		var a2 = -t * 0.6 + k * TAU / 24.0
+		c.draw_circle(ctr + Vector2(cos(a2), sin(a2)) * 93.0, 2.2, Color(col, 0.9))
+	# vier Spitzbögen außen (oben, unten, links, rechts)
+	for k in range(4):
+		var a3 = k * PI * 0.5 - PI * 0.5
+		var d = Vector2(cos(a3), sin(a3))
+		var q = Vector2(-d.y, d.x)
+		var b = ctr + d * 104.0
+		c.draw_colored_polygon(PackedVector2Array([b + q * 11.0, b + d * 30.0, b - q * 11.0]), Color(col, 0.85))
+		c.draw_polyline(PackedVector2Array([b + q * 11.0, b + d * 30.0, b - q * 11.0]), Color(0, 0, 0, 0.8), 1.5, true)
+	# Mega: zusätzlich glühender Außenschein
+	if g.get("mega", false):
+		c.draw_arc(ctr, 132.0 + 6.0 * pu, 0.0, TAU, 72, Color(1.0, 0.1, 0.15, 0.35 + 0.3 * pu), 7.0, true)
