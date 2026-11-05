@@ -4,7 +4,8 @@ extends Node3D
 
 # gespeichertes Replay, das nach dem Neuladen der Szene abgespielt werden soll (bleibt über reload_current_scene erhalten)
 static var pending_rp = ""
-static var pending_free = false   # nach dem FX Lab gleich wieder ins Free ride (Live-Regler vom PC)
+static var pending_free = false
+static var pending_test = false   # Neustart direkt in die Lenk-Teststrecke   # nach dem FX Lab gleich wieder ins Free ride (Live-Regler vom PC)
 static var restart = false
 static var bench_req = false   # Leistungstest: nach dem Neuladen direkt starten   # „Race again“: nach dem Neuladen direkt losfahren
 
@@ -115,6 +116,12 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--jungle"):
 		cfg.look = 2
 	T.J = _jungle()   # eigene Streckenführung im Dschungel
+	T.S = pending_test or OS.get_cmdline_user_args().has("--steertest")
+	if T.S:
+		pending_test = false
+		T.J = false
+		free_ride = true
+		_start.call_deferred()
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
 	if OS.get_cmdline_user_args().has("--free"):
@@ -4214,12 +4221,23 @@ func _menu() -> void:
 	var go = _btn("START RACE", true)
 	go.pressed.connect(_start)
 	box.add_child(go)
-	var bfr = _btn("Free ride – no rivals, endless laps")
+	var frow = HBoxContainer.new()
+	frow.add_theme_constant_override("separation", 16)
+	box.add_child(frow)
+	var bfr = _btn("Free ride")
 	bfr.add_theme_font_size_override("font_size", 28)
+	bfr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bfr.pressed.connect(func():
 		free_ride = true
 		_start())
-	box.add_child(bfr)
+	frow.add_child(bfr)
+	var bst = _btn("Steering test")
+	bst.add_theme_font_size_override("font_size", 28)
+	bst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bst.pressed.connect(func():
+		pending_test = true
+		_reload())
+	frow.add_child(bst)
 	var rrow = HBoxContainer.new()
 	rrow.add_theme_constant_override("separation", 16)
 	box.add_child(rrow)
@@ -4761,6 +4779,8 @@ func _input(ev: InputEvent) -> void:
 				return
 			if state == "race" and fire_rect.has_point(ev.position):
 				fire_req = true
+				return
+			if not stt.is_empty() and _stt_hit(ev.position):
 				return
 			touches[ev.index] = ev.position.x
 		else:
@@ -6830,23 +6850,9 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 		_live_send(c, "application/json", JSON.stringify({"b": steer_btn, "px": clampf(btn_t / maxf(0.05, float(SD.ptime)), 0.0, 1.0) if steer_btn != 0 else -1.0,
 			"rx": clampf(rel_t / maxf(0.001, float(SD.rtime)), 0.0, 1.0) if steer_btn == 0 and rel_t < float(SD.rtime) else -1.0, "s": last_steer}))
 	elif path.begins_with("/preset?"):
-		var pi = clampi(int(path.get_slice("=", 1)), 0, STEER_PRE.size() - 1)
-		var pr: Array = STEER_PRE[pi]
-		fx.steer.ptime = pr[1]
-		fx.steer.rtime = pr[2]
-		fx.steer.delay = 0.0
-		fx.ship.steer = pr[3]
-		fx.ship.steerk = pr[4]
-		fx.ship.grip = pr[5]
-		curves.press = (pr[6] as Array).duplicate(true)
-		curves.release = (CURVE_DEF.release as Array).duplicate(true)
-		for k in curves:
-			curve_lut[k] = _curve_bake(curves[k])
-		_curves_save()
+		_steer_preset(int(path.get_slice("=", 1)))
 		for k in ["steer", "steerk", "grip"]:
 			_live_sync_lab("ship", k)
-		live_sv = 0.5
-		_toast("Steering: " + str(pr[0]))
 		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/curve"):
 		var qi2 = path.find("?d=")
@@ -9413,6 +9419,8 @@ func _process(delta: float) -> void:
 		if rt > 0.001 and rel_t < rt:
 			steer = rel_v * _curve_at("release", rel_t / rt)
 	last_steer = steer
+	if T.S:
+		_stt_update(dt)
 	_steer_glow(dt, steer)
 	if state == "done":
 		steer = clampf(-g.lat * 0.6 - g.vpsi * 2.0, -1.0, 1.0)
@@ -11253,3 +11261,272 @@ func _gh_medal(c: Control, ctr: Vector2, t: float, oc: Color) -> void:
 	# Mega: zusätzlich glühender Außenschein
 	if g.get("mega", false):
 		c.draw_arc(ctr, 132.0 + 6.0 * pu, 0.0, TAU, 72, Color(1.0, 0.1, 0.15, 0.35 + 0.3 * pu), 7.0, true)
+
+
+# ---------------------------------------------------------------- Lenk-Teststrecke: gerade Strecke mit Toren
+# Slalom (Rhythmus), Spurwechsel (Überschießen) und schmale Ziel-Tore (gezieltes Anfahren wie bei den Säulen).
+# Oben rechts ein Knopf für die Einstellleiste (geht ohne PC), unten die Lenkanzeige.
+# Tor: [Position in der Runde, Mitte (seitlich), halbe Breite, Abschnitt]
+var stt = {}
+
+
+func _stt_gates() -> Array:
+	var out = []
+	var sd = 1.0
+	for k in range(11):
+		out.append([60.0 + k * 20.0, 1.1 * sd, 0.6, 0])
+		sd = -sd
+	for q in [[300, -1.5], [322, 1.5], [337, 1.5], [352, 1.5], [374, -1.5], [389, -1.5], [404, -1.5], [426, 1.5], [441, 1.5]]:
+		out.append([float(q[0]), float(q[1]), 0.55, 1])
+	var rng = RandomNumberGenerator.new()
+	rng.seed = 37
+	var prev = 0.0
+	for k in range(12):
+		var lat = rng.randf_range(-1.7, 1.7)
+		if absf(lat - prev) < 0.7:
+			lat = clampf(-prev * 0.8, -1.7, 1.7)
+		prev = lat
+		out.append([490.0 + k * 18.0, lat, 0.32, 2])
+	return out
+
+
+const STT_COL = [Color(0.25, 0.9, 1.0), Color(1.0, 0.3, 0.8), Color(1.0, 0.8, 0.25)]
+const STT_NAME = ["SLALOM", "LANES", "TARGET"]
+
+
+func _stt_build() -> void:
+	stt = {"g": [], "res": [[0, 0], [0, 0], [0, 0]], "lz": -1.0, "open": false}
+	for gd in _stt_gates():
+		var m = StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.albedo_color = STT_COL[gd[3]]
+		var nd = Node3D.new()
+		for sd in [-1.0, 1.0]:
+			var post = MeshInstance3D.new()
+			var cy = CylinderMesh.new()
+			cy.top_radius = 0.04
+			cy.bottom_radius = 0.04
+			cy.height = 1.1
+			cy.radial_segments = 8
+			cy.rings = 1
+			post.mesh = cy
+			post.material_override = m
+			post.position = Vector3(sd * float(gd[2]), 0.55, 0)
+			post.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			nd.add_child(post)
+		var bar = MeshInstance3D.new()
+		var bx = BoxMesh.new()
+		bx.size = Vector3(float(gd[2]) * 2.0 + 0.08, 0.06, 0.06)
+		bar.mesh = bx
+		bar.material_override = m
+		bar.position = Vector3(0, 1.1, 0)
+		bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		nd.add_child(bar)
+		add_child(nd)
+		stt.g.append({"d": gd, "n": nd, "m": m, "done": -1, "fl": 0.0, "ok": false})
+	# Anzeige oben, Lenkanzeige unten, Knopf + Einstellleiste
+	var cl = CanvasLayer.new()
+	cl.layer = 7
+	add_child(cl)
+	stt.cl = cl
+	var lb = _lbl("", 26)
+	lb.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	lb.offset_top = 470
+	lb.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	lb.add_theme_constant_override("outline_size", 8)
+	cl.add_child(lb)
+	stt.lb = lb
+	var ind = Control.new()
+	ind.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ind.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cl.add_child(ind)
+	ind.draw.connect(func(): _stt_draw_ind(ind))
+	stt.ind = ind
+	var gb = _btn("⚙ STEERING")
+	gb.add_theme_font_size_override("font_size", 26)
+	gb.anchor_left = 1.0
+	gb.anchor_right = 1.0
+	gb.offset_left = -300
+	gb.offset_right = -24
+	gb.offset_top = 380
+	gb.offset_bottom = 450
+	gb.pressed.connect(func():
+		stt.open = not stt.open
+		(stt.pnl as Control).visible = stt.open)
+	cl.add_child(gb)
+	stt.gb = gb
+	var pnl = PanelContainer.new()
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.03, 0.03, 0.06, 0.88)
+	sb.border_color = Color(0.85, 0.15, 0.2, 0.8)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(18)
+	sb.set_content_margin_all(18)
+	pnl.add_theme_stylebox_override("panel", sb)
+	pnl.anchor_left = 0.04
+	pnl.anchor_right = 0.96
+	pnl.offset_top = 570
+	pnl.visible = false
+	cl.add_child(pnl)
+	stt.pnl = pnl
+	var vb = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 12)
+	pnl.add_child(vb)
+	var pr = HBoxContainer.new()
+	pr.add_theme_constant_override("separation", 10)
+	vb.add_child(pr)
+	for k in range(STEER_PRE.size()):
+		var b = _btn(str(STEER_PRE[k][0]))
+		b.add_theme_font_size_override("font_size", 26)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var kk = k
+		b.pressed.connect(func(): _steer_preset(kk))
+		pr.add_child(b)
+	stt.rows = []
+	for r in [["ship", "steer", "Trägheit  (weniger = reagiert schneller)", 0.1], ["ship", "steerk", "Lenkkraft  (mehr = engere Kurven)", 0.05], ["steer", "ptime", "Anlaufzeit  (kürzer = sofort volle Kraft)", 0.05]]:
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		vb.add_child(row)
+		var tl = Label.new()
+		tl.text = r[2]
+		tl.add_theme_font_size_override("font_size", 22)
+		tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		row.add_child(tl)
+		var bm = _btn("−")
+		bm.custom_minimum_size = Vector2(96, 80)
+		row.add_child(bm)
+		var vl = Label.new()
+		vl.custom_minimum_size = Vector2(110, 0)
+		vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		vl.add_theme_font_size_override("font_size", 28)
+		row.add_child(vl)
+		var bpl = _btn("+")
+		bpl.custom_minimum_size = Vector2(96, 80)
+		row.add_child(bpl)
+		var rr = r
+		bm.pressed.connect(func(): _stt_step(rr, -1.0))
+		bpl.pressed.connect(func(): _stt_step(rr, 1.0))
+		stt.rows.append([r, vl])
+	_stt_vals()
+	if OS.get_environment("STTOPEN") != "":
+		stt.open = true
+		pnl.visible = true
+
+
+func _stt_step(r: Array, sg: float) -> void:
+	var g: String = r[0]
+	var k: String = r[1]
+	for it in FXS[g]:
+		if it[0] == k:
+			fx[g][k] = clampf(snappedf(float(fx[g][k]) + sg * float(r[3]), 0.01), it[2], it[3])
+	_fx_changed(g, k)
+	live_sv = 0.8
+	_stt_vals()
+
+
+func _stt_vals() -> void:
+	for e in stt.get("rows", []):
+		var r: Array = e[0]
+		var v = float(fx[r[0]][r[1]])
+		(e[1] as Label).text = ("%.2f s" % v) if r[1] == "ptime" else ("%.2f" % v)
+
+
+func _steer_preset(i: int) -> void:
+	var pr: Array = STEER_PRE[clampi(i, 0, STEER_PRE.size() - 1)]
+	fx.steer.ptime = pr[1]
+	fx.steer.rtime = pr[2]
+	fx.steer.delay = 0.0
+	fx.ship.steer = pr[3]
+	fx.ship.steerk = pr[4]
+	fx.ship.grip = pr[5]
+	curves.press = (pr[6] as Array).duplicate(true)
+	curves.release = (CURVE_DEF.release as Array).duplicate(true)
+	for k in curves:
+		curve_lut[k] = _curve_bake(curves[k])
+	_curves_save()
+	live_sv = 0.5
+	_stt_vals()
+	_toast("Steering: " + str(pr[0]))
+
+
+func _stt_hit(p: Vector2) -> bool:
+	if not stt.has("gb"):
+		return false
+	if (stt.gb as Control).get_global_rect().has_point(p):
+		return true
+	return stt.open and (stt.pnl as Control).get_global_rect().has_point(p)
+
+
+func _stt_update(dt: float) -> void:
+	if (state != "race" and state != "done") or warm_t >= 0.0:
+		return   # erst nach dem Vorwärmen bauen (das räumt neue Knoten wieder weg)
+	if stt.is_empty() or not is_instance_valid(stt.get("cl")):
+		_stt_build()
+	var g: Dictionary = ships[0]
+	var lap = floor((g.z - 20.0) / 700.0)
+	var zl = g.z - 20.0 - lap * 700.0 + 20.0
+	# Rundenwechsel: Ergebnis zeigen und neu zählen
+	if stt.lz > 600.0 and zl < 100.0:
+		var tot = 0
+		var hit = 0
+		for r in stt.res:
+			tot += r[1]
+			hit += r[0]
+		_toast("Runde: %d von %d Toren  ·  %s %d/%d  %s %d/%d  %s %d/%d" % [hit, tot, STT_NAME[0], stt.res[0][0], stt.res[0][1], STT_NAME[1], stt.res[1][0], stt.res[1][1], STT_NAME[2], stt.res[2][0], stt.res[2][1]])
+		stt.res = [[0, 0], [0, 0], [0, 0]]
+	stt.lz = zl
+	for e in stt.g:
+		var gd: Array = e.d
+		var z = lap * 700.0 + float(gd[0])
+		if z < g.z - 40.0:
+			z += 700.0
+		var f = T.frame(z)
+		(e.n as Node3D).global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * float(gd[1]))
+		# durchflogen? (jede Runde einmal werten)
+		var lid = int(floor((z - 20.0) / 700.0))
+		if g.z >= z and e.done != lid and g.z - z < 6.0:
+			e.done = lid
+			var ok = absf(g.lat - float(gd[1])) <= float(gd[2])
+			e.ok = ok
+			e.fl = 0.6
+			stt.res[gd[3]][1] += 1
+			if ok:
+				stt.res[gd[3]][0] += 1
+				_snd("pick", -10.0, 1.4)
+			else:
+				_snd("beep", -8.0, 0.6)
+		if e.fl > 0.0:
+			e.fl -= dt
+			(e.m as StandardMaterial3D).albedo_color = (Color(0.3, 1.0, 0.4) if e.ok else Color(1.0, 0.15, 0.1)) if e.fl > 0.0 else STT_COL[gd[3]]
+	var sec = 0 if zl < 280.0 else (1 if zl < 470.0 else 2)
+	(stt.lb as Label).text = "%s   ·   %d / %d" % [STT_NAME[sec], stt.res[sec][0], stt.res[sec][1]]
+	(stt.lb as Label).add_theme_color_override("font_color", STT_COL[sec])
+	(stt.ind as Control).queue_redraw()
+
+
+# Lenkanzeige oben unter dem Abschnitt: Balken füllt sich von der Mitte nach links/rechts.
+# Orange Linie = dein Finger (Lenkbefehl), grüne Füllung = was das Schiff gerade tut
+func _stt_draw_ind(c: Control) -> void:
+	if ships.is_empty():
+		return
+	var g: Dictionary = ships[0]
+	var vp = c.size
+	var cy = 528.0
+	var hw = vp.x * 0.36
+	var cx = vp.x * 0.5
+	c.draw_rect(Rect2(cx - hw, cy - 10, hw * 2.0, 20), Color(0, 0, 0, 0.45))
+	c.draw_rect(Rect2(cx - hw, cy - 10, hw * 2.0, 20), Color(1, 1, 1, 0.3), false, 2.0)
+	var cmd = clampf(last_steer, -1.0, 1.0)
+	var act = clampf(float(g.u), -1.0, 1.0)
+	if absf(act) > 0.005:
+		c.draw_rect(Rect2(cx + minf(0.0, act * hw), cy - 8, absf(act) * hw, 16), Color(0.36, 1.0, 0.6, 0.9))
+	if absf(cmd) > 0.005:
+		c.draw_rect(Rect2(cx + minf(0.0, cmd * hw), cy + 12, absf(cmd) * hw, 5), Color(1.0, 0.5, 0.2, 0.95))
+	c.draw_line(Vector2(cx, cy - 16), Vector2(cx, cy + 20), Color(1, 1, 1, 0.7), 2.0)
+	var font = c.get_theme_default_font()
+	var s = "%d %%" % int(round(absf(act) * 100.0))
+	var w = font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 22).x
+	var tx = cx + hw + 12.0
+	c.draw_string_outline(font, Vector2(tx, cy + 8), s, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 6, Color(0, 0, 0, 0.8))
+	c.draw_string(font, Vector2(tx, cy + 8), s, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1, 0.85))

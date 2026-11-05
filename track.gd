@@ -15,6 +15,7 @@ const TUN := [[160.0, 245.0], [510.0, 595.0]]
 # Dschungel: turbotauglich – weite, fließende Kurven (Summe weniger Sinuswellen, keine hektischen Wechsel),
 # langer sanfter Anstieg (120–400), steile lange Abfahrt (440–520) und direkt danach die lange Steilkurve (500–690)
 static var J := false
+static var S := false   # Lenk-Teststrecke: ganz gerade und flach
 const SEG_J := []
 const CRV_J := [[1.0, 22.0, -3.9225], [2.0, 10.0, -9.4158], [3.0, 4.5, -14.9091], [4.0, 2.0, -20.4024]]   # [Welle, Weite, Phase] – große Kurve um z 632
 const DROP := [[80.0, 250.0, 38.0], [420.0, 160.0, -38.0]]   # Anstieg, dann die lange steile Abfahrt
@@ -22,6 +23,8 @@ const TUN_J := [[605.0, 655.0]]   # Erdtunnel mitten in der Steilkurve
 
 
 static func tuns() -> Array:
+	if S:
+		return []
 	return TUN_J if J else TUN
 
 
@@ -51,6 +54,8 @@ static func s2(u: float) -> float:
 
 
 static func px(z: float) -> float:
+	if S:
+		return 0.0
 	var l := lz(z)
 	var r := 0.0
 	if J:
@@ -62,6 +67,8 @@ static func px(z: float) -> float:
 
 
 static func dpx(z: float) -> float:
+	if S:
+		return 0.0
 	var l := lz(z)
 	var r := 0.0
 	if J:
@@ -73,6 +80,8 @@ static func dpx(z: float) -> float:
 
 
 static func d2px(z: float) -> float:
+	if S:
+		return 0.0
 	var l := lz(z)
 	var r := 0.0
 	if J:
@@ -84,6 +93,8 @@ static func d2px(z: float) -> float:
 
 
 static func py(z: float) -> float:
+	if S:
+		return 0.0
 	var l := z - 20.0
 	var r := 0.0
 	for h in HILL:
@@ -96,6 +107,8 @@ static func py(z: float) -> float:
 
 
 static func dpy(z: float) -> float:
+	if S:
+		return 0.0
 	var l := z - 20.0
 	var r := 0.0
 	for h in HILL:
@@ -109,6 +122,8 @@ static func dpy(z: float) -> float:
 
 # Sprungschanze vor der Lücke bei 410–417
 static func rmp(z: float) -> float:
+	if S:
+		return 0.0
 	z = lz(z)
 	var jn := ceilf((z - 60.0) / 350.0) * 350.0 + 60.0
 	if jn < 300.0 or jn > 700.0:
@@ -118,6 +133,8 @@ static func rmp(z: float) -> float:
 
 
 static func gap(z: float) -> bool:
+	if S:
+		return false
 	z = lz(z)
 	var j := floorf((z - 60.0) / 350.0) * 350.0 + 60.0
 	if j < 300.0:
