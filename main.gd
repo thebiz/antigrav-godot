@@ -6,7 +6,7 @@ extends Node3D
 static var pending_rp = ""
 static var pending_free = false
 static var pending_test = false
-static var stt_spd = 0.5   # Tempo auf der Teststrecke (Anteil vom normalen Tempo)   # Neustart direkt in die Lenk-Teststrecke   # nach dem FX Lab gleich wieder ins Free ride (Live-Regler vom PC)
+static var stt_spd = 1.0   # Tempo auf der Teststrecke (Anteil vom normalen Tempo)   # Neustart direkt in die Lenk-Teststrecke   # nach dem FX Lab gleich wieder ins Free ride (Live-Regler vom PC)
 static var restart = false
 static var bench_req = false   # Leistungstest: nach dem Neuladen direkt starten   # „Race again“: nach dem Neuladen direkt losfahren
 
@@ -1828,7 +1828,7 @@ uniform vec3 fc=vec3(.75,1.,.3);uniform float fs=1.;
 varying float br;
 void vertex(){
 	vec4 cd=INSTANCE_CUSTOM;float s=cd.r*100.;
-	vec3 o=MODEL_MATRIX[3].xyz+vec3(sin(TIME*.7+s)*.5,sin(TIME*1.1+s*2.)*.3,cos(TIME*.6+s*1.3)*.5);
+	vec3 o=MODEL_MATRIX[3].xyz+vec3(sin(TIME*.7+s)*.3,sin(TIME*1.1+s*2.)*.3,cos(TIME*.6+s*1.3)*.3);
 	VERTEX*=fs;
 	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(INV_VIEW_MATRIX[0],INV_VIEW_MATRIX[1],INV_VIEW_MATRIX[2],vec4(o,1.));
 	br=smoothstep(.15,1.,sin(TIME*(1.5+cd.g*2.)+s*7.));
@@ -2141,6 +2141,13 @@ func _jungle_build() -> void:
 		else:
 			var mp: Array = mush_p[rng.randi() % mush_p.size()]
 			p = _jf(mp[0], mp[1], maxf(1.2, mp[2])) + Vector3.UP * rng.randf_range(0.25, 1.0)
+		# nie über der Fahrbahn: in der Steilkurve zeigt „oben“ schräg über die Bahn – dann seitlich nach außen schieben
+		var ff = T.frame(p.z)
+		var lat = (p - ff.c).dot(ff.rr)
+		var sgn = signf(lat) if absf(lat) > 0.01 else 1.0
+		var mlat = T.TW + 1.6
+		if absf(lat) < mlat:
+			p += ff.rr * sgn * (mlat - absf(lat))
 		jfly_mm.set_instance_transform(i, Transform3D(Basis.IDENTITY, p))
 		jfly_mm.set_instance_custom_data(i, Color(rng.randf(), rng.randf(), 0, 0))
 	jfly_n = jfly_mm.instance_count
@@ -7054,7 +7061,7 @@ function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D
  if(T.g=='steer'){const pr=document.createElement('div');pr.id='pre';const lb=document.createElement('span');lb.textContent='Voreinstellung zum Vergleichen:';lb.style.color='#9fb0cc';pr.append(lb);
   ['Ruhig','Mittel','Scharf'].forEach((n,k)=>{const b=document.createElement('button');b.textContent=n;b.onclick=()=>fetch('/preset?n='+k).then(()=>reloadAll(n));pr.append(b);});
   const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t='Setzt Lenkkurve, Anlaufzeit, Ausklingzeit und im Reiter Ship auch Steering lag, Steering strength und Grip auf einen festen Satz. Fahr mit jeder Voreinstellung eine Runde und sag, welche am nächsten dran ist.';pr.append(ii);m.append(pr);
-  ssT=setInterval(()=>{if(SS&&SS.t&&Date.now()-lastWs<1000)return;fetch('/sst').then(r=>r.json()).then(d=>{SS=d;EDS.forEach(f=>f());}).catch(()=>{});},150);}
+  ssT=setInterval(()=>{if(SS&&SS.t&&Date.now()-lastWs<1000)return;fetch('/sst').then(r=>r.json()).then(d=>{SS=d;dirty=true;}).catch(()=>{});},150);}
  T.it.forEach(it=>{const r=document.createElement('div');r.className='r';
   const l=document.createElement('div');l.textContent=it.n;
   if(it.i){const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t=it.i;ii.onclick=e=>{ii.classList.toggle('show');};l.append(ii);}const s=document.createElement('input');s.type='range';
@@ -7123,13 +7130,17 @@ function cvEd(m,name,title,xl,yl){
   p.splice(k,0,[x,y,-hl,-hl*sl,hl,hl*sl]);draw();sendCurve();};
  rb.onclick=()=>{CV[name]=JSON.parse(JSON.stringify(CD[name]));draw();sendCurve();};
  draw();}
-let VER=-1,lastSend=0,lastWs=0;
-function syncFrom(ver){if(ver==VER||Date.now()-lastSend<800)return;VER=ver;
+let VER=-1,lastSend=0,lastWs=0,dirty=false,mdown=false;
+document.addEventListener('pointerdown',()=>mdown=true,true);document.addEventListener('pointerup',()=>{mdown=false;lastSend=Date.now();},true);
+// Neu zeichnen nur bei Änderung und höchstens einmal pro Bildschirmbild
+(function loop(){if(dirty&&EDS.length&&!EDS.dragging){dirty=false;EDS.forEach(f=>f());}requestAnimationFrame(loop);})();
+function syncFrom(ver){if(ver==VER||mdown||Date.now()-lastSend<800)return;VER=ver;
  fetch('/fx').then(r=>r.json()).then(d=>{const T=d.tabs;T.forEach((t,i)=>{if(D[i])D[i].it=t.it;});
   document.querySelectorAll('#m .r').forEach((r,j)=>{const it=D[cur].it[j];if(!it)return;const s=r.querySelector('input');if(s&&document.activeElement!==s){s.value=it.v;r.querySelector('.v').textContent=fmt(it,it.v);}});
   if(D[cur].g=='steer')fetch('/curve').then(r=>r.json()).then(c=>{if(!EDS.dragging){CV=c.cur;EDS.forEach(f=>f());}});});}
 function wsConnect(){try{const ws=new WebSocket('ws://'+location.hostname+':8081');
- ws.onmessage=e=>{lastWs=Date.now();const d=JSON.parse(e.data);SS=d;EDS.forEach(f=>f());syncFrom(d.ver);};
+ ws.onmessage=e=>{lastWs=Date.now();const d=JSON.parse(e.data);
+  const ch=!SS||SS.px!=d.px||SS.rx!=d.rx;SS=d;if(ch)dirty=true;syncFrom(d.ver);};
  ws.onclose=()=>setTimeout(wsConnect,1000);ws.onerror=()=>{};}catch(e){setTimeout(wsConnect,2000);}}
 wsConnect();
 fetch('/fx').then(r=>r.json()).then(dd=>{const d=dd.tabs;VER=dd.ver;D=d;const t=document.getElementById('tabs');
