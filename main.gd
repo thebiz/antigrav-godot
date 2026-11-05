@@ -683,13 +683,14 @@ const FXS = {
 		["amp", "Heat shimmer", 0.0, 10.0, 1.0], ["fine", "Fineness", 0.3, 6.0, 1.0], ["speed", "Speed", 0.0, 8.0, 1.0], ["size", "Size", 0.2, 6.0, 1.0],
 		["len", "Length", 0.2, 6.0, 1.0], ["boost", "Extra with boost", 0.0, 8.0, 1.0]],
 	"pillar": [["speed", "Ring speed", 0.0, 6.0, 1.0], ["size", "Ring size", 0.3, 5.0, 1.0], ["glow", "Ring glow", 0.0, 10.0, 1.0], ["squash", "Rubber squash", 0.0, 6.0, 1.0],
-		["soft", "Soft bounce", 0.0, 2.0, 1.0], ["beam", "Pillar light", 0.0, 10.0, 1.0]],
+		["soft", "Soft bounce", 0.0, 2.0, 1.0], ["beam", "Pillar light", 0.0, 10.0, 1.0], ["hitw", "Hit width", 0.2, 1.0, 0.5]],
 	"ship": [["height", "Hover height", 0.2, 8.0, 1.0], ["bob", "Hover bob", 0.0, 10.0, 1.0], ["bank", "Lean in curves", 0.0, 6.0, 1.0], ["pitch", "Nose pitch", 0.0, 8.0, 1.0],
 		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0], ["steer", "Steering lag", 0.2, 8.0, 1.0],
 		["steerk", "Steering strength", 0.3, 3.0, 1.0], ["grip", "Grip", 0.2, 4.0, 1.0], ["drift", "Drift", 0.0, 4.0, 0.0],
 		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0], ["trim", "Nose trim (down +)", -1.0, 1.0, 0.0],
 		["weight", "Tassel weight", 0.1, 3.0, 1.0], ["swing", "Tassel swing", 0.1, 3.0, 1.0], ["wind", "Tassel wind (driving)", 0.0, 3.0, 1.0],
-		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0]],
+		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0],
+		["center", "Auto-center nose", 0.0, 3.0, 1.0], ["spdst", "Softer steering at speed", 0.0, 2.0, 0.5]],
 	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
@@ -6592,6 +6593,9 @@ const FX_INFO = {
 	"ship.weight": "Gewicht der Ketten und Quasten. Höher = hängen straff nach unten.",
 	"ship.swing": "Wie lange Ketten und Quasten nachschwingen. Höher = pendeln länger.",
 	"ship.wind": "Wie stark der Fahrtwind die Quasten nach hinten zieht.",
+	"ship.center": "Beim Loslassen dreht sich die Nase von selbst wieder gerade. 0 = bleibt schräg (man muss gegenlenken), höher = stellt sich schneller gerade, Säulen lassen sich leichter anvisieren.",
+	"ship.spdst": "Bei hohem Tempo und Boost lenkt das Schiff sanfter, damit es nicht zur Seite schießt. 0 = immer gleich stark, höher = bei Tempo deutlich ruhiger.",
+	"pillar.hitw": "Wie nah du an der Waffensäule vorbeifliegen musst, damit sie zählt (nur die Trefferzone, die Säule sieht gleich aus). Höher = leichter zu treffen.",
 	"ship.breeze": "Leichte Brise, die immer weht, auch im Stand. 0 = windstill.",
 	"steer.ptime": "Wie lange du halten musst, bis die Lenkung voll greift (die Drück-Kurve läuft über diese Zeit). Kürzer = schnell volle Kraft, länger = feiner dosierbar.",
 	"steer.rtime": "Wie lange die Lenkung nach dem Loslassen noch nachwirkt (die Loslass-Kurve läuft über diese Zeit). 0 = stoppt sofort.",
@@ -7278,7 +7282,7 @@ func _weapons(dt: float, racing: bool) -> void:
 	var wz = (zz - _wzp(wk)) / 35.0
 	if wz < 0.0 or not _pad_ok(_wzp(wk)):
 		wz = 9.0
-	if racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < 0.34 and wk != g.wpK and (g.wpn == "" or not g.get("mega", false)):
+	if racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < float(fx.pillar.get("hitw", 0.5)) and wk != g.wpK and (g.wpn == "" or not g.get("mega", false)):
 		g.wpK = wk
 		if g.wpn == "":
 			g.wpn = _pick_w()
@@ -8750,7 +8754,15 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	s.u += (inp - s.u) * (1.0 - exp(-dt / (0.03 * float(fx.ship.steer) if is_p else 0.08)))
 	var turn: float = T.kap(z) * s.spd
 	var SH: Dictionary = fx.ship
-	s.psi = clampf(s.psi + (s.u * (YAW_P * float(SH.steerk) if is_p else YAW_AI) + turn) * dt, -0.9, 0.9)
+	var yk = YAW_P * float(SH.steerk) if is_p else YAW_AI
+	if is_p:
+		# bei hohem Tempo sanfter lenken, sonst schießt das Schiff zur Seite
+		yk /= 1.0 + float(SH.get("spdst", 0.5)) * maxf(0.0, s.spd / maxf(1.0, base_spd) - 0.7) * 1.5
+	s.psi = clampf(s.psi + (s.u * yk + turn) * dt, -0.9, 0.9)
+	if is_p and not s.air:
+		# Auto-center: ohne Lenken dreht sich die Nase wieder in Fahrtrichtung
+		var ce = float(SH.get("center", 1.0)) * 4.0 * (1.0 - clampf(absf(s.u) * 1.6, 0.0, 1.0))
+		s.psi -= s.psi * (1.0 - exp(-dt * ce))
 	var grip = 0.8 if s.air else (9.5 if is_p else 7.0)
 	if is_p and not s.air:
 		# Grip: wie fest das Schiff in der Spur bleibt; Drift: beim Einlenken rutscht es seitlich weiter (Nase zeigt in die Kurve)
@@ -11383,7 +11395,8 @@ func _stt_build() -> void:
 		b.pressed.connect(func(): _steer_preset(kk))
 		pr.add_child(b)
 	stt.rows = []
-	for r in [["ship", "steer", "Trägheit  (weniger = reagiert schneller)", 0.1], ["ship", "steerk", "Lenkkraft  (mehr = engere Kurven)", 0.05], ["steer", "ptime", "Anlaufzeit  (kürzer = sofort volle Kraft)", 0.05]]:
+	for r in [["ship", "steer", "Trägheit  (weniger = reagiert schneller)", 0.1], ["ship", "steerk", "Lenkkraft  (mehr = engere Kurven)", 0.05], ["steer", "ptime", "Anlaufzeit  (kürzer = sofort volle Kraft)", 0.05],
+			["ship", "center", "Auto-Gerade  (mehr = Nase stellt sich schneller gerade)", 0.25], ["ship", "spdst", "Tempo-Dämpfung  (mehr = ruhiger bei Speed)", 0.1]]:
 		var row = HBoxContainer.new()
 		row.add_theme_constant_override("separation", 10)
 		vb.add_child(row)
