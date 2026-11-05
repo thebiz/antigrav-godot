@@ -5,7 +5,8 @@ extends Node3D
 # gespeichertes Replay, das nach dem Neuladen der Szene abgespielt werden soll (bleibt über reload_current_scene erhalten)
 static var pending_rp = ""
 static var pending_free = false
-static var pending_test = false   # Neustart direkt in die Lenk-Teststrecke   # nach dem FX Lab gleich wieder ins Free ride (Live-Regler vom PC)
+static var pending_test = false
+static var stt_spd = 0.5   # Tempo auf der Teststrecke (Anteil vom normalen Tempo)   # Neustart direkt in die Lenk-Teststrecke   # nach dem FX Lab gleich wieder ins Free ride (Live-Regler vom PC)
 static var restart = false
 static var bench_req = false   # Leistungstest: nach dem Neuladen direkt starten   # „Race again“: nach dem Neuladen direkt losfahren
 
@@ -6728,7 +6729,11 @@ var live_srv: TCPServer
 var live_cons = []
 var live_lbl: Label
 var live_sv = 0.0
-var live_seen = 99.0   # Sekunden seit der letzten Anfrage vom PC (die Seite meldet sich alle 2 s)
+var live_seen = 99.0
+var fx_ver = 0          # zählt jede Änderung hoch: die PC-Seite zieht dann Regler und Kurven nach
+const LIVE_WS_PORT = 8081   # Dauerverbindung (WebSocket) für die Live-Linie, ~60 Werte pro Sekunde
+var live_ws_srv: TCPServer
+var live_ws = []   # Sekunden seit der letzten Anfrage vom PC (die Seite meldet sich alle 2 s)
 
 
 # PC hat die Regler-Seite offen: am Handy alles ausblenden, nur die Szene im Vollbild
@@ -6755,6 +6760,10 @@ func _live_poll(dt: float) -> void:
 			live_srv.stop()
 			live_srv = null
 			live_cons.clear()
+		if live_ws_srv != null:
+			live_ws_srv.stop()
+			live_ws_srv = null
+			live_ws.clear()
 		if live_lbl != null:
 			live_lbl.visible = false
 		return
@@ -6763,6 +6772,7 @@ func _live_poll(dt: float) -> void:
 		if live_srv.listen(LIVE_PORT) != OK:
 			live_srv = null
 			return
+	_live_ws_poll()
 	# kleine Adresse oben links, damit man sie am PC eintippen kann
 	if live_lbl == null and hud.has("fire"):
 		live_lbl = Label.new()
@@ -6810,6 +6820,40 @@ func _live_poll(dt: float) -> void:
 			_fx_save()
 
 
+# Dauerverbindung: jedes Bild Lenkzustand an alle offenen PC-Seiten schicken
+func _live_ws_poll() -> void:
+	if live_ws_srv == null:
+		live_ws_srv = TCPServer.new()
+		if live_ws_srv.listen(LIVE_WS_PORT) != OK:
+			live_ws_srv = null
+			return
+	while live_ws_srv.is_connection_available():
+		var tcp = live_ws_srv.take_connection()
+		if tcp != null:
+			var ws = WebSocketPeer.new()
+			if ws.accept_stream(tcp) == OK:
+				live_ws.append(ws)
+	if live_ws.is_empty():
+		return
+	var g: Dictionary = ships[0] if not ships.is_empty() else {}
+	var SD: Dictionary = fx.steer
+	var msg = JSON.stringify({"ver": fx_ver, "b": steer_btn,
+		"px": clampf(btn_t / maxf(0.05, float(SD.ptime)), 0.0, 1.0) if steer_btn != 0 else -1.0,
+		"rx": clampf(rel_t / maxf(0.001, float(SD.rtime)), 0.0, 1.0) if steer_btn == 0 and rel_t < float(SD.rtime) else -1.0,
+		"s": last_steer, "u": float(g.get("u", 0.0)), "psi": float(g.get("psi", 0.0)), "t": Time.get_ticks_msec()})
+	for i in range(live_ws.size() - 1, -1, -1):
+		var ws: WebSocketPeer = live_ws[i]
+		ws.poll()
+		var st = ws.get_ready_state()
+		if st == WebSocketPeer.STATE_OPEN:
+			live_seen = 0.0
+			ws.send_text(msg)
+			while ws.get_available_packet_count() > 0:
+				ws.get_packet()
+		elif st == WebSocketPeer.STATE_CLOSED:
+			live_ws.remove_at(i)
+
+
 func _live_send(c: StreamPeerTCP, ctype: String, body: String) -> void:
 	var b = body.to_utf8_buffer()
 	var h = "HTTP/1.1 200 OK\r\nContent-Type: %s; charset=utf-8\r\nContent-Length: %d\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n" % [ctype, b.size()]
@@ -6826,7 +6870,7 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 			for it in FXS[t[0]]:
 				its.append({"k": it[0], "n": it[1], "lo": it[2], "hi": it[3], "d": it[4], "v": float(fx[t[0]][it[0]]), "i": FX_INFO.get(t[0] + "." + it[0], "")})
 			tabs.append({"g": t[0], "n": t[1], "it": its})
-		_live_send(c, "application/json", JSON.stringify(tabs))
+		_live_send(c, "application/json", JSON.stringify({"ver": fx_ver, "tabs": tabs}))
 	elif path.begins_with("/tab?") or path.begins_with("/fire?") or path.begins_with("/drive"):
 		var q2 = {}
 		var qi = path.find("?")
@@ -6868,6 +6912,7 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 						curves[k] = d[k]
 						curve_lut[k] = _curve_bake(curves[k])
 				_curves_save()
+				fx_ver += 1
 		_live_send(c, "application/json", JSON.stringify({"cur": curves, "def": CURVE_DEF}))
 	elif path.begins_with("/set?"):
 		var q = {}
@@ -6931,6 +6976,7 @@ func _live_fire(t: String, sup: bool, mega: bool) -> void:
 
 # nach einer Regleränderung (FX Lab oder PC): Wirkung sofort sichtbar machen
 func _fx_changed(t: String, key: String) -> void:
+	fx_ver += 1
 	if t == "env":
 		if key in ["city", "dens", "bh", "bw", "bd"]:
 			_city_fill()
@@ -6992,7 +7038,7 @@ main{padding:12px 16px;max-width:900px}
 let D=[],cur=0,tm={};
 const st=document.getElementById('st');
 function fmt(it,v){if(it.k.indexOf('hue')>=0)return Math.round(v*360)+'°';if(['ptime','rtime','delay'].includes(it.k))return (+v).toFixed(2)+' s';return Math.round(v*100)+' %';}
-function send(g,k,v){clearTimeout(tm[g+k]);tm[g+k]=setTimeout(()=>{fetch('/set?g='+g+'&k='+k+'&v='+v).then(()=>st.textContent='gesendet: '+k+' = '+v).catch(()=>st.textContent='keine Verbindung');},40);}
+function send(g,k,v){lastSend=Date.now();clearTimeout(tm[g+k]);tm[g+k]=setTimeout(()=>{fetch('/set?g='+g+'&k='+k+'&v='+v).then(()=>st.textContent='gesendet: '+k+' = '+v).catch(()=>st.textContent='keine Verbindung');},40);}
 let sup=false,mega=false;
 const pv=document.getElementById('pv');pv.checked=localStorage.getItem('pv')=='1';
 pv.onchange=()=>{localStorage.setItem('pv',pv.checked?'1':'0');if(pv.checked)fetch('/tab?g='+D[cur].g);};
@@ -7008,7 +7054,7 @@ function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D
  if(T.g=='steer'){const pr=document.createElement('div');pr.id='pre';const lb=document.createElement('span');lb.textContent='Voreinstellung zum Vergleichen:';lb.style.color='#9fb0cc';pr.append(lb);
   ['Ruhig','Mittel','Scharf'].forEach((n,k)=>{const b=document.createElement('button');b.textContent=n;b.onclick=()=>fetch('/preset?n='+k).then(()=>reloadAll(n));pr.append(b);});
   const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t='Setzt Lenkkurve, Anlaufzeit, Ausklingzeit und im Reiter Ship auch Steering lag, Steering strength und Grip auf einen festen Satz. Fahr mit jeder Voreinstellung eine Runde und sag, welche am nächsten dran ist.';pr.append(ii);m.append(pr);
-  ssT=setInterval(()=>fetch('/sst').then(r=>r.json()).then(d=>{SS=d;EDS.forEach(f=>f());}).catch(()=>{}),120);}
+  ssT=setInterval(()=>{if(SS&&SS.t&&Date.now()-lastWs<1000)return;fetch('/sst').then(r=>r.json()).then(d=>{SS=d;EDS.forEach(f=>f());}).catch(()=>{});},150);}
  T.it.forEach(it=>{const r=document.createElement('div');r.className='r';
   const l=document.createElement('div');l.textContent=it.n;
   if(it.i){const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t=it.i;ii.onclick=e=>{ii.classList.toggle('show');};l.append(ii);}const s=document.createElement('input');s.type='range';
@@ -7020,8 +7066,8 @@ function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D
   r.append(l,s,v,z);m.append(r);});
  if(T.g=='steer')curveUI(m);}
 let CV=null,CD=null;
-function reloadAll(n){fetch('/fx').then(r=>r.json()).then(d=>{D=d;fetch('/curve').then(r=>r.json()).then(c=>{CV=c.cur;CD=c.def;show(cur);st.textContent='Voreinstellung: '+n;});});}
-function sendCurve(){clearTimeout(tm.cv);tm.cv=setTimeout(()=>fetch('/curve?d='+encodeURIComponent(JSON.stringify(CV))).then(()=>st.textContent='Lenkkurve gesendet').catch(()=>st.textContent='keine Verbindung'),60);}
+function reloadAll(n){fetch('/fx').then(r=>r.json()).then(dd=>{D=dd.tabs;VER=dd.ver;fetch('/curve').then(r=>r.json()).then(c=>{CV=c.cur;CD=c.def;show(cur);st.textContent='Voreinstellung: '+n;});});}
+function sendCurve(){lastSend=Date.now();clearTimeout(tm.cv);tm.cv=setTimeout(()=>fetch('/curve?d='+encodeURIComponent(JSON.stringify(CV))).then(()=>st.textContent='Lenkkurve gesendet').catch(()=>st.textContent='keine Verbindung'),60);}
 function curveUI(m){
  if(!CV){fetch('/curve').then(r=>r.json()).then(d=>{CV=d.cur;CD=d.def;curveUI(m);});return;}
  cvEd(m,'press','Lenkung beim Drücken','Haltedauer (bis „Press: ramp time“)','Lenkkraft');
@@ -7061,14 +7107,14 @@ function cvEd(m,name,title,xl,yl){
    if(i<p.length-1&&Math.hypot(X(a[0]+a[4])-px,Y(a[1]+a[5])-py)<9)return [i,'out'];}
   for(let i=0;i<p.length;i++){const a=p[i];if(Math.hypot(X(a[0])-px,Y(a[1])-py)<11)return [i,'a'];}return null;}
  const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
- c.onpointerdown=e=>{const [px,py]=pos(e);const h=hit(px,py);if(h){drag=h;c.setPointerCapture(e.pointerId);}};
+ c.onpointerdown=e=>{const [px,py]=pos(e);const h=hit(px,py);if(h){drag=h;EDS.dragging=true;c.setPointerCapture(e.pointerId);}};
  c.onpointermove=e=>{if(!drag)return;const [px,py]=pos(e);const p=P(),i=drag[0],a=p[i];const x=IX(px),y=IY(py);
   if(drag[1]=='a'){if(i>0&&i<p.length-1)a[0]=cl(x,p[i-1][0]+0.01,p[i+1][0]-0.01);a[1]=cl(y,0,1);
    a[2]=Math.max(-a[0],a[2]);a[4]=Math.min(1-a[0],a[4]);a[3]=cl(a[1]+a[3],-0.08,1.08)-a[1];a[5]=cl(a[1]+a[5],-0.08,1.08)-a[1];}
   else if(drag[1]=='in'){a[2]=Math.min(0,Math.max(-a[0],x-a[0]));a[3]=cl(y,-0.08,1.08)-a[1];}
   else{a[4]=Math.max(0,Math.min(1-a[0],x-a[0]));a[5]=cl(y,-0.08,1.08)-a[1];}
   draw();sendCurve();};
- c.onpointerup=()=>{drag=null;};
+ c.onpointerup=()=>{drag=null;EDS.dragging=false;};
  c.ondblclick=e=>{const [px,py]=pos(e);const h=hit(px,py);const p=P();
   if(h&&h[1]=='a'){if(h[0]>0&&h[0]<p.length-1){p.splice(h[0],1);draw();sendCurve();}return;}
   const x=cl(IX(px),0.02,0.98);let k=1;while(k<p.length&&p[k][0]<x)k++;
@@ -7077,7 +7123,16 @@ function cvEd(m,name,title,xl,yl){
   p.splice(k,0,[x,y,-hl,-hl*sl,hl,hl*sl]);draw();sendCurve();};
  rb.onclick=()=>{CV[name]=JSON.parse(JSON.stringify(CD[name]));draw();sendCurve();};
  draw();}
-fetch('/fx').then(r=>r.json()).then(d=>{D=d;const t=document.getElementById('tabs');
+let VER=-1,lastSend=0,lastWs=0;
+function syncFrom(ver){if(ver==VER||Date.now()-lastSend<800)return;VER=ver;
+ fetch('/fx').then(r=>r.json()).then(d=>{const T=d.tabs;T.forEach((t,i)=>{if(D[i])D[i].it=t.it;});
+  document.querySelectorAll('#m .r').forEach((r,j)=>{const it=D[cur].it[j];if(!it)return;const s=r.querySelector('input');if(s&&document.activeElement!==s){s.value=it.v;r.querySelector('.v').textContent=fmt(it,it.v);}});
+  if(D[cur].g=='steer')fetch('/curve').then(r=>r.json()).then(c=>{if(!EDS.dragging){CV=c.cur;EDS.forEach(f=>f());}});});}
+function wsConnect(){try{const ws=new WebSocket('ws://'+location.hostname+':8081');
+ ws.onmessage=e=>{lastWs=Date.now();const d=JSON.parse(e.data);SS=d;EDS.forEach(f=>f());syncFrom(d.ver);};
+ ws.onclose=()=>setTimeout(wsConnect,1000);ws.onerror=()=>{};}catch(e){setTimeout(wsConnect,2000);}}
+wsConnect();
+fetch('/fx').then(r=>r.json()).then(dd=>{const d=dd.tabs;VER=dd.ver;D=d;const t=document.getElementById('tabs');
  d.forEach((T,i)=>{const b=document.createElement('button');b.textContent=T.n;b.onclick=()=>show(i);t.append(b);});
  const ship=d.findIndex(T=>T.g=='ship');show(ship>=0?ship:0);st.textContent='verbunden – Änderungen wirken sofort';})
  .catch(()=>st.textContent='keine Verbindung zum Spiel');
@@ -8785,6 +8840,8 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	if s.slowT > 0.0:
 		s.slowT -= dt
 	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow * (0.75 if s.slowT > 0.0 else 1.0) if racing or state == "done" else 0.0
+	if T.S and is_p:
+		s.spd *= stt_spd
 	if is_p and not fin.is_empty() and fin.get("fly", false):
 		# Siegerrunde: sanft ausrollen und schwebend stehen bleiben (für die Kamerafahrt)
 		s.ro = float(s.get("ro", 1.0)) * exp(-dt * 1.4)
@@ -11285,20 +11342,20 @@ var stt = {}
 func _stt_gates() -> Array:
 	var out = []
 	var sd = 1.0
-	for k in range(11):
-		out.append([60.0 + k * 20.0, 1.1 * sd, 0.6, 0])
+	for k in range(6):
+		out.append([60.0 + k * 38.0, 1.0 * sd, 0.85, 0])
 		sd = -sd
-	for q in [[300, -1.5], [322, 1.5], [337, 1.5], [352, 1.5], [374, -1.5], [389, -1.5], [404, -1.5], [426, 1.5], [441, 1.5]]:
-		out.append([float(q[0]), float(q[1]), 0.55, 1])
+	for q in [[300, -1.4], [345, 1.4], [375, 1.4], [420, -1.4], [450, -1.4]]:
+		out.append([float(q[0]), float(q[1]), 0.8, 1])
 	var rng = RandomNumberGenerator.new()
 	rng.seed = 37
 	var prev = 0.0
-	for k in range(12):
-		var lat = rng.randf_range(-1.7, 1.7)
+	for k in range(7):
+		var lat = rng.randf_range(-1.6, 1.6)
 		if absf(lat - prev) < 0.7:
-			lat = clampf(-prev * 0.8, -1.7, 1.7)
+			lat = clampf(-prev * 0.8, -1.6, 1.6)
 		prev = lat
-		out.append([490.0 + k * 18.0, lat, 0.32, 2])
+		out.append([500.0 + k * 30.0, lat, 0.5, 2])
 	return out
 
 
@@ -11384,6 +11441,27 @@ func _stt_build() -> void:
 	var vb = VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 12)
 	pnl.add_child(vb)
+	var sr = HBoxContainer.new()
+	sr.add_theme_constant_override("separation", 10)
+	vb.add_child(sr)
+	var sl = Label.new()
+	sl.text = "Tempo"
+	sl.add_theme_font_size_override("font_size", 24)
+	sr.add_child(sl)
+	stt.sb = []
+	for v in [0.25, 0.5, 0.75, 1.0]:
+		var b2 = _btn("%d %%" % int(v * 100.0))
+		b2.add_theme_font_size_override("font_size", 24)
+		b2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b2.toggle_mode = true
+		b2.button_pressed = absf(stt_spd - v) < 0.01
+		var vv = v
+		b2.pressed.connect(func():
+			stt_spd = vv
+			for e in stt.sb:
+				(e[0] as Button).set_pressed_no_signal(absf(float(e[1]) - vv) < 0.01))
+		sr.add_child(b2)
+		stt.sb.append([b2, v])
 	var pr = HBoxContainer.new()
 	pr.add_theme_constant_override("separation", 10)
 	vb.add_child(pr)
@@ -11446,6 +11524,7 @@ func _stt_vals() -> void:
 
 
 func _steer_preset(i: int) -> void:
+	fx_ver += 1
 	var pr: Array = STEER_PRE[clampi(i, 0, STEER_PRE.size() - 1)]
 	fx.steer.ptime = pr[1]
 	fx.steer.rtime = pr[2]
@@ -11512,7 +11591,7 @@ func _stt_update(dt: float) -> void:
 		if e.fl > 0.0:
 			e.fl -= dt
 			(e.m as StandardMaterial3D).albedo_color = (Color(0.3, 1.0, 0.4) if e.ok else Color(1.0, 0.15, 0.1)) if e.fl > 0.0 else STT_COL[gd[3]]
-	var sec = 0 if zl < 280.0 else (1 if zl < 470.0 else 2)
+	var sec = 0 if zl < 280.0 else (1 if zl < 480.0 else 2)
 	(stt.lb as Label).text = "%s   ·   %d / %d" % [STT_NAME[sec], stt.res[sec][0], stt.res[sec][1]]
 	(stt.lb as Label).add_theme_color_override("font_color", STT_COL[sec])
 	(stt.ind as Control).queue_redraw()
