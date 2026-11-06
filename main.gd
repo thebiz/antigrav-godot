@@ -4782,6 +4782,10 @@ func _input(ev: InputEvent) -> void:
 	if state == "replay" and vx.is_empty() and not rp.is_empty():
 		_rp_input(ev)
 	if ev is InputEventScreenTouch:
+		if ev.pressed and state == "done" and hud.board.visible and (hud.board as Control).get_global_rect().grow(30).has_point(ev.position):
+			# Tafel antippen: zwischen Ergebnis und Schaden umschalten, danach kein automatischer Wechsel mehr
+			var cur_dmg = fmod(board_t, 9.0) > 5.0 if board_man < 0 else board_man == 1
+			board_man = 0 if cur_dmg else 1
 		if ev.pressed:
 			if state == "kill":
 				_kc_end()
@@ -8639,6 +8643,7 @@ func _mine_warn(dt: float, racing: bool) -> void:
 
 # Ergebnistafel nach dem Rennen
 var board_t = 0.0
+var board_man = -1   # -1 = wechselt von selbst; 0/1 = von Hand gewählt (Ergebnis/Schaden), bleibt dann stehen
 
 
 func _board_update(dt: float) -> void:
@@ -8650,9 +8655,10 @@ func _board_update(dt: float) -> void:
 		hud.fire.visible = false
 	if not show:
 		board_t = 0.0
+		board_man = -1
 		return
 	board_t += dt
-	var dmg_mode = fmod(board_t, 9.0) > 5.0
+	var dmg_mode = fmod(board_t, 9.0) > 5.0 if board_man < 0 else board_man == 1
 	var list = ships.duplicate()
 	if dmg_mode:
 		hud.boardt.text = "DAMAGE DEALT"
