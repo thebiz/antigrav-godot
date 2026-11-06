@@ -51,7 +51,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 1}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -3788,6 +3788,13 @@ func _hud() -> void:
 	gh.draw.connect(func(): _gh_draw(gh))
 	hud.gh = gh
 	hud.gs = 0.0   # geglättetes Tempo für die Anzeige
+	# Gothic-Altar-HUD (Rahmen von John): oben Platz/Runde/Zeit, unten Tempo, Waffenrad mit FIRE, Energie
+	var gac = Control.new()
+	gac.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gac.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cl.add_child(gac)
+	gac.draw.connect(func(): _ga_draw(gac))
+	hud.ga = gac
 	# Waffenknopf: runder Knopf, geladen = orange mit drehendem, pulsierendem Ring
 	var ring = Control.new()
 	ring.anchor_left = 0.5
@@ -3819,7 +3826,9 @@ func _hud() -> void:
 		var c = ring.size * 0.5
 		var pu = 0.5 + 0.5 * sin(t * 5.0)
 		var oc: Color = hud.get("wc", Color(1.0, 0.55, 0.15))
-		if int(cfg.get("hud", 1)) == 1:
+		if int(cfg.get("hud", 2)) == 2:
+			return
+		if int(cfg.get("hud", 2)) == 1:
 			_gh_medal(ring, c, t, oc)
 			_wicon(ring, c + Vector2(0, -42), 30.0, str(ships[0].wpn), Color(1, 1, 1, 0.95))
 			return
@@ -4451,12 +4460,13 @@ func _menu() -> void:
 		_save_cfg()
 		bcm.text = "Comic intro: " + ("On" if int(cfg.comic) == 1 else "Off"))
 	sp.add_child(bcm)
-	var bhd = _btn("HUD style: " + ("Cyber Gothic" if int(cfg.get("hud", 1)) == 1 else "Classic"))
+	var HN = ["Classic", "Dragon gauge", "Gothic altar"]
+	var bhd = _btn("HUD style: " + HN[clampi(int(cfg.get("hud", 2)), 0, 2)])
 	bhd.add_theme_font_size_override("font_size", 30)
 	bhd.pressed.connect(func():
-		cfg.hud = 1 - int(cfg.get("hud", 1))
+		cfg.hud = (int(cfg.get("hud", 2)) + 1) % 3
 		_save_cfg()
-		bhd.text = "HUD style: " + ("Cyber Gothic" if int(cfg.hud) == 1 else "Classic"))
+		bhd.text = "HUD style: " + HN[int(cfg.hud)])
 	sp.add_child(bhd)
 	var blv = _btn("Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off"))
 	blv.add_theme_font_size_override("font_size", 30)
@@ -7420,12 +7430,17 @@ func _weapons(dt: float, racing: bool) -> void:
 			var bar: MeshInstance3D = (o.node as Node3D).get_meta("bar")
 			bar.set_instance_shader_parameter("fill", o.en)
 			bar.visible = state == "race" and o.z - g.z > 1.5 and o.z - g.z < 40.0
-	var goth = int(cfg.get("hud", 1)) == 1
-	if hud.en_bg.visible == goth:
-		hud.en_bg.visible = not goth
-		hud.el.visible = not goth
-		hud.pg.position.y = 112
+	var hs = int(cfg.get("hud", 2))
+	var goth = hs == 1
+	var alt = hs == 2
+	if hud.en_bg.visible == (hs != 0):
+		hud.en_bg.visible = hs == 0
+		hud.el.visible = hs == 0
+	hud.pg.visible = not alt
 	hud.gh.visible = goth
+	hud.ga.visible = alt
+	if alt:
+		_ga_frame(g, dt)
 	if goth:
 		hud.gs = lerpf(float(hud.gs), g.spd, 1.0 - exp(-get_process_delta_time() / 0.15))
 		hud.gh.queue_redraw()
@@ -11639,3 +11654,182 @@ func _stt_draw_ind(c: Control) -> void:
 	var tx = cx + hw + 12.0
 	c.draw_string_outline(font, Vector2(tx, cy + 8), s, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, 6, Color(0, 0, 0, 0.8))
 	c.draw_string(font, Vector2(tx, cy + 8), s, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1, 0.85))
+
+
+# ---------------------------------------------------------------- Gothic-Altar-HUD
+# Der Rahmen ist ein Bild (art/hud/frame.png, 941×1672): oberer Teil oben angeheftet, unterer Teil unten.
+# Alle Koordinaten unten sind Bildpunkte im Rahmenbild; gezeichnet wird mit dem Maßstab Bildschirmbreite/941.
+const GA_W = 941.0
+const GA_H = 1672.0
+var ga_tex: Texture2D = null
+var ga_font: FontVariation = null
+var ga_rl = {}        # Roulette: {"t", "seq", "fin"}
+var ga_last = ""
+
+
+func _ga_frame(g: Dictionary, dt: float) -> void:
+	# alte Anzeigen weg, die der Rahmen ersetzt
+	hud.plbox.visible = false
+	hud.ring.visible = false
+	if state in ["race", "count", "intro"]:
+		hud.top.modulate.a = 0.0
+	else:
+		hud.top.modulate.a = 1.0
+	# FIRE-Trefferfläche: das ganze Waffenrad samt FIRE-Knopf
+	var k = get_viewport().get_visible_rect().size.x / GA_W
+	var f: Label = hud.fire
+	f.modulate.a = 0.0
+	f.offset_left = -150.0 * k
+	f.offset_right = 150.0 * k
+	f.offset_top = -(GA_H - 1250.0) * k
+	f.offset_bottom = -(GA_H - 1585.0) * k
+	# Roulette starten, wenn eine neue Waffe eingesammelt wurde
+	var w: String = g.wpn
+	if w != ga_last:
+		if w != "" and state == "race":
+			var seq = []
+			for i in range(13):
+				seq.append(WP[randi() % WP.size()][0])
+			seq.append(w)
+			ga_rl = {"t": 0.0, "seq": seq, "i": -1}
+		ga_last = w
+	if not ga_rl.is_empty():
+		ga_rl.t += dt
+		var n: int = ga_rl.seq.size()
+		var u = clampf(ga_rl.t / 1.15, 0.0, 1.0)
+		var idx = mini(n - 1, int(floor((1.0 - pow(1.0 - u, 2.6)) * (n - 1) + 0.0001)))
+		if idx != ga_rl.i:
+			ga_rl.i = idx
+			_snd("beep", -16.0, 2.2 if idx < n - 1 else 1.4)
+		if ga_rl.t > 1.6:
+			ga_rl = {}
+	hud.gs = lerpf(float(hud.gs), g.spd, 1.0 - exp(-dt / 0.15))
+	(hud.ga as Control).queue_redraw()
+
+
+func _ga_txt(c: Control, p: Vector2, s: String, sz: int, col: Color, al := 0, ol := 0) -> void:
+	# al: 0 links, 1 Mitte, 2 rechts (an p ausgerichtet)
+	if ga_font == null:
+		ga_font = FontVariation.new()
+		ga_font.base_font = c.get_theme_default_font()
+		ga_font.variation_embolden = 0.9
+		ga_font.variation_transform = Transform2D(Vector2(1, 0), Vector2(-0.22, 1), Vector2.ZERO)
+	var w = ga_font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x
+	var q = p - Vector2(w * (0.5 if al == 1 else (1.0 if al == 2 else 0.0)), 0.0)
+	if ol > 0:
+		c.draw_string_outline(ga_font, q, s, HORIZONTAL_ALIGNMENT_LEFT, -1, sz, ol, Color(0, 0, 0, 0.9))
+	c.draw_string(ga_font, q, s, HORIZONTAL_ALIGNMENT_LEFT, -1, sz, col)
+
+
+func _ga_wsel(i: int) -> String:
+	return WP[posmod(i, WP.size())][0]
+
+
+func _ga_widx(w: String) -> int:
+	for i in range(WP.size()):
+		if WP[i][0] == w:
+			return i
+	return 0
+
+
+func _ga_draw(c: Control) -> void:
+	if ships.is_empty():
+		return
+	if ga_tex == null:
+		ga_tex = load("res://art/hud/frame.png")
+	var g: Dictionary = ships[0]
+	var vp = c.size
+	var k = vp.x / GA_W
+	var t = Time.get_ticks_msec() / 1000.0
+	var OR2 = Color(1.0, 0.55, 0.15)
+	var TXT = Color(1.0, 0.82, 0.62)
+	# ---- oben
+	c.draw_set_transform(Vector2.ZERO, 0.0, Vector2(k, k))
+	c.draw_texture_rect_region(ga_tex, Rect2(0, 0, GA_W, 420), Rect2(0, 0, GA_W, 420))
+	_ga_txt(c, Vector2(72, 150), "POS", 22, OR2)
+	if free_ride:
+		_ga_txt(c, Vector2(72, 200), "FREE", 46, TXT, 0, 6)
+	else:
+		var pl = str(hud.pl.text).substr(0, 1)
+		_ga_txt(c, Vector2(150, 202), pl if pl != "" else "-", 62, Color(1, 1, 1), 2, 6)
+		_ga_txt(c, Vector2(156, 202), str(hud.pln.text), 34, TXT, 0, 5)
+	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, 99)
+	_ga_txt(c, Vector2(668, 150), "LAP", 22, OR2)
+	_ga_txt(c, Vector2(872, 160), ("%d" % lap) if free_ride else ("%d/%d" % [mini(lap, T.LAPS), T.LAPS]), 44, Color(1, 1, 1), 2, 6)
+	_ga_txt(c, Vector2(646, 226), "TIME", 20, OR2)
+	_ga_txt(c, Vector2(868, 234), _fmt(race_t), 32, TXT, 2, 5)
+	# ---- unten
+	var oy = vp.y - GA_H * k
+	c.draw_set_transform(Vector2(0, oy), 0.0, Vector2(k, k))
+	c.draw_texture_rect_region(ga_tex, Rect2(0, 1100, GA_W, GA_H - 1100), Rect2(0, 1100, GA_W, GA_H - 1100))
+	# Tempo
+	var bo = clampf(g.boost, 0.0, 1.0)
+	var sc = Color(1.0, 0.3, 0.2) if bo > 0.02 else Color(1, 1, 1)
+	_ga_txt(c, Vector2(62, 1497), "BOOST" if bo > 0.02 else "SPEED", 20, Color(1.0, 0.3, 0.2) if bo > 0.02 else OR2)
+	_ga_txt(c, Vector2(232, 1540), str(int(round(float(hud.gs) * 12.0))), 52, sc, 2, 6)
+	_ga_txt(c, Vector2(240, 1538), "KM/H", 16, TXT)
+	# Energie: zehn schräge Segmente
+	var en = clampf(g.en, 0.0, 1.0)
+	var low = en <= 0.25 and not g.out
+	var ec = OR2 if en > 0.5 else (Color(1.0, 0.85, 0.25) if en > 0.25 else Color(1.0, 0.2, 0.15))
+	_ga_txt(c, Vector2(646, 1497), "ENERGY", 20, ec)
+	_ga_txt(c, Vector2(880, 1497), "%d %%" % int(round(en * 100.0)), 20, TXT, 2)
+	for i in range(10):
+		var x0 = 648.0 + i * 24.0
+		var fl = clampf(en * 10.0 - i, 0.0, 1.0)
+		var col = Color(0.18, 0.1, 0.06, 0.9).lerp(ec, fl)
+		if low and fl > 0.0 and fmod(t * 7.0 + i * 0.37, 1.0) > 0.6:
+			col.a *= 0.4
+		c.draw_colored_polygon(PackedVector2Array([Vector2(x0 + 9, 1506), Vector2(x0 + 29, 1506), Vector2(x0 + 20, 1534), Vector2(x0, 1534)]), col)
+	# Waffenrad: Mitte = deine Waffe, links/rechts die Nachbarn; beim Einsammeln rattert es durch (Roulette)
+	var w: String = g.wpn
+	var cw = w
+	var spin = not ga_rl.is_empty() and int(ga_rl.i) < int(ga_rl.seq.size()) - 1
+	if not ga_rl.is_empty():
+		cw = ga_rl.seq[maxi(0, int(ga_rl.i))]
+	var ci = _ga_widx(cw)
+	var mega = g.get("mega", false)
+	var sup = g.get("sup", false)
+	var gc = Color(1.0, 0.15, 0.2) if mega else (Color(1.0, 0.8, 0.25) if sup else WC.get(cw, OR2))
+	if cw != "":
+		var lw = _ga_wsel(ci - 1)
+		var rw = _ga_wsel(ci + 1)
+		_wicon(c, Vector2(366, 1352), 26.0, lw, Color(1, 1, 1, 0.3 if not spin else 0.55))
+		_wicon(c, Vector2(574, 1352), 26.0, rw, Color(1, 1, 1, 0.3 if not spin else 0.55))
+		var bounce = 0.0
+		if not ga_rl.is_empty():
+			var since = float(ga_rl.t) - 1.15
+			if since > 0.0:
+				bounce = sin(since * 22.0) * exp(-since * 7.0) * 6.0
+		var pu = 0.5 + 0.5 * sin(t * 5.0)
+		if not spin:
+			# Glühen hinter dem mittleren Feld
+			var tr = PackedVector2Array([Vector2(394, 1298), Vector2(548, 1298), Vector2(502, 1430), Vector2(440, 1430), Vector2(394, 1298)])
+			c.draw_polyline(tr, Color(gc, 0.35 + 0.4 * pu), 9.0, true)
+			c.draw_polyline(tr, Color(gc, 0.9), 3.0, true)
+		_wicon(c, Vector2(471, 1340 + bounce), 40.0, cw, Color(1, 1, 1, 0.95) if not spin else Color(1, 1, 1, 0.75))
+		var nm = str(WN.get(cw, "")).replace("FORCE FIELD", "FIELD")
+		_ga_txt(c, Vector2(471, 1405 + bounce), nm, 22 if nm.length() < 7 else 18, Color(gc, 1.0) if not spin else TXT, 1, 5)
+		if (sup or mega) and not spin:
+			_ga_txt(c, Vector2(471, 1290), "MEGA" if mega else "SUPER", 18, gc, 1, 5)
+	elif g.auto > 0.0:
+		_wicon(c, Vector2(471, 1340), 40.0, "auto", Color(0.5, 0.95, 1.0, 0.9))
+		_ga_txt(c, Vector2(471, 1405), "AUTO %.1f" % g.auto, 20, Color(0.5, 0.95, 1.0), 1, 5)
+	else:
+		_ga_txt(c, Vector2(471, 1372), "—", 30, Color(1, 1, 1, 0.25), 1)
+	# Autopilot-Restzeit als Bogen ums Rad
+	if g.auto > 0.0 and state == "race":
+		c.draw_arc(Vector2(467, 1400), 152.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(g.auto / 5.0, 0.0, 1.0), 64, Color(0.4, 0.95, 1.0, 0.9), 6.0, true)
+	# FIRE-Knopf: Schwert und Schrift, glüht, wenn eine Waffe bereit ist
+	var armed = w != "" and not spin
+	var fp = Vector2(470, 1532)
+	if armed:
+		var pf = 0.5 + 0.5 * sin(t * 6.0)
+		c.draw_circle(fp, 44.0, Color(gc, 0.16 + 0.14 * pf))
+		c.draw_arc(fp, 47.0, 0.0, TAU, 40, Color(gc, 0.6 + 0.4 * pf), 4.0, true)
+	var sw = Color(1, 1, 1, 0.95) if armed else Color(1, 1, 1, 0.3)
+	c.draw_line(fp + Vector2(0, -32), fp + Vector2(0, 2), sw, 4.0, true)
+	c.draw_line(fp + Vector2(-11, -20), fp + Vector2(11, -20), sw, 4.0, true)
+	c.draw_colored_polygon(PackedVector2Array([fp + Vector2(-4, -32), fp + Vector2(0, -40), fp + Vector2(4, -32)]), sw)
+	_ga_txt(c, fp + Vector2(0, 30), "FIRE", 20, sw, 1, 4)
+	c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
