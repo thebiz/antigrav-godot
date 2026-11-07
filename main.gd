@@ -51,7 +51,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -692,7 +692,8 @@ const FXS = {
 		["weight", "Tassel weight", 0.1, 3.0, 1.0], ["swing", "Tassel swing", 0.1, 3.0, 1.0], ["wind", "Tassel wind (driving)", 0.0, 3.0, 1.0],
 		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0],
 		["center", "Auto-center nose", 0.0, 3.0, 1.0], ["spdst", "Softer steering at speed", 0.0, 2.0, 0.5]],
-	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0]],
+	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0],
+		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -4468,6 +4469,13 @@ func _menu() -> void:
 		_save_cfg()
 		bhd.text = "HUD style: " + HN[int(cfg.hud)])
 	sp.add_child(bhd)
+	var bct = _btn("Steering: " + ("Swipe (double-tap = fire)" if int(cfg.get("ctrl", 1)) == 1 else "Tap left / right"))
+	bct.add_theme_font_size_override("font_size", 30)
+	bct.pressed.connect(func():
+		cfg.ctrl = 1 - int(cfg.get("ctrl", 1))
+		_save_cfg()
+		bct.text = "Steering: " + ("Swipe (double-tap = fire)" if int(cfg.ctrl) == 1 else "Tap left / right"))
+	sp.add_child(bct)
 	var blv = _btn("Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off"))
 	blv.add_theme_font_size_override("font_size", 30)
 	blv.pressed.connect(func():
@@ -4806,11 +4814,15 @@ func _input(ev: InputEvent) -> void:
 			if not stt.is_empty() and _stt_hit(ev.position):
 				return
 			touches[ev.index] = ev.position.x
+			_sw_down(ev.index, ev.position)
 		else:
+			if touches.has(ev.index):
+				_sw_up(ev.index, ev.position)
 			touches.erase(ev.index)
 	elif ev is InputEventScreenDrag:
 		if touches.has(ev.index):
 			touches[ev.index] = ev.position.x
+			_sw_drag(ev.index, ev.position, ev.velocity)
 	elif ev is InputEventKey and ev.pressed and ev.keycode == KEY_SPACE:
 		fire_req = true
 
@@ -6621,6 +6633,10 @@ const FX_INFO = {
 	"ship.breeze": "Leichte Brise, die immer weht, auch im Stand. 0 = windstill.",
 	"steer.ptime": "Wie lange du halten musst, bis die Lenkung voll greift (die Drück-Kurve läuft über diese Zeit). Kürzer = schnell volle Kraft, länger = feiner dosierbar.",
 	"steer.rtime": "Wie lange die Lenkung nach dem Loslassen noch nachwirkt (die Loslass-Kurve läuft über diese Zeit). 0 = stoppt sofort.",
+	"steer.swrange": "Wisch-Lenkung: wie weit (Anteil der Bildschirmbreite) du den Daumen schieben musst, bis voll gelenkt wird. Kleiner = schon kurze Wischer lenken stark, größer = feiner dosierbar.",
+	"steer.velk": "Wisch-Lenkung: wie viel extra gelenkt wird, wenn du schnell wischst (Form über die Kurve „Wischtempo“). 0 = nur der Wischweg zählt.",
+	"steer.hold": "Wisch-Lenkung: wie lange die Lenkung festgehalten wird, wenn du den Daumen kurz abhebst (z. B. zum Doppeltippen). Setzt du in der Zeit wieder auf, lenkst du nahtlos weiter.",
+	"steer.dtap": "Wie schnell zwei Tipper aufeinander folgen müssen, damit die Waffe feuert. Größer = leichter auszulösen, aber eher aus Versehen.",
 	"steer.delay": "Verzögerung zwischen Tippen und Lenken. Normalerweise 0 lassen, höher fühlt sich schwammig an.",
 	"env.city": "Hochhäuser neben der Strecke an oder aus.",
 	"env.dens": "Wie viele Gebäude stehen. Weniger = schneller auf dem Handy.",
@@ -6680,7 +6696,9 @@ const STEER_PRE = [
 const CURVE_PATH = "user://curves.json"
 const CURVE_DEF = {
 	"press": [[0.0, 0.55, 0.0, 0.0, 0.4, 0.0], [1.0, 1.0, -0.3, -0.25, 0.0, 0.0]],
-	"release": [[0.0, 1.0, 0.0, 0.0, 0.35, 0.0], [1.0, 0.0, -0.35, 0.0, 0.0, 0.0]]}
+	"release": [[0.0, 1.0, 0.0, 0.0, 0.35, 0.0], [1.0, 0.0, -0.35, 0.0, 0.0, 0.0]],
+	"swipe": [[0.0, 0.0, 0.0, 0.0, 0.35, 0.12], [1.0, 1.0, -0.35, -0.05, 0.0, 0.0]],
+	"swvel": [[0.0, 0.0, 0.0, 0.0, 0.4, 0.0], [1.0, 1.0, -0.3, -0.3, 0.0, 0.0]]}
 var curves = {}
 var curve_lut = {}
 
@@ -6690,7 +6708,7 @@ func _curves_load() -> void:
 	if FileAccess.file_exists(CURVE_PATH):
 		var d = JSON.parse_string(FileAccess.get_file_as_string(CURVE_PATH))
 		if d is Dictionary:
-			for k in ["press", "release"]:
+			for k in ["press", "release", "swipe", "swvel"]:
 				if d.get(k) is Array and (d[k] as Array).size() >= 2:
 					curves[k] = d[k]
 	for k in curves:
@@ -6858,7 +6876,8 @@ func _live_ws_poll() -> void:
 		return
 	var g: Dictionary = ships[0] if not ships.is_empty() else {}
 	var SD: Dictionary = fx.steer
-	var msg = JSON.stringify({"ver": fx_ver, "b": steer_btn,
+	var swc = int(cfg.get("ctrl", 1)) == 1
+	var msg = JSON.stringify({"ver": fx_ver, "b": steer_btn, "c": 1 if swc else 0, "sx": float(sw.m) if swc and sw.idx >= 0 else -1.0, "vx": float(sw.vm) if swc and sw.idx >= 0 else -1.0,
 		"px": clampf(btn_t / maxf(0.05, float(SD.ptime)), 0.0, 1.0) if steer_btn != 0 else -1.0,
 		"rx": clampf(rel_t / maxf(0.001, float(SD.rtime)), 0.0, 1.0) if steer_btn == 0 and rel_t < float(SD.rtime) else -1.0,
 		"s": last_steer, "u": float(g.get("u", 0.0)), "psi": float(g.get("psi", 0.0)), "t": Time.get_ticks_msec()})
@@ -6928,13 +6947,13 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 		if qi2 >= 0:
 			var d = JSON.parse_string(path.substr(qi2 + 3).uri_decode())
 			if d is Dictionary:
-				for k in ["press", "release"]:
+				for k in ["press", "release", "swipe", "swvel"]:
 					if d.get(k) is Array and (d[k] as Array).size() >= 2:
 						curves[k] = d[k]
 						curve_lut[k] = _curve_bake(curves[k])
 				_curves_save()
 				fx_ver += 1
-		_live_send(c, "application/json", JSON.stringify({"cur": curves, "def": CURVE_DEF}))
+		_live_send(c, "application/json", JSON.stringify({"cur": curves, "def": CURVE_DEF, "ctrl": int(cfg.get("ctrl", 1))}))
 	elif path.begins_with("/set?"):
 		var q = {}
 		for kv in path.substr(5).split("&"):
@@ -7091,8 +7110,10 @@ function reloadAll(n){fetch('/fx').then(r=>r.json()).then(dd=>{D=dd.tabs;VER=dd.
 function sendCurve(){lastSend=Date.now();clearTimeout(tm.cv);tm.cv=setTimeout(()=>fetch('/curve?d='+encodeURIComponent(JSON.stringify(CV))).then(()=>st.textContent='Lenkkurve gesendet').catch(()=>st.textContent='keine Verbindung'),60);}
 function curveUI(m){
  if(!CV){fetch('/curve').then(r=>r.json()).then(d=>{CV=d.cur;CD=d.def;curveUI(m);});return;}
- cvEd(m,'press','Lenkung beim Drücken','Haltedauer (bis „Press: ramp time“)','Lenkkraft');
- cvEd(m,'release','Lenkung nach dem Loslassen','Zeit seit dem Loslassen (bis „Release: fade time“)','Restlenkung');}
+ cvEd(m,'swipe','Wisch-Lenkung: Wischweg','Wischweg (bis „Swipe: full-lock distance“)','Lenkkraft');
+ cvEd(m,'swvel','Wisch-Lenkung: Wischtempo','langsam … schnell gewischt','Extra-Lenkung (× „Swipe: speed boost“)');
+ cvEd(m,'release','Lenkung nach dem Loslassen','Zeit seit dem Loslassen (bis „Release: fade time“)','Restlenkung');
+ cvEd(m,'press','Tipp-Lenkung (alter Modus): beim Halten','Haltedauer (bis „Press: ramp time“)','Lenkkraft');}
 function cvEd(m,name,title,xl,yl){
  const w=document.createElement('div');const h3=document.createElement('h3');h3.textContent=title;h3.style.cssText='color:#5ee8ff;margin:22px 0 6px;font-size:16px';w.append(h3);
  const c=document.createElement('canvas');c.width=720;c.height=330;c.style.cssText='width:100%;max-width:720px;background:#0b0e18;border:1px solid #2a3350;border-radius:8px;touch-action:none;cursor:crosshair';w.append(c);
@@ -7117,7 +7138,7 @@ function cvEd(m,name,title,xl,yl){
     g.beginPath();g.arc(X(a[0]+a[u]),Y(a[1]+a[v]),5,0,7);g.fillStyle='#0b0e18';g.fill();g.strokeStyle='#5ee8ff';g.stroke();});
    g.beginPath();g.arc(X(a[0]),Y(a[1]),7,0,7);g.fillStyle='#ef6a2e';g.fill();g.strokeStyle='#fff';g.lineWidth=1.5;g.stroke();});
   // Live-Linie: wo du beim Fahren gerade auf dieser Kurve bist
-  const lx=SS?(name=='press'?SS.px:SS.rx):-1;
+  const lx=!SS?-1:(name=='press'?(SS.c?-1:SS.px):name=='swipe'?(SS.sx??-1):name=='swvel'?(SS.vx??-1):SS.rx);
   if(lx>=0){g.strokeStyle='#7fe0b0';g.lineWidth=2;g.setLineDash([5,4]);g.beginPath();g.moveTo(X(lx),Y(0));g.lineTo(X(lx),Y(1));g.stroke();g.setLineDash([]);
    const ly=yAt(lx);g.beginPath();g.arc(X(lx),Y(ly),9,0,7);g.fillStyle='#7fe0b0';g.fill();
    g.fillStyle='#7fe0b0';g.font='bold 13px system-ui';g.fillText(Math.round(ly*100)+' %',X(lx)+12,Y(ly)-10);}}
@@ -7154,7 +7175,7 @@ function syncFrom(ver){if(ver==VER||mdown||Date.now()-lastSend<800)return;VER=ve
   if(D[cur].g=='steer')fetch('/curve').then(r=>r.json()).then(c=>{if(!EDS.dragging){CV=c.cur;EDS.forEach(f=>f());}});});}
 function wsConnect(){try{const ws=new WebSocket('ws://'+location.hostname+':8081');
  ws.onmessage=e=>{lastWs=Date.now();const d=JSON.parse(e.data);
-  const ch=!SS||SS.px!=d.px||SS.rx!=d.rx;SS=d;if(ch)dirty=true;syncFrom(d.ver);};
+  const ch=!SS||SS.px!=d.px||SS.rx!=d.rx||SS.sx!=d.sx||SS.vx!=d.vx;SS=d;if(ch)dirty=true;syncFrom(d.ver);};
  ws.onclose=()=>setTimeout(wsConnect,1000);ws.onerror=()=>{};}catch(e){setTimeout(wsConnect,2000);}}
 wsConnect();
 fetch('/fx').then(r=>r.json()).then(dd=>{const d=dd.tabs;VER=dd.ver;D=d;const t=document.getElementById('tabs');
@@ -9493,7 +9514,10 @@ func _process(delta: float) -> void:
 	if racing or state == "done":
 		race_t += dt
 	# Lenkung mit Anlaufkurve
+	var swm = int(cfg.get("ctrl", 1)) == 1 and (state == "race" or state == "count")
 	var b = _steer_input()
+	if swm and not (Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_RIGHT)):
+		b = 0
 	# Eingabe-Verzögerung (FX Lab „Steering“): es zählt, was vor „delay“ Sekunden gedrückt war
 	var now = Time.get_ticks_msec() / 1000.0
 	var SD: Dictionary = fx.steer
@@ -9519,6 +9543,11 @@ func _process(delta: float) -> void:
 		var rt = float(SD.rtime)
 		if rt > 0.001 and rel_t < rt:
 			steer = rel_v * _curve_at("release", rel_t / rt)
+	if swm and b == 0:
+		var sws = _sw_steer(dt)
+		if sws != null:
+			steer = sws
+			steer_btn = int(signf(steer)) if absf(steer) > 0.01 else 0
 	last_steer = steer
 	if T.S:
 		_stt_update(dt)
@@ -10329,6 +10358,29 @@ func _shot() -> void:
 				t_state = 0.0
 				ships[2].fin = 1.0
 				_fin_flow(3)
+			if shot_s.contains("swtest") and state == "race":
+				var evs = {45: ["t", 0, 270.0, true], 47: ["d", 0, 300.0], 49: ["d", 0, 330.0], 60: ["dt"]}
+				if shot_n == 60:
+					for q in [[true, 100.0], [false, 100.0], [true, 102.0], [false, 102.0]]:
+						var te = InputEventScreenTouch.new()
+						te.index = 1
+						te.pressed = q[0]
+						te.position = Vector2(q[1], 900)
+						_input(te)
+				elif evs.has(shot_n):
+					var e: Array = evs[shot_n]
+					var ie
+					if e[0] == "t":
+						ie = InputEventScreenTouch.new()
+						ie.pressed = e[3]
+					else:
+						ie = InputEventScreenDrag.new()
+						ie.velocity = Vector2(900, 0)
+					ie.index = e[1]
+					ie.position = Vector2(e[2], 900)
+					Input.parse_input_event(ie)
+				if shot_n in [46, 50, 55, 62, 66]:
+					print("SWT n=", shot_n, " steer=", last_steer, " m=", sw.m, " idx=", sw.idx, " wpn=", ships[0].wpn, " fire=", fire_req)
 			if shot_n == 60 and shot_s.contains(",ko"):
 				_comic_start("ko", 1)
 			if shot_n >= 2 and p.size() > 2 and p[2].begins_with("st"):
@@ -11473,6 +11525,15 @@ func _stt_build() -> void:
 	var vb = VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 12)
 	pnl.add_child(vb)
+	var bcm2 = _btn("")
+	bcm2.add_theme_font_size_override("font_size", 24)
+	var ctl_txt = func(): bcm2.text = "Lenken: " + ("WISCHEN  (Doppeltipp = Feuer)" if int(cfg.get("ctrl", 1)) == 1 else "TIPPEN links / rechts")
+	ctl_txt.call()
+	bcm2.pressed.connect(func():
+		cfg.ctrl = 1 - int(cfg.get("ctrl", 1))
+		_save_cfg()
+		ctl_txt.call())
+	vb.add_child(bcm2)
 	var sr = HBoxContainer.new()
 	sr.add_theme_constant_override("separation", 10)
 	vb.add_child(sr)
@@ -11679,10 +11740,17 @@ func _ga_frame(g: Dictionary, dt: float) -> void:
 	var k = get_viewport().get_visible_rect().size.x / GA_W
 	var f: Label = hud.fire
 	f.modulate.a = 0.0
-	f.offset_left = -150.0 * k
-	f.offset_right = 150.0 * k
-	f.offset_top = -(GA_H - 1250.0) * k
-	f.offset_bottom = -(GA_H - 1585.0) * k
+	if int(cfg.get("ctrl", 1)) == 1:
+		# Wisch-Lenkung: nur der kleine FIRE-Kreis feuert, der Rest ist Lenkfläche
+		f.offset_left = -62.0 * k
+		f.offset_right = 62.0 * k
+		f.offset_top = -(GA_H - 1478.0) * k
+		f.offset_bottom = -(GA_H - 1590.0) * k
+	else:
+		f.offset_left = -150.0 * k
+		f.offset_right = 150.0 * k
+		f.offset_top = -(GA_H - 1250.0) * k
+		f.offset_bottom = -(GA_H - 1585.0) * k
 	# Roulette starten, wenn eine neue Waffe eingesammelt wurde
 	var w: String = g.wpn
 	if w != ga_last:
@@ -11833,3 +11901,100 @@ func _ga_draw(c: Control) -> void:
 	c.draw_colored_polygon(PackedVector2Array([fp + Vector2(-4, -32), fp + Vector2(0, -40), fp + Vector2(4, -32)]), sw)
 	_ga_txt(c, fp + Vector2(0, 30), "FIRE", 20, sw, 1, 4)
 	c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+# ---------------------------------------------------------------- Wisch-Lenkung (unsichtbarer Joystick) und Doppeltipp zum Feuern
+# Der erste Daumen auf dem Bildschirm lenkt: wo er aufsetzt, ist die Mitte; nach links/rechts schieben lenkt
+# (Stärke über die Kurve „Wischweg“, schnelles Wischen gibt Extra über „Wischtempo“). Schiebt man weiter als
+# den vollen Ausschlag, wandert die Mitte mit, damit der Rückweg sofort wirkt. Kurz abheben hält die Lenkung fest.
+# Zwei schnelle Tipper (ohne Wischen) – mit welchem Finger auch immer – feuern die Waffe.
+var sw = {"idx": -1, "ax": 0.0, "x": 0.0, "v": 0.0, "hold": 0.0, "keep": 0.0, "last": 0.0, "m": 0.0, "vm": 0.0}
+var tinfo = {}
+var tap_last = {"t": -9.0, "p": Vector2.ZERO}
+
+
+func _sw_w() -> float:
+	return maxf(1.0, get_viewport().get_visible_rect().size.x)
+
+
+func _sw_down(i: int, p: Vector2) -> void:
+	tinfo[i] = {"t": Time.get_ticks_msec() / 1000.0, "p": p, "mv": false}
+	if int(cfg.get("ctrl", 1)) != 1:
+		return
+	if sw.idx < 0:
+		sw.idx = i
+		sw.x = p.x
+		sw.v = 0.0
+		# kurz abgehoben und wieder aufgesetzt: dort weiterlenken, wo man war
+		sw.ax = p.x - (sw.keep if sw.hold > 0.0 else 0.0)
+		sw.hold = 0.0
+
+
+func _sw_drag(i: int, p: Vector2, vel: Vector2) -> void:
+	if tinfo.has(i) and p.distance_to(tinfo[i].p) > _sw_w() * 0.03:
+		tinfo[i].mv = true
+	if i != sw.idx:
+		return
+	sw.x = p.x
+	sw.v = lerpf(float(sw.v), vel.x, 0.5)
+	var rng = float(fx.steer.swrange) * _sw_w()
+	var d = sw.x - sw.ax
+	if absf(d) > rng:
+		sw.ax = sw.x - signf(d) * rng
+
+
+func _sw_up(i: int, p: Vector2) -> void:
+	var now = Time.get_ticks_msec() / 1000.0
+	if tinfo.has(i):
+		var ti: Dictionary = tinfo[i]
+		if not ti.mv and now - float(ti.t) < 0.25 and state == "race":
+			if now - float(tap_last.t) < float(fx.steer.dtap) and p.distance_to(tap_last.p) < _sw_w() * 0.18:
+				fire_req = true
+				tap_last.t = -9.0
+			else:
+				tap_last.t = now
+				tap_last.p = p
+		tinfo.erase(i)
+	if i == sw.idx:
+		sw.idx = -1
+		sw.keep = sw.x - sw.ax
+		sw.hold = float(fx.steer.hold)
+		sw.v = 0.0
+		# liegt noch ein anderer Finger auf, übernimmt er das Lenken (ab seiner Position, ohne Sprung)
+		for k in touches:
+			if k != i:
+				sw.idx = k
+				sw.x = float(touches[k])
+				sw.ax = sw.x - sw.keep
+				sw.hold = 0.0
+				break
+
+
+# liefert die Lenkung (−1 … 1) oder null, wenn gerade nichts zu tun ist (dann greift die Loslass-Kurve)
+func _sw_steer(dt: float):
+	var SD: Dictionary = fx.steer
+	if sw.idx >= 0:
+		var rng = float(SD.swrange) * _sw_w()
+		var d = (sw.x - sw.ax) / maxf(1.0, rng)
+		var m = clampf(absf(d), 0.0, 1.0)
+		var base = _curve_at("swipe", m)
+		# Wischtempo: nur in Richtung des Ausschlags, klingt schnell ab
+		var vn = clampf(absf(float(sw.v)) / (_sw_w() * 2.5), 0.0, 1.0)
+		var extra = 0.0
+		if signf(float(sw.v)) == signf(d) and m > 0.02:
+			extra = _curve_at("swvel", vn) * float(SD.velk)
+		sw.v = float(sw.v) * exp(-dt / 0.08)
+		sw.m = m
+		sw.vm = vn
+		var st = signf(d) * clampf(base + extra, 0.0, 1.0)
+		sw.last = st
+		rel_t = 9.0
+		return st
+	sw.m = 0.0
+	if sw.hold > 0.0:
+		sw.hold -= dt
+		if sw.hold <= 0.0:
+			rel_v = float(sw.last)
+			rel_t = 0.0
+		return float(sw.last)
+	return null
