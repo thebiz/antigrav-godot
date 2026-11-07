@@ -1382,6 +1382,11 @@ func _ring(key: String, z: float, rad: float, cy: float, rt: float, am: float = 
 
 
 # ---------------------------------------------------------------- Strecke „Neon Night“
+# Dschungel: die Piste steigt zum Rand hin leicht an – Felder liegen darauf statt darin zu versinken
+func _jrh(x: float) -> float:
+	return 0.06 * pow(absf(x) / T.TW, 3.0) if _jungle() else 0.0
+
+
 func _build_track() -> void:
 	var TW = T.TW
 	# Fahrbahn: nasser Asphalt (Reihen alle 0,5 Einheiten, 8 Spalten)
@@ -1423,14 +1428,14 @@ func _build_track() -> void:
 		if zc < 25.0 or zc > 715.0 or T.gap(zc + 1.4) or T.gap(zc) or T.gap(zc + 3.0):
 			continue
 		var bx = _bpx(k)
-		_strip("pad", zc, zc + 3.0, bx - PAD_HW, bx + PAD_HW, 0.008, 0.008)
+		_strip("pad", zc, zc + 3.0, bx - PAD_HW, bx + PAD_HW, 0.008 + _jrh(bx - PAD_HW), 0.008 + _jrh(bx + PAD_HW))
 	# Waffenfelder: bunter Ring auf jedem zweiten Feld
 	for wk in range(0, 21, 2):
 		var zw = _wzp(wk)
 		if zw < 25.0 or zw > 715.0 or T.gap(zw + 1.0):
 			continue
 		var wx = _wpx(wk)
-		_strip("wpad", zw - 0.25, zw + 2.25, wx - PAD_HW, wx + PAD_HW, 0.009, 0.009)
+		_strip("wpad", zw - 0.25, zw + 2.25, wx - PAD_HW, wx + PAD_HW, 0.009 + _jrh(wx - PAD_HW), 0.009 + _jrh(wx + PAD_HW))
 		wpads.append([zw + 1.0, wx])
 	# Tore mit Lampen (nicht im Tunnel), Werbetafeln, Stützen
 	var gk = 1
@@ -10486,6 +10491,8 @@ func _shot() -> void:
 				print("GOSHOT z=", ships[0].z, " spd=", ships[0].spd, " cam=", cam.global_position, " fig=", starter.n.global_position if not starter.is_empty() else Vector3.ZERO)
 				get_tree().quit()
 			if p.size() > 3 and p[3].begins_with("go"):
+				if shot_n == 3 and float(p[1]) > 0.0:
+					ships[0].z = float(p[1])
 				return
 			if shot_n == 60 and shot_s.contains("finwin"):
 				state = "done"
@@ -10755,6 +10762,14 @@ func _camera(dt: float) -> void:
 	if state == "kill" and _kc_cam():
 		return
 	if state == "done" and _fly_cam(dt):
+		return
+	if OS.get_environment("TOPCAM") != "":
+		# nur zum Testen: Blick senkrecht von oben auf die Strecke
+		var tz = float(OS.get_environment("TOPCAM"))
+		var tf = T.frame(tz)
+		cam.global_position = tf.c + Vector3.UP * 9.0
+		cam.look_at(tf.c, tf.fw)
+		cam.fov = 60.0
 		return
 	var g: Dictionary = _focus()
 	var f = T.frame(g.z)
