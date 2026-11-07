@@ -746,7 +746,7 @@ const FXS = {
 	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0],
 		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35],
 		["revmode", "Swipe: reverse = counter-steer (0 off / 1 on)", 0.0, 1.0, 1.0], ["revbuf", "Swipe: reverse buffer", 0.0, 0.04, 0.008], ["velmin", "Swipe: speed boost threshold", 0.0, 0.9, 0.35],
-		["psens", "Pointer: sensitivity", 0.5, 8.0, 3.0], ["paccel", "Pointer: acceleration", 0.0, 4.0, 1.0], ["vib", "Lanes: vibration (0 off / 1 on)", 0.0, 1.0, 1.0], ["ltime", "Lane tap: full change time (outer to outer)", 0.1, 1.2, 0.35],
+		["psens", "Pointer: sensitivity", 0.5, 8.0, 3.0], ["paccel", "Pointer: acceleration", 0.0, 4.0, 1.0], ["vib", "Lanes: vibration (0 off / 1 on)", 0.0, 1.0, 1.0], ["ltime", "Lane tap: full change time (outer to outer)", 0.1, 1.2, 0.35], ["lhold", "Lane tap: hold time for the next lane", 0.1, 1.0, 0.25],
 		["glide", "Glide: follow time", 0.05, 1.0, 0.25], ["gwidth", "Glide: reach to edge", 0.3, 1.0, 0.85], ["gpull", "Glide: curve pull", 0.0, 2.0, 0.5]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
@@ -6668,7 +6668,7 @@ const FX_MODES = {
 	"steer.ptime": [0], "steer.delay": [0], "steer.rtime": [0, 1],
 	"steer.swrange": [1, 2], "steer.velk": [1], "steer.velmin": [1], "steer.revmode": [1], "steer.revbuf": [1], "steer.hold": [1, 2],
 	"steer.glide": [2, 3, 4], "steer.gwidth": [2, 3], "steer.gpull": [2, 3],
-	"steer.psens": [3, 4], "steer.paccel": [3, 4], "steer.vib": [4, 5], "steer.ltime": [5], "steer.dtap": [1, 2, 3, 4],
+	"steer.psens": [3, 4], "steer.paccel": [3, 4], "steer.vib": [4, 5], "steer.ltime": [5], "steer.lhold": [5], "steer.dtap": [1, 2, 3, 4],
 	"ship.steer": [0, 1], "ship.steerk": [0, 1], "ship.grip": [0, 1], "ship.drift": [0, 1], "ship.center": [0, 1], "ship.spdst": [0, 1]}
 const CTRL_CURVES = [["press", "release"], ["swipe", "swvel", "release"], ["swipe"], [], [], []]
 # Fahrbahn in drei gleich breite Drittel geteilt (bis knapp an die Leuchtkante); jede Spur liegt mittig in ihrem Drittel
@@ -9803,6 +9803,14 @@ func _process(delta: float) -> void:
 		steer = ptr_lat
 		steer_btn = 0
 		if int(cfg.get("ctrl", 1)) == 5:
+			if not lt_hold.is_empty():
+				if not touches.has(int(lt_hold.i)):
+					lt_hold = {}
+				else:
+					lt_hold.t = float(lt_hold.t) + dt
+					if float(lt_hold.t) >= maxf(0.05, float(fx.steer.get("lhold", 0.25))):
+						lt_hold.t = 0.0
+						_lane_step(int(lt_hold.dir))
 			steer = float(lane_cur)
 			lane_fl = maxf(0.0, lane_fl - dt * 3.0)
 			if hud.has("lanei"):
@@ -10716,7 +10724,22 @@ func _shot() -> void:
 				if shot_n == 45:
 					tap.call(W * 0.9)
 					set_meta("lt0", race_t)
-				if shot_n == 75 or shot_n == 77:
+				if shot_s.contains("lanehold"):
+					if shot_n == 60:
+						var te = InputEventScreenTouch.new()
+						te.index = 0
+						te.pressed = true
+						te.position = Vector2(W * 0.1, 500)
+						_input(te)
+						set_meta("lt0", race_t)
+					if shot_n == 80:
+						var te2 = InputEventScreenTouch.new()
+						te2.index = 0
+						te2.pressed = false
+						te2.position = Vector2(W * 0.1, 500)
+						_input(te2)
+						print("LT released")
+				elif shot_n == 75 or shot_n == 77:
 					tap.call(W * 0.1)
 					if shot_n == 75:
 						set_meta("lt0", race_t)
@@ -12299,14 +12322,9 @@ func _sw_down(i: int, p: Vector2) -> void:
 			if state == "race":
 				fire_req = true
 			return
-		var want = clampi(lane_cur + (-1 if p.x < W / 3.0 else 1), -1, 1)
-		if want != lane_cur and (state == "race" or state == "count"):
-			lane_cur = want
-			ptr_lat = float(want)
-			lane_fl = 1.0
-			if float(fx.steer.vib) > 0.5:
-				Input.vibrate_handheld(22)
-			_snd("beep", -18.0, 2.6 + 0.15 * lane_cur)
+		var dir = -1 if p.x < W / 3.0 else 1
+		_lane_step(dir)
+		lt_hold = {"i": i, "dir": dir, "t": 0.0}   # drauf bleiben = nach der Haltezeit noch eine Spur weiter
 		return
 	if sw.idx < 0:
 		sw.idx = i
@@ -12361,6 +12379,8 @@ func _sw_drag(i: int, p: Vector2, vel: Vector2) -> void:
 
 
 func _sw_up(i: int, p: Vector2) -> void:
+	if int(lt_hold.get("i", -1)) == i:
+		lt_hold = {}
 	var now = Time.get_ticks_msec() / 1000.0
 	if tinfo.has(i):
 		var ti: Dictionary = tinfo[i]
@@ -12519,7 +12539,7 @@ const STT_ROWS = {
 	3: [["steer", "psens", "Empfindlichkeit  (mehr = weniger Daumenweg)", 0.25], ["steer", "paccel", "Beschleunigung  (mehr = schnelle Züge weiter)", 0.25], ["steer", "glide", "Folgezeit  (weniger = flinker)", 0.05]],
 	4: [["steer", "psens", "Empfindlichkeit  (mehr = kürzerer Wisch pro Spur)", 0.25], ["steer", "paccel", "Beschleunigung  (schneller Ruck = ganz rüber)", 0.25],
 		["steer", "glide", "Einrasten  (weniger = springt flinker in die Spur)", 0.05], ["steer", "vib", "Vibration  (0 aus, 1 an)", 1.0]],
-	5: [["steer", "ltime", "Spurwechsel ganz außen → ganz außen  (Sekunden)", 0.05], ["steer", "vib", "Vibration  (0 aus / 1 an)", 1.0]]}
+	5: [["steer", "ltime", "Spurwechsel ganz außen → ganz außen  (Sekunden)", 0.05], ["steer", "lhold", "Gedrückt halten → nächste Spur nach  (Sekunden)", 0.05], ["steer", "vib", "Vibration  (0 aus / 1 an)", 1.0]]}
 
 const STT_MN = ["Tippen", "Wischen", "Gleiten", "Touchpad", "Spuren", "Spur antippen"]
 const STT_MH = ["Linke oder rechte Bildschirmhälfte halten", "Wischen lenkt, Doppeltipp feuert", "Wischen schiebt rüber, loslassen = zurück zur Mitte", "Daumen bewegen wie einen Mauszeiger", "Wischen wählt links, Mitte oder rechts",
@@ -12604,7 +12624,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp", "megaw",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last", "lane_cur", "lane_fl", "ptr_lat", "glide_in", "sw", "tinfo",
-	"tap_last", "last_c", "tun_k", "cm"]
+	"tap_last", "last_c", "tun_k", "cm", "lt_hold"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
@@ -12839,3 +12859,16 @@ func _steer_help() -> String:
 	return ["Hold the left or right half of the screen.", "Swipe left or right to steer. Double-tap to fire.",
 		"Swipe to slide over – let go to return to the middle.", "Move your thumb like a mouse to steer.",
 		"Swipe to pick the left, middle or right lane.", "Tap left or right to move one lane. Tap the middle to fire."][clampi(int(cfg.get("ctrl", 1)), 0, 5)]
+
+
+# Spur antippen: eine Spur weiter (mit Piep und kurzem Vibrieren)
+var lt_hold = {}
+func _lane_step(dir: int) -> void:
+	var want = clampi(lane_cur + dir, -1, 1)
+	if want != lane_cur and (state == "race" or state == "count"):
+		lane_cur = want
+		ptr_lat = float(want)
+		lane_fl = 1.0
+		if float(fx.steer.vib) > 0.5:
+			Input.vibrate_handheld(22)
+		_snd("beep", -18.0, 2.6 + 0.15 * lane_cur)
