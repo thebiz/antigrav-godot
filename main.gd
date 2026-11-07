@@ -170,6 +170,17 @@ func _ready() -> void:
 		_show_help.call_deferred(true)
 	if OS.get_cmdline_user_args().has("--records"):
 		_show_records.call_deferred(true)
+	if OS.get_cmdline_user_args().has("--replays"):
+		_show_replays.call_deferred(true)
+	if OS.get_cmdline_user_args().has("--lab"):
+		get_tree().create_timer(2.0).timeout.connect(_lab_open)
+	if OS.get_cmdline_user_args().has("--toastdemo"):
+		get_tree().create_timer(2.5).timeout.connect(func():
+			_toast("Open " + _live_addr() + " in the PC browser (same Wi-Fi)")
+			await get_tree().create_timer(0.6).timeout
+			if OS.get_environment("SHOTPATH") != "":
+				get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
+				get_tree().quit())
 	if OS.get_cmdline_user_args().has("--namedemo"):
 		_name_entry.call_deferred([["lap", 31.42, 0], ["dmg", 2.4, 2]])
 	if _noir():
@@ -6449,7 +6460,7 @@ func _tips_check(g: Dictionary, racing: bool, dt: float) -> void:
 		(hud.fire as Control).get_parent().add_child(tip_box)
 	if racing:
 		if t_state > 0.9:
-			_tip("steer", "Hold the left or right half of the screen.")
+			_tip("steer", _steer_help())
 		# Boost- und Waffenfeld voraus?
 		var k0 = int(round(g.z / 35.0))
 		for k in [k0, k0 + 1]:
@@ -6609,7 +6620,7 @@ func _show_help(on: bool) -> void:
 	sc.add_child(lst)
 	var rows = [
 		["goal", "Goal", "Race 3 laps. Finish first – or be the last one still flying."],
-		["steer", "Steering", "Hold the left or right half of the screen."],
+		["steer", "Steering", _steer_help()],
 		["boost", "Boost pad", "Arrows on the track. Fly over them for a burst of speed."],
 		["wpad", "Weapon pad", "A spinning ring. Fly through it to pick up a random weapon."],
 		["fire", "Fire", "Tap the round FIRE button at the bottom to use your weapon."],
@@ -9227,15 +9238,28 @@ var back_q = -10.0
 
 
 func _toast(t: String) -> void:
+	# dunkle Sprechblase, volle Breite mit Rand, Text bricht um – ragt nie aus dem Bild und bleibt lesbar
+	var pc = PanelContainer.new()
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.03, 0.03, 0.06, 0.92)
+	sb.border_color = Color(1, 1, 1, 0.25)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(18)
+	sb.set_content_margin_all(18)
+	pc.add_theme_stylebox_override("panel", sb)
+	pc.anchor_left = 0.06
+	pc.anchor_right = 0.94
+	pc.anchor_top = 0.34
+	pc.anchor_bottom = 0.34
+	pc.grow_vertical = Control.GROW_DIRECTION_BOTH
+	pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var l = _lbl(t, 30)
-	l.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	l.offset_top = -260
-	l.offset_bottom = -200
-	l.offset_left = -360
-	l.offset_right = 360
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	pc.add_child(l)
 	var cl = CanvasLayer.new()
 	cl.layer = 30
-	cl.add_child(l)
+	cl.add_child(pc)
 	add_child(cl)
 	get_tree().create_timer(2.0).timeout.connect(cl.queue_free)
 
@@ -9987,7 +10011,11 @@ func _lab_open() -> void:
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	hint.offset_top = 104
-	hint.modulate = Color(1, 1, 1, 0.5)
+	hint.modulate = Color(1, 1, 1, 0.8)
+	hint.add_theme_constant_override("outline_size", 7)
+	hint.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	tl.add_theme_constant_override("outline_size", 8)
+	tl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	root.add_child(hint)
 	var bg = ColorRect.new()
 	bg.color = Color(0, 0, 0, 0.62)
@@ -11882,8 +11910,18 @@ func _stt_build() -> void:
 	var bcm2 = _btn("")
 	bcm2.add_theme_font_size_override("font_size", 24)
 	stt.mbtn = bcm2
+	bcm2.add_theme_font_size_override("font_size", 30)
+	bcm2.clip_text = true
+	bcm2.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	bcm2.pressed.connect(func(): _set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 6))
 	vb.add_child(bcm2)
+	# kurze Erklärung zum Modus unter dem Knopf – bricht um, wird nie breiter als die Leiste
+	var mh = _lbl("", 22)
+	mh.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mh.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	mh.modulate = Color(1, 1, 1, 0.65)
+	vb.add_child(mh)
+	stt.mhint = mh
 	var sr = HBoxContainer.new()
 	sr.add_theme_constant_override("separation", 10)
 	vb.add_child(sr)
@@ -12483,12 +12521,16 @@ const STT_ROWS = {
 		["steer", "glide", "Einrasten  (weniger = springt flinker in die Spur)", 0.05], ["steer", "vib", "Vibration  (0 aus, 1 an)", 1.0]],
 	5: [["steer", "ltime", "Spurwechsel ganz außen → ganz außen  (Sekunden)", 0.05], ["steer", "vib", "Vibration  (0 aus / 1 an)", 1.0]]}
 
-const STT_MN = ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)", "TOUCHPAD  (wie ein Mauszeiger)", "SPUREN  (links / Mitte / rechts)", "SPUR ANTIPPEN  (links / rechts = eine Spur, Mitte = Feuer)"]
+const STT_MN = ["Tippen", "Wischen", "Gleiten", "Touchpad", "Spuren", "Spur antippen"]
+const STT_MH = ["Linke oder rechte Bildschirmhälfte halten", "Wischen lenkt, Doppeltipp feuert", "Wischen schiebt rüber, loslassen = zurück zur Mitte", "Daumen bewegen wie einen Mauszeiger", "Wischen wählt links, Mitte oder rechts",
+	"Links / rechts tippen = eine Spur weiter · Mitte tippen = Feuer"]
 
 
 func _stt_rows() -> void:
 	var m = clampi(int(cfg.get("ctrl", 1)), 0, 5)
 	(stt.mbtn as Button).text = "Lenken: " + STT_MN[m]
+	if stt.has("mhint"):
+		(stt.mhint as Label).text = STT_MH[m]
 	var vb: VBoxContainer = stt.rowbox
 	for c in vb.get_children():
 		c.queue_free()
@@ -12790,3 +12832,10 @@ func _fit(root: Node) -> void:
 		if fills and not (b is CheckBox):
 			b.clip_text = true
 			b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+
+
+# Lenk-Erklärung passend zum gewählten Modus (Anleitung und Hinweis im Rennen)
+func _steer_help() -> String:
+	return ["Hold the left or right half of the screen.", "Swipe left or right to steer. Double-tap to fire.",
+		"Swipe to slide over – let go to return to the middle.", "Move your thumb like a mouse to steer.",
+		"Swipe to pick the left, middle or right lane.", "Tap left or right to move one lane. Tap the middle to fire."][clampi(int(cfg.get("ctrl", 1)), 0, 5)]
