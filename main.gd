@@ -4561,7 +4561,7 @@ func _menu() -> void:
 		_save_cfg()
 		bhd.text = "HUD style: " + HN[int(cfg.hud)])
 	sp.add_child(bhd)
-	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center", "Touchpad – move like a mouse", "Lanes – left / middle / right", "Lane tap – tap a third of the screen"]
+	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center", "Touchpad – move like a mouse", "Lanes – left / middle / right", "Lane tap – left / right = one lane, middle = fire"]
 	var bct = _btn("Steering: " + CN[clampi(int(cfg.get("ctrl", 1)), 0, 5)])
 	bct.add_theme_font_size_override("font_size", 30)
 	bct.pressed.connect(func():
@@ -10659,10 +10659,13 @@ func _shot() -> void:
 				if shot_n == 45:
 					tap.call(W * 0.9)
 					set_meta("lt0", race_t)
-				if shot_n == 75:
+				if shot_n == 75 or shot_n == 77:
 					tap.call(W * 0.1)
-					set_meta("lt0", race_t)
-					set_meta("ltd", false)
+					if shot_n == 75:
+						set_meta("lt0", race_t)
+				if shot_n == 86:
+					tap.call(W * 0.5)
+					print("LT fire_req=", fire_req, " lane=", lane_cur)
 				if shot_n >= 45:
 					var tg = lane_cur * LANE_W
 					print("LT n=", shot_n, " t=", snappedf(race_t - float(get_meta("lt0")), 0.001), " lane=", lane_cur, " lat=", snappedf(ships[0].lat, 0.001), " psi=", snappedf(ships[0].psi, 0.01), " spd=", snappedf(ships[0].spd, 0.1))
@@ -12209,9 +12212,14 @@ func _sw_down(i: int, p: Vector2) -> void:
 	if int(cfg.get("ctrl", 1)) < 1:
 		return
 	if int(cfg.get("ctrl", 1)) == 5:
-		# Spur antippen: linkes / mittleres / rechtes Bildschirmdrittel = Spur; das Schiff bleibt dort, bis du woanders tippst
+		# Spur antippen: linkes Drittel = eine Spur nach links, rechtes = eine nach rechts, Mitte = Feuer.
+		# Das Schiff bleibt auf seiner Spur, bis wieder getippt wird.
 		var W = _sw_w()
-		var want = -1 if p.x < W / 3.0 else (1 if p.x > W * 2.0 / 3.0 else 0)
+		if p.x >= W / 3.0 and p.x <= W * 2.0 / 3.0:
+			if state == "race":
+				fire_req = true
+			return
+		var want = clampi(lane_cur + (-1 if p.x < W / 3.0 else 1), -1, 1)
 		if want != lane_cur and (state == "race" or state == "count"):
 			lane_cur = want
 			ptr_lat = float(want)
@@ -12433,7 +12441,7 @@ const STT_ROWS = {
 		["steer", "glide", "Einrasten  (weniger = springt flinker in die Spur)", 0.05], ["steer", "vib", "Vibration  (0 aus, 1 an)", 1.0]],
 	5: [["steer", "ltime", "Spurwechsel ganz außen → ganz außen  (Sekunden)", 0.05], ["steer", "vib", "Vibration  (0 aus / 1 an)", 1.0]]}
 
-const STT_MN = ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)", "TOUCHPAD  (wie ein Mauszeiger)", "SPUREN  (links / Mitte / rechts)", "SPUR ANTIPPEN  (Bildschirm-Drittel tippen)"]
+const STT_MN = ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)", "TOUCHPAD  (wie ein Mauszeiger)", "SPUREN  (links / Mitte / rechts)", "SPUR ANTIPPEN  (links / rechts = eine Spur, Mitte = Feuer)"]
 
 
 func _stt_rows() -> void:
