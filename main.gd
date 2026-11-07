@@ -713,6 +713,7 @@ const FXS = {
 		["center", "Auto-center nose", 0.0, 3.0, 1.0], ["spdst", "Softer steering at speed", 0.0, 2.0, 0.5]],
 	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0],
 		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35],
+		["revmode", "Swipe: reverse = counter-steer (0 off / 1 on)", 0.0, 1.0, 1.0], ["revbuf", "Swipe: reverse buffer", 0.0, 0.04, 0.008], ["velmin", "Swipe: speed boost threshold", 0.0, 0.9, 0.35],
 		["glide", "Glide: follow time", 0.05, 1.0, 0.25], ["gwidth", "Glide: reach to edge", 0.3, 1.0, 0.85], ["gpull", "Glide: curve & boost pull", 0.0, 2.0, 0.5]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
@@ -6688,6 +6689,9 @@ const FX_INFO = {
 	"steer.glide": "Gleit-Modus: wie schnell das Schiff zur Stelle rutscht, die dein Daumen vorgibt (und beim Loslassen zurück zur Mitte). Kleiner = flink, größer = weich und träge.",
 	"steer.gwidth": "Gleit-Modus: wie weit du das Schiff bei vollem Wisch zum Rand schieben kannst. 1 = bis kurz vor die Bande.",
 	"steer.gpull": "Gleit-Modus: wie stark Kurven und Boost das Schiff nach außen ziehen. Dagegen musst du anwischen. 0 = Schiff bleibt immer genau dort, wo du es hinschiebst.",
+	"steer.revmode": "1 = Wischst du zurück, lenkt das Schiff sofort sanft in die Gegenrichtung (die Mitte springt unter deinen Daumen). 0 = wie ein Joystick: erst wenn du über die Mitte zurück bist, lenkst du in die andere Richtung.",
+	"steer.revbuf": "Wie weit (Anteil der Bildschirmbreite) du zurückwischen musst, bis es als Richtungswechsel zählt. Schluckt Daumenzittern. Klein halten, sonst fühlt sich der Wechsel verzögert an.",
+	"steer.velmin": "Ab welchem Wischtempo der Extra-Schub überhaupt greift. Höher = nur ein klarer, schneller Ruck gibt Extra, normale Bewegungen bleiben immer sanft.",
 	"steer.dtap": "Wie schnell zwei Tipper aufeinander folgen müssen, damit die Waffe feuert. Größer = leichter auszulösen, aber eher aus Versehen.",
 	"steer.delay": "Verzögerung zwischen Tippen und Lenken. Normalerweise 0 lassen, höher fühlt sich schwammig an.",
 	"env.city": "Hochhäuser neben der Strecke an oder aus.",
@@ -7150,7 +7154,7 @@ function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D
  T.it.forEach(it=>{const r=document.createElement('div');r.className='r';
   const l=document.createElement('div');l.textContent=it.n;
   if(it.i){const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t=it.i;ii.onclick=e=>{ii.classList.toggle('show');};l.append(ii);}const s=document.createElement('input');s.type='range';
-  s.min=it.lo;s.max=it.hi;s.step=(it.k=='shape'||it.k=='city'||it.k=='life')?1:0.001;s.value=it.v;
+  s.min=it.lo;s.max=it.hi;s.step=(it.k=='shape'||it.k=='city'||it.k=='life'||it.k=='revmode')?1:0.001;s.value=it.v;
   const v=document.createElement('div');v.className='v';v.textContent=fmt(it,it.v);
   const z=document.createElement('button');z.textContent='↺';z.title='Standard';
   s.oninput=()=>{it.v=+s.value;v.textContent=fmt(it,it.v);send(T.g,it.k,s.value);};
@@ -10425,7 +10429,7 @@ func _shot() -> void:
 				ships[2].fin = 1.0
 				_fin_flow(3)
 			if shot_s.contains("swtest") and state == "race":
-				var evs = {45: ["t", 0, 270.0, true], 47: ["d", 0, 300.0], 49: ["d", 0, 330.0], 60: ["dt"]}
+				var evs = {45: ["t", 0, 270.0, true], 47: ["d", 0, 300.0], 49: ["d", 0, 330.0], 52: ["d", 0, 322.0], 53: ["d", 0, 316.0], 60: ["dt"]}
 				if shot_n == 60:
 					for q in [[true, 100.0], [false, 100.0], [true, 102.0], [false, 102.0]]:
 						var te = InputEventScreenTouch.new()
@@ -11995,6 +11999,8 @@ func _sw_down(i: int, p: Vector2) -> void:
 		# kurz abgehoben und wieder aufgesetzt: dort weiterlenken, wo man war
 		sw.ax = p.x - (sw.keep if sw.hold > 0.0 else 0.0)
 		sw.hold = 0.0
+		sw.ext = p.x
+		sw.dir = 0
 
 
 func _sw_drag(i: int, p: Vector2, vel: Vector2) -> void:
@@ -12003,6 +12009,24 @@ func _sw_drag(i: int, p: Vector2, vel: Vector2) -> void:
 	if i != sw.idx:
 		return
 	sw.x = p.x
+	# Richtungswechsel erkennen: weiteste Stelle in Wischrichtung merken; zurück um mehr als den Puffer = Umkehr
+	var buf = float(fx.steer.revbuf) * _sw_w()
+	var dr = int(sw.get("dir", 0))
+	var ext = float(sw.get("ext", p.x))
+	if dr == 0:
+		if absf(p.x - ext) > buf:
+			sw.dir = int(signf(p.x - ext))
+			sw.ext = p.x
+	elif signf(p.x - ext) == dr:
+		sw.ext = p.x
+	elif absf(p.x - ext) > buf:
+		sw.dir = -dr
+		sw.ext = p.x
+		sw.v = 0.0
+		vel = Vector2.ZERO
+		if float(fx.steer.revmode) > 0.5:
+			# Mitte unter den Daumen (plus den Puffer, den er schon zurückgelegt hat): sanftes Gegenlenken ab sofort
+			sw.ax = p.x + dr * buf
 	sw.v = lerpf(float(sw.v), vel.x, 0.5)
 	var rng = float(fx.steer.swrange) * _sw_w()
 	var d = sw.x - sw.ax
@@ -12048,8 +12072,9 @@ func _sw_steer(dt: float):
 		# Wischtempo: nur in Richtung des Ausschlags, klingt schnell ab
 		var vn = clampf(absf(float(sw.v)) / (_sw_w() * 2.5), 0.0, 1.0)
 		var extra = 0.0
-		if signf(float(sw.v)) == signf(d) and m > 0.02:
-			extra = _curve_at("swvel", vn) * float(SD.velk)
+		var thr = float(SD.velmin)
+		if signf(float(sw.v)) == signf(d) and m > 0.02 and vn > thr:
+			extra = _curve_at("swvel", (vn - thr) / maxf(0.05, 1.0 - thr)) * float(SD.velk)
 		sw.v = float(sw.v) * exp(-dt / 0.08)
 		sw.m = m
 		sw.vm = vn
