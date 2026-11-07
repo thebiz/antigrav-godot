@@ -6591,8 +6591,9 @@ const FX_MODES = {
 	"steer.psens": [3, 4], "steer.paccel": [3, 4], "steer.vib": [4], "steer.dtap": [1, 2, 3, 4],
 	"ship.steer": [0, 1], "ship.steerk": [0, 1], "ship.grip": [0, 1], "ship.drift": [0, 1], "ship.center": [0, 1], "ship.spdst": [0, 1]}
 const CTRL_CURVES = [["press", "release"], ["swipe", "swvel", "release"], ["swipe"], [], []]
-const LANE_W = 1.4   # Abstand der drei Spuren (links −1, Mitte 0, rechts 1)
-const PAD_HW = 0.6   # halbe Breite der Boost- und Waffenfelder: füllt eine Spur fast ganz aus
+# Fahrbahn in drei gleich breite Drittel geteilt (bis knapp an die Leuchtkante); jede Spur liegt mittig in ihrem Drittel
+const LANE_W = (2.4 - 0.1) * 2.0 / 3.0   # ≈ 1,53: Abstand der drei Spuren (links −1, Mitte 0, rechts 1)
+const PAD_HW = LANE_W * 0.5 - 0.03       # Boost- und Waffenfelder füllen ihr Drittel ganz aus
 
 # Erklärungen zu den Reglern (Tooltip auf der Live-Seite am PC)
 const FX_INFO = {
