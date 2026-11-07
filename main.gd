@@ -735,7 +735,7 @@ const FXS = {
 	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0],
 		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35],
 		["revmode", "Swipe: reverse = counter-steer (0 off / 1 on)", 0.0, 1.0, 1.0], ["revbuf", "Swipe: reverse buffer", 0.0, 0.04, 0.008], ["velmin", "Swipe: speed boost threshold", 0.0, 0.9, 0.35],
-		["psens", "Pointer: sensitivity", 0.5, 8.0, 3.0], ["paccel", "Pointer: acceleration", 0.0, 4.0, 1.0], ["vib", "Lanes: vibration (0 off / 1 on)", 0.0, 1.0, 1.0],
+		["psens", "Pointer: sensitivity", 0.5, 8.0, 3.0], ["paccel", "Pointer: acceleration", 0.0, 4.0, 1.0], ["vib", "Lanes: vibration (0 off / 1 on)", 0.0, 1.0, 1.0], ["ltime", "Lane tap: full change time (outer to outer)", 0.1, 1.2, 0.35],
 		["glide", "Glide: follow time", 0.05, 1.0, 0.25], ["gwidth", "Glide: reach to edge", 0.3, 1.0, 0.85], ["gpull", "Glide: curve pull", 0.0, 2.0, 0.5]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
@@ -4561,11 +4561,11 @@ func _menu() -> void:
 		_save_cfg()
 		bhd.text = "HUD style: " + HN[int(cfg.hud)])
 	sp.add_child(bhd)
-	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center", "Touchpad – move like a mouse", "Lanes – left / middle / right"]
-	var bct = _btn("Steering: " + CN[clampi(int(cfg.get("ctrl", 1)), 0, 4)])
+	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center", "Touchpad – move like a mouse", "Lanes – left / middle / right", "Lane tap – tap a third of the screen"]
+	var bct = _btn("Steering: " + CN[clampi(int(cfg.get("ctrl", 1)), 0, 5)])
 	bct.add_theme_font_size_override("font_size", 30)
 	bct.pressed.connect(func():
-		_set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 5)
+		_set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 6)
 		bct.text = "Steering: " + CN[int(cfg.ctrl)])
 	sp.add_child(bct)
 	var blv = _btn("Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off"))
@@ -6631,14 +6631,14 @@ func _show_help(on: bool) -> void:
 
 # Welche Regler in welchem Lenkmodus gebraucht werden (0 Tippen, 1 Wischen, 2 Gleiten, 3 Touchpad, 4 Spuren);
 # nicht genannte gelten immer. Die Live-Seite und die Einstellleiste zeigen nur die passenden.
-const CTRL_N = ["Tap", "Swipe", "Glide", "Touchpad", "Lanes"]
+const CTRL_N = ["Tap", "Swipe", "Glide", "Touchpad", "Lanes", "Lane tap"]
 const FX_MODES = {
 	"steer.ptime": [0], "steer.delay": [0], "steer.rtime": [0, 1],
 	"steer.swrange": [1, 2], "steer.velk": [1], "steer.velmin": [1], "steer.revmode": [1], "steer.revbuf": [1], "steer.hold": [1, 2],
 	"steer.glide": [2, 3, 4], "steer.gwidth": [2, 3], "steer.gpull": [2, 3],
-	"steer.psens": [3, 4], "steer.paccel": [3, 4], "steer.vib": [4], "steer.dtap": [1, 2, 3, 4],
+	"steer.psens": [3, 4], "steer.paccel": [3, 4], "steer.vib": [4, 5], "steer.ltime": [5], "steer.dtap": [1, 2, 3, 4],
 	"ship.steer": [0, 1], "ship.steerk": [0, 1], "ship.grip": [0, 1], "ship.drift": [0, 1], "ship.center": [0, 1], "ship.spdst": [0, 1]}
-const CTRL_CURVES = [["press", "release"], ["swipe", "swvel", "release"], ["swipe"], [], []]
+const CTRL_CURVES = [["press", "release"], ["swipe", "swvel", "release"], ["swipe"], [], [], []]
 # Fahrbahn in drei gleich breite Drittel geteilt (bis knapp an die Leuchtkante); jede Spur liegt mittig in ihrem Drittel
 const LANE_W = (2.4 - 0.1) * 2.0 / 3.0   # ≈ 1,53: Abstand der drei Spuren (links −1, Mitte 0, rechts 1)
 const PAD_HW = LANE_W * 0.5 - 0.03       # Boost- und Waffenfelder füllen ihr Drittel ganz aus
@@ -7077,7 +7077,7 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 				_start()
 		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/mode?"):
-		_set_ctrl(clampi(int(path.get_slice("=", 1)), 0, 4))
+		_set_ctrl(clampi(int(path.get_slice("=", 1)), 0, 5))
 		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/ping"):
 		_live_send(c, "text/plain", "ok")
@@ -9051,12 +9051,32 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		var tgt = clampf(glide_in * float(SG.gwidth) * lim + pull, -lim, lim)
 		if int(cfg.get("ctrl", 1)) == 4:
 			tgt = lane_cur * LANE_W
-		var tau = maxf(0.05, float(SG.glide))   # beim Boost genauso flink wie sonst
-		var dl = (tgt - s.lat) * (1.0 - exp(-dt / tau))
-		var want = atan2(dl / maxf(dt, 1e-4), maxf(1.0, s.spd))
-		s.vpsi = clampf(want, -0.6, 0.6)
-		s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.12))
-		s.u = clampf((tgt - s.lat) * 1.2, -1.0, 1.0)
+		if int(cfg.get("ctrl", 1)) == 5:
+			# Spur antippen: fester Zeitplan – ganz außen nach ganz außen dauert „ltime“ Sekunden, egal wie schnell du fährst.
+			# Kurz anfahren, gleichmäßig rüber, weich einrasten; die Nase zeigt nur leicht in die Richtung.
+			tgt = lane_cur * LANE_W
+			var lt = maxf(0.08, float(SG.get("ltime", 0.35)))
+			var vmax = 2.0 * LANE_W / lt * 1.25
+			var amax = vmax / (0.18 * lt)
+			var d = tgt - s.lat
+			var des = clampf(d * vmax / (LANE_W * 0.35), -vmax, vmax)
+			var lv = float(s.get("lv", 0.0))
+			lv += clampf(des - lv, -amax * dt, amax * dt)
+			if absf(d) < 0.004 and absf(lv) < 0.05:
+				lv = 0.0
+			s.lv = lv
+			var spd0 = maxf(0.01, s.spd)
+			s.vpsi = asin(clampf(lv / spd0, -0.3, 0.3))   # Nase: höchstens ~17° in die Wechselrichtung
+			s.lat += (lv - s.spd * sin(s.vpsi)) * dt      # den Rest schiebt das Schwebefeld direkt seitlich
+			s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.08))
+			s.u = clampf(lv / vmax * 1.6, -1.0, 1.0)
+		else:
+			var tau = maxf(0.05, float(SG.glide))   # beim Boost genauso flink wie sonst
+			var dl = (tgt - s.lat) * (1.0 - exp(-dt / tau))
+			var want = atan2(dl / maxf(dt, 1e-4), maxf(1.0, s.spd))
+			s.vpsi = clampf(want, -0.6, 0.6)
+			s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.12))
+			s.u = clampf((tgt - s.lat) * 1.2, -1.0, 1.0)
 	s.slow += (1.0 - s.slow) * (1.0 - exp(-dt / 1.4))
 	s.boost *= exp(-dt / 1.4)
 	if s.out:
@@ -9733,6 +9753,11 @@ func _process(delta: float) -> void:
 	if int(cfg.get("ctrl", 1)) >= 3 and state != "done":
 		steer = ptr_lat
 		steer_btn = 0
+		if int(cfg.get("ctrl", 1)) == 5:
+			steer = float(lane_cur)
+			lane_fl = maxf(0.0, lane_fl - dt * 3.0)
+			if hud.has("lanei"):
+				(hud.lanei as Control).queue_redraw()
 		if int(cfg.get("ctrl", 1)) == 4:
 			# Spur-Modus: der unsichtbare Zeiger wählt die nächste der drei Spuren (mit etwas Spiel gegen Hin- und Herspringen)
 			var want = clampi(int(roundf(ptr_lat)), -1, 1)
@@ -10619,6 +10644,28 @@ func _shot() -> void:
 						_start()
 				if shot_n == 64:
 					print("AGAIN after kids=", get_child_count(), " fx=", fxs.size(), " mines=", mines.size(), " out2=", ships[2].out, " vis2=", (ships[2].node as Node3D).visible, " z=", ships[0].z, " en2=", ships[2].en, " state=", state, " race_t=", race_t)
+			if shot_s.contains("lanetap") and state == "race":
+				# Test: Spur antippen – rechts außen, dann ganz nach links; Zeit messen
+				if shot_n == 40:
+					cfg.ctrl = 5
+				var W = get_viewport().get_visible_rect().size.x
+				var tap = func(x: float):
+					for pr in [true, false]:
+						var te = InputEventScreenTouch.new()
+						te.index = 0
+						te.pressed = pr
+						te.position = Vector2(x, 500)
+						_input(te)
+				if shot_n == 45:
+					tap.call(W * 0.9)
+					set_meta("lt0", race_t)
+				if shot_n == 75:
+					tap.call(W * 0.1)
+					set_meta("lt0", race_t)
+					set_meta("ltd", false)
+				if shot_n >= 45:
+					var tg = lane_cur * LANE_W
+					print("LT n=", shot_n, " t=", snappedf(race_t - float(get_meta("lt0")), 0.001), " lane=", lane_cur, " lat=", snappedf(ships[0].lat, 0.001), " psi=", snappedf(ships[0].psi, 0.01), " spd=", snappedf(ships[0].spd, 0.1))
 			if shot_n == 50 and shot_s.contains("pausetest"):
 				_pause(true)
 				var tm = get_tree().create_timer(1.5, true)
@@ -11790,7 +11837,7 @@ func _stt_build() -> void:
 	var bcm2 = _btn("")
 	bcm2.add_theme_font_size_override("font_size", 24)
 	stt.mbtn = bcm2
-	bcm2.pressed.connect(func(): _set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 5))
+	bcm2.pressed.connect(func(): _set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 6))
 	vb.add_child(bcm2)
 	var sr = HBoxContainer.new()
 	sr.add_theme_constant_override("separation", 10)
@@ -12161,6 +12208,18 @@ func _sw_down(i: int, p: Vector2) -> void:
 	tinfo[i] = {"t": Time.get_ticks_msec() / 1000.0, "p": p, "mv": false}
 	if int(cfg.get("ctrl", 1)) < 1:
 		return
+	if int(cfg.get("ctrl", 1)) == 5:
+		# Spur antippen: linkes / mittleres / rechtes Bildschirmdrittel = Spur; das Schiff bleibt dort, bis du woanders tippst
+		var W = _sw_w()
+		var want = -1 if p.x < W / 3.0 else (1 if p.x > W * 2.0 / 3.0 else 0)
+		if want != lane_cur and (state == "race" or state == "count"):
+			lane_cur = want
+			ptr_lat = float(want)
+			lane_fl = 1.0
+			if float(fx.steer.vib) > 0.5:
+				Input.vibrate_handheld(22)
+			_snd("beep", -18.0, 2.6 + 0.15 * lane_cur)
+		return
 	if sw.idx < 0:
 		sw.idx = i
 		sw.x = p.x
@@ -12175,7 +12234,7 @@ func _sw_down(i: int, p: Vector2) -> void:
 func _sw_drag(i: int, p: Vector2, vel: Vector2) -> void:
 	if tinfo.has(i) and p.distance_to(tinfo[i].p) > _sw_w() * 0.03:
 		tinfo[i].mv = true
-	if i != sw.idx:
+	if i != sw.idx or int(cfg.get("ctrl", 1)) == 5:
 		return
 	if int(cfg.get("ctrl", 1)) >= 3:
 		# wie ein Mauszeiger: nur die Bewegung zählt, Beschleunigung nur im Moment (keine Nachwirkung)
@@ -12217,7 +12276,7 @@ func _sw_up(i: int, p: Vector2) -> void:
 	var now = Time.get_ticks_msec() / 1000.0
 	if tinfo.has(i):
 		var ti: Dictionary = tinfo[i]
-		if not ti.mv and now - float(ti.t) < 0.25 and state == "race":
+		if not ti.mv and now - float(ti.t) < 0.25 and state == "race" and int(cfg.get("ctrl", 1)) != 5:
 			if now - float(tap_last.t) < float(fx.steer.dtap) and p.distance_to(tap_last.p) < _sw_w() * 0.18:
 				fire_req = true
 				tap_last.t = -9.0
@@ -12356,7 +12415,7 @@ func _set_ctrl(m: int) -> void:
 	cfg.ctrl = m
 	_save_cfg()
 	fx_ver += 1
-	ptr_lat = float(lane_cur) if m == 4 else 0.0
+	ptr_lat = float(lane_cur) if m >= 4 else 0.0
 	if not stt.is_empty() and stt.has("rowbox") and is_instance_valid(stt.rowbox):
 		_stt_rows()
 
@@ -12371,12 +12430,14 @@ const STT_ROWS = {
 	2: [["steer", "swrange", "Wischweg bis zum Rand  (mehr = feiner)", 0.02], ["steer", "glide", "Folgezeit  (weniger = flinker)", 0.05], ["steer", "gwidth", "Reichweite zum Rand", 0.05]],
 	3: [["steer", "psens", "Empfindlichkeit  (mehr = weniger Daumenweg)", 0.25], ["steer", "paccel", "Beschleunigung  (mehr = schnelle Züge weiter)", 0.25], ["steer", "glide", "Folgezeit  (weniger = flinker)", 0.05]],
 	4: [["steer", "psens", "Empfindlichkeit  (mehr = kürzerer Wisch pro Spur)", 0.25], ["steer", "paccel", "Beschleunigung  (schneller Ruck = ganz rüber)", 0.25],
-		["steer", "glide", "Einrasten  (weniger = springt flinker in die Spur)", 0.05], ["steer", "vib", "Vibration  (0 aus, 1 an)", 1.0]]}
-const STT_MN = ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)", "TOUCHPAD  (wie ein Mauszeiger)", "SPUREN  (links / Mitte / rechts)"]
+		["steer", "glide", "Einrasten  (weniger = springt flinker in die Spur)", 0.05], ["steer", "vib", "Vibration  (0 aus, 1 an)", 1.0]],
+	5: [["steer", "ltime", "Spurwechsel ganz außen → ganz außen  (Sekunden)", 0.05], ["steer", "vib", "Vibration  (0 aus / 1 an)", 1.0]]}
+
+const STT_MN = ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)", "TOUCHPAD  (wie ein Mauszeiger)", "SPUREN  (links / Mitte / rechts)", "SPUR ANTIPPEN  (Bildschirm-Drittel tippen)"]
 
 
 func _stt_rows() -> void:
-	var m = clampi(int(cfg.get("ctrl", 1)), 0, 4)
+	var m = clampi(int(cfg.get("ctrl", 1)), 0, 5)
 	(stt.mbtn as Button).text = "Lenken: " + STT_MN[m]
 	var vb: VBoxContainer = stt.rowbox
 	for c in vb.get_children():
@@ -12423,7 +12484,7 @@ func _stt_rows() -> void:
 
 
 func _lane_draw(c: Control) -> void:
-	if int(cfg.get("ctrl", 1)) != 4 or not (state == "race" or state == "count"):
+	if int(cfg.get("ctrl", 1)) < 4 or not (state == "race" or state == "count"):
 		return
 	var vp = c.size
 	var k = vp.x / 941.0
@@ -12630,10 +12691,10 @@ func _pause(on: bool) -> void:
 	bx.add_child(b1)
 	var bc = _btn("")
 	bc.add_theme_font_size_override("font_size", 30)
-	var cset = func(): bc.text = "Steering: " + CTRL_N[clampi(int(cfg.get("ctrl", 1)), 0, 4)]
+	var cset = func(): bc.text = "Steering: " + CTRL_N[clampi(int(cfg.get("ctrl", 1)), 0, 5)]
 	cset.call()
 	bc.pressed.connect(func():
-		_set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 5)
+		_set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 6)
 		cset.call())
 	bx.add_child(bc)
 	var vl = _lbl("", 30)
