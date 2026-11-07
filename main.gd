@@ -9088,6 +9088,9 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 			# Kurz anfahren, gleichmäßig rüber, weich einrasten; die Nase zeigt nur leicht in die Richtung.
 			tgt = lane_cur * LANE_W
 			var lt = maxf(0.08, float(SG.get("ltime", 0.35)))
+			# schneller als Reisetempo (Boost-Feld): Wechsel entsprechend flotter, damit er auf der Strecke gleich kurz wirkt
+			# (sonst braucht er bei 1,6-fachem Tempo 60 % mehr Strecke – das fühlt sich verzögert an)
+			lt /= 1.0 + 0.6 * clampf(float(s.boost), 0.0, 1.5)
 			var vmax = 2.0 * LANE_W / lt * 1.25
 			var amax = vmax / (0.18 * lt)
 			var d = tgt - s.lat
@@ -10740,6 +10743,8 @@ func _shot() -> void:
 						_input(te2)
 						print("LT released")
 				elif shot_n == 75 or shot_n == 77:
+					if shot_s.contains("laneboost"):
+						ships[0].boost = 1.0
 					tap.call(W * 0.1)
 					if shot_n == 75:
 						set_meta("lt0", race_t)
