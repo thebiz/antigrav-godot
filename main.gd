@@ -3818,7 +3818,7 @@ func _hud() -> void:
 	cl.add_child(gac)
 	gac.draw.connect(func(): _ga_draw(gac))
 	hud.ga = gac
-	# Spur-Anzeige: fünf Rauten über dem Waffenrad, die aktuelle leuchtet, blitzt beim Einrasten
+	# Spur-Anzeige: drei Rauten über dem Waffenrad, die aktuelle leuchtet, blitzt beim Einrasten
 	var lni = Control.new()
 	lni.set_anchors_preset(Control.PRESET_FULL_RECT)
 	lni.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -4521,7 +4521,7 @@ func _menu() -> void:
 		_save_cfg()
 		bhd.text = "HUD style: " + HN[int(cfg.hud)])
 	sp.add_child(bhd)
-	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center", "Touchpad – move like a mouse", "Lanes – 5 lanes, snap in"]
+	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center", "Touchpad – move like a mouse", "Lanes – left / middle / right"]
 	var bct = _btn("Steering: " + CN[clampi(int(cfg.get("ctrl", 1)), 0, 4)])
 	bct.add_theme_font_size_override("font_size", 30)
 	bct.pressed.connect(func():
@@ -4958,9 +4958,9 @@ func _wpx(k: int) -> float:
 	return _lane_snap(_wpx0(k))
 
 
-# Felder und Säulen liegen immer genau auf einer der fünf Spuren
+# Felder und Säulen liegen immer genau auf einer der drei Spuren
 func _lane_snap(v: float) -> float:
-	return clampi(int(roundf(v / 0.4)), -2, 2) * LANE_W
+	return clampi(int(roundf(v / 0.5)), -1, 1) * LANE_W
 
 
 func _bpx0(k: int) -> float:
@@ -6591,7 +6591,7 @@ const FX_MODES = {
 	"steer.psens": [3, 4], "steer.paccel": [3, 4], "steer.vib": [4], "steer.dtap": [1, 2, 3, 4],
 	"ship.steer": [0, 1], "ship.steerk": [0, 1], "ship.grip": [0, 1], "ship.drift": [0, 1], "ship.center": [0, 1], "ship.spdst": [0, 1]}
 const CTRL_CURVES = [["press", "release"], ["swipe", "swvel", "release"], ["swipe"], [], []]
-const LANE_W = 1.0   # Abstand der fünf Spuren (Spur −2 … 2)
+const LANE_W = 1.4   # Abstand der drei Spuren (links −1, Mitte 0, rechts 1)
 
 # Erklärungen zu den Reglern (Tooltip auf der Live-Seite am PC)
 const FX_INFO = {
@@ -6729,7 +6729,7 @@ const FX_INFO = {
 	"steer.revmode": "1 = Wischst du zurück, lenkt das Schiff sofort sanft in die Gegenrichtung (die Mitte springt unter deinen Daumen). 0 = wie ein Joystick: erst wenn du über die Mitte zurück bist, lenkst du in die andere Richtung.",
 	"steer.revbuf": "Wie weit (Anteil der Bildschirmbreite) du zurückwischen musst, bis es als Richtungswechsel zählt. Schluckt Daumenzittern. Klein halten, sonst fühlt sich der Wechsel verzögert an.",
 	"steer.velmin": "Ab welchem Wischtempo der Extra-Schub überhaupt greift. Höher = nur ein klarer, schneller Ruck gibt Extra, normale Bewegungen bleiben immer sanft.",
-	"steer.psens": "Touchpad-Modus: wie weit das Schiff pro Daumenweg rutscht. 3 = ein Drittel Bildschirmbreite schiebt es von der Mitte bis an den Rand. Höher = weniger Daumenweg nötig.",
+	"steer.psens": "Touchpad- und Spur-Modus: wie weit das Schiff pro Daumenweg rutscht. 3 = ein Drittel Bildschirmbreite schiebt es von der Mitte bis an den Rand. Höher = weniger Daumenweg nötig.",
 	"steer.paccel": "Touchpad-Modus: Mausbeschleunigung. Schnelle Bewegungen schieben weiter, langsame bleiben fein. Gilt nur im Moment der Bewegung – abbremsen und sanft zurück ist sofort wieder fein. 0 = immer gleich.",
 	"steer.vib": "Spur-Modus: kurze Vibration, wenn das Schiff in eine neue Spur einrastet. 0 = aus.",
 	"steer.dtap": "Wie schnell zwei Tipper aufeinander folgen müssen, damit die Waffe feuert. Größer = leichter auszulösen, aber eher aus Versehen.",
@@ -9671,15 +9671,15 @@ func _process(delta: float) -> void:
 		steer = ptr_lat
 		steer_btn = 0
 		if int(cfg.get("ctrl", 1)) == 4:
-			# Spur-Modus: der unsichtbare Zeiger wählt die nächste der fünf Spuren (mit etwas Spiel gegen Hin- und Herspringen)
-			var want = clampi(int(roundf(ptr_lat * 2.0)), -2, 2)
-			if want != lane_cur and absf(ptr_lat * 2.0 - lane_cur) > 0.62:
+			# Spur-Modus: der unsichtbare Zeiger wählt die nächste der drei Spuren (mit etwas Spiel gegen Hin- und Herspringen)
+			var want = clampi(int(roundf(ptr_lat)), -1, 1)
+			if want != lane_cur and absf(ptr_lat - lane_cur) > 0.62:
 				lane_cur = want
 				lane_fl = 1.0
 				if float(fx.steer.vib) > 0.5:
 					Input.vibrate_handheld(22)
 				_snd("beep", -18.0, 2.6 + 0.15 * lane_cur)
-			steer = lane_cur / 2.0
+			steer = float(lane_cur)
 			lane_fl = maxf(0.0, lane_fl - dt * 3.0)
 			if hud.has("lanei"):
 				(hud.lanei as Control).queue_redraw()
@@ -12054,6 +12054,8 @@ func _sw_drag(i: int, p: Vector2, vel: Vector2) -> void:
 		var W = _sw_w()
 		var vn = clampf(absf(vel.x) / (W * 2.0), 0.0, 1.0)
 		var gain = float(fx.steer.psens) * (1.0 + float(fx.steer.paccel) * vn * vn)
+		if int(cfg.get("ctrl", 1)) == 4:
+			gain *= 2.0   # Spuren: ein kurzer Wisch (ca. 1/6 Bildschirmbreite) reicht für eine Spur
 		ptr_lat = clampf(ptr_lat + (p.x - sw.x) / W * gain, -1.0, 1.0)
 		sw.x = p.x
 		return
@@ -12226,7 +12228,7 @@ func _set_ctrl(m: int) -> void:
 	cfg.ctrl = m
 	_save_cfg()
 	fx_ver += 1
-	ptr_lat = lane_cur / 2.0 if m == 4 else 0.0
+	ptr_lat = float(lane_cur) if m == 4 else 0.0
 	if not stt.is_empty() and stt.has("rowbox") and is_instance_valid(stt.rowbox):
 		_stt_rows()
 
@@ -12240,9 +12242,9 @@ const STT_ROWS = {
 		["steer", "swrange", "Wischweg bis voll  (mehr = feiner)", 0.02], ["ship", "center", "Auto-Gerade  (mehr = Nase schneller gerade)", 0.25], ["ship", "spdst", "Tempo-Dämpfung  (mehr = ruhiger bei Speed)", 0.1]],
 	2: [["steer", "swrange", "Wischweg bis zum Rand  (mehr = feiner)", 0.02], ["steer", "glide", "Folgezeit  (weniger = flinker)", 0.05], ["steer", "gwidth", "Reichweite zum Rand", 0.05]],
 	3: [["steer", "psens", "Empfindlichkeit  (mehr = weniger Daumenweg)", 0.25], ["steer", "paccel", "Beschleunigung  (mehr = schnelle Züge weiter)", 0.25], ["steer", "glide", "Folgezeit  (weniger = flinker)", 0.05]],
-	4: [["steer", "psens", "Empfindlichkeit  (mehr = weniger Daumenweg pro Spur)", 0.25], ["steer", "paccel", "Beschleunigung  (schneller Ruck = mehrere Spuren)", 0.25],
+	4: [["steer", "psens", "Empfindlichkeit  (mehr = kürzerer Wisch pro Spur)", 0.25], ["steer", "paccel", "Beschleunigung  (schneller Ruck = ganz rüber)", 0.25],
 		["steer", "glide", "Einrasten  (weniger = springt flinker in die Spur)", 0.05], ["steer", "vib", "Vibration  (0 aus, 1 an)", 1.0]]}
-const STT_MN = ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)", "TOUCHPAD  (wie ein Mauszeiger)", "SPUREN  (5 Spuren, einrasten)"]
+const STT_MN = ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)", "TOUCHPAD  (wie ein Mauszeiger)", "SPUREN  (links / Mitte / rechts)"]
 
 
 func _stt_rows() -> void:
@@ -12299,8 +12301,8 @@ func _lane_draw(c: Control) -> void:
 	var k = vp.x / 941.0
 	var cy = vp.y - (1672.0 - 1118.0) * k - 22.0
 	var gap = 58.0
-	c.draw_rect(Rect2(vp.x * 0.5 - gap * 2.6, cy - 20, gap * 5.2, 40), Color(0, 0, 0, 0.45))
-	for i in range(-2, 3):
+	c.draw_rect(Rect2(vp.x * 0.5 - gap * 1.6, cy - 20, gap * 3.2, 40), Color(0, 0, 0, 0.45))
+	for i in range(-1, 2):
 		var p = Vector2(vp.x * 0.5 + i * gap, cy)
 		var on = i == lane_cur
 		var r = 12.0 + (6.0 * lane_fl if on else 0.0)
