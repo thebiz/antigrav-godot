@@ -693,7 +693,8 @@ const FXS = {
 		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0],
 		["center", "Auto-center nose", 0.0, 3.0, 1.0], ["spdst", "Softer steering at speed", 0.0, 2.0, 0.5]],
 	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0],
-		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35]],
+		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35],
+		["glide", "Glide: follow time", 0.05, 1.0, 0.25], ["gwidth", "Glide: reach to edge", 0.3, 1.0, 0.85], ["gpull", "Glide: curve & boost pull", 0.0, 2.0, 0.5]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -4469,12 +4470,13 @@ func _menu() -> void:
 		_save_cfg()
 		bhd.text = "HUD style: " + HN[int(cfg.hud)])
 	sp.add_child(bhd)
-	var bct = _btn("Steering: " + ("Swipe (double-tap = fire)" if int(cfg.get("ctrl", 1)) == 1 else "Tap left / right"))
+	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center"]
+	var bct = _btn("Steering: " + CN[clampi(int(cfg.get("ctrl", 1)), 0, 2)])
 	bct.add_theme_font_size_override("font_size", 30)
 	bct.pressed.connect(func():
-		cfg.ctrl = 1 - int(cfg.get("ctrl", 1))
+		cfg.ctrl = (int(cfg.get("ctrl", 1)) + 1) % 3
 		_save_cfg()
-		bct.text = "Steering: " + ("Swipe (double-tap = fire)" if int(cfg.ctrl) == 1 else "Tap left / right"))
+		bct.text = "Steering: " + CN[int(cfg.ctrl)])
 	sp.add_child(bct)
 	var blv = _btn("Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off"))
 	blv.add_theme_font_size_override("font_size", 30)
@@ -6636,6 +6638,9 @@ const FX_INFO = {
 	"steer.swrange": "Wisch-Lenkung: wie weit (Anteil der Bildschirmbreite) du den Daumen schieben musst, bis voll gelenkt wird. Kleiner = schon kurze Wischer lenken stark, größer = feiner dosierbar.",
 	"steer.velk": "Wisch-Lenkung: wie viel extra gelenkt wird, wenn du schnell wischst (Form über die Kurve „Wischtempo“). 0 = nur der Wischweg zählt.",
 	"steer.hold": "Wisch-Lenkung: wie lange die Lenkung festgehalten wird, wenn du den Daumen kurz abhebst (z. B. zum Doppeltippen). Setzt du in der Zeit wieder auf, lenkst du nahtlos weiter.",
+	"steer.glide": "Gleit-Modus: wie schnell das Schiff zur Stelle rutscht, die dein Daumen vorgibt (und beim Loslassen zurück zur Mitte). Kleiner = flink, größer = weich und träge.",
+	"steer.gwidth": "Gleit-Modus: wie weit du das Schiff bei vollem Wisch zum Rand schieben kannst. 1 = bis kurz vor die Bande.",
+	"steer.gpull": "Gleit-Modus: wie stark Kurven und Boost das Schiff nach außen ziehen. Dagegen musst du anwischen. 0 = Schiff bleibt immer genau dort, wo du es hinschiebst.",
 	"steer.dtap": "Wie schnell zwei Tipper aufeinander folgen müssen, damit die Waffe feuert. Größer = leichter auszulösen, aber eher aus Versehen.",
 	"steer.delay": "Verzögerung zwischen Tippen und Lenken. Normalerweise 0 lassen, höher fühlt sich schwammig an.",
 	"env.city": "Hochhäuser neben der Strecke an oder aus.",
@@ -6876,7 +6881,7 @@ func _live_ws_poll() -> void:
 		return
 	var g: Dictionary = ships[0] if not ships.is_empty() else {}
 	var SD: Dictionary = fx.steer
-	var swc = int(cfg.get("ctrl", 1)) == 1
+	var swc = int(cfg.get("ctrl", 1)) >= 1
 	var msg = JSON.stringify({"ver": fx_ver, "b": steer_btn, "c": 1 if swc else 0, "sx": float(sw.m) if swc and sw.idx >= 0 else -1.0, "vx": float(sw.vm) if swc and sw.idx >= 0 else -1.0,
 		"px": clampf(btn_t / maxf(0.05, float(SD.ptime)), 0.0, 1.0) if steer_btn != 0 else -1.0,
 		"rx": clampf(rel_t / maxf(0.001, float(SD.rtime)), 0.0, 1.0) if steer_btn == 0 and rel_t < float(SD.rtime) else -1.0,
@@ -8885,6 +8890,19 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.15))
 		s.slow = 1.0
 		s.slowT = 0.0
+	if is_p and not ap and not s.out and int(cfg.get("ctrl", 1)) == 2 and (racing or state == "count"):
+		# Gleit-Modus: das Schiff fährt die Kurven selbst und gleitet zur Spur, die der Daumen vorgibt;
+		# loslassen = zurück zur Mitte. Kurven und Boost ziehen etwas nach außen, die Ränder federn ab.
+		var SG: Dictionary = fx.steer
+		var lim = T.TW - 0.35
+		var pull = clampf(T.kap(z) * maxf(1.0, s.spd) * 6.0, -1.0, 1.0) * float(SG.gpull) * (0.5 + s.boost) * lim * 0.5
+		var tgt = clampf(glide_in * float(SG.gwidth) * lim + pull, -lim, lim)
+		var tau = maxf(0.05, float(SG.glide)) * (1.0 + 0.5 * clampf(s.boost, 0.0, 1.0))
+		var dl = (tgt - s.lat) * (1.0 - exp(-dt / tau))
+		var want = atan2(dl / maxf(dt, 1e-4), maxf(1.0, s.spd))
+		s.vpsi = clampf(want, -0.6, 0.6)
+		s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.12))
+		s.u = clampf((tgt - s.lat) * 1.2, -1.0, 1.0)
 	s.slow += (1.0 - s.slow) * (1.0 - exp(-dt / 1.4))
 	s.boost *= exp(-dt / 1.4)
 	if s.out:
@@ -9514,7 +9532,7 @@ func _process(delta: float) -> void:
 	if racing or state == "done":
 		race_t += dt
 	# Lenkung mit Anlaufkurve
-	var swm = int(cfg.get("ctrl", 1)) == 1 and (state == "race" or state == "count")
+	var swm = int(cfg.get("ctrl", 1)) >= 1 and (state == "race" or state == "count")
 	var b = _steer_input()
 	if swm and not (Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_RIGHT)):
 		b = 0
@@ -9549,6 +9567,7 @@ func _process(delta: float) -> void:
 			steer = sws
 			steer_btn = int(signf(steer)) if absf(steer) > 0.01 else 0
 	last_steer = steer
+	glide_in = clampf(steer, -1.0, 1.0)
 	if T.S:
 		_stt_update(dt)
 	_steer_glow(dt, steer)
@@ -10379,8 +10398,8 @@ func _shot() -> void:
 					ie.index = e[1]
 					ie.position = Vector2(e[2], 900)
 					Input.parse_input_event(ie)
-				if shot_n in [46, 50, 55, 62, 66]:
-					print("SWT n=", shot_n, " steer=", last_steer, " m=", sw.m, " idx=", sw.idx, " wpn=", ships[0].wpn, " fire=", fire_req)
+				if shot_n in [44, 46, 50, 55, 62, 66, 90, 120]:
+					print("SWT n=", shot_n, " lat=", ships[0].lat, " z=", ships[0].z, " steer=", last_steer, " m=", sw.m, " idx=", sw.idx, " wpn=", ships[0].wpn, " fire=", fire_req)
 			if shot_n == 60 and shot_s.contains(",ko"):
 				_comic_start("ko", 1)
 			if shot_n >= 2 and p.size() > 2 and p[2].begins_with("st"):
@@ -11527,10 +11546,10 @@ func _stt_build() -> void:
 	pnl.add_child(vb)
 	var bcm2 = _btn("")
 	bcm2.add_theme_font_size_override("font_size", 24)
-	var ctl_txt = func(): bcm2.text = "Lenken: " + ("WISCHEN  (Doppeltipp = Feuer)" if int(cfg.get("ctrl", 1)) == 1 else "TIPPEN links / rechts")
+	var ctl_txt = func(): bcm2.text = "Lenken: " + ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)"][clampi(int(cfg.get("ctrl", 1)), 0, 2)]
 	ctl_txt.call()
 	bcm2.pressed.connect(func():
-		cfg.ctrl = 1 - int(cfg.get("ctrl", 1))
+		cfg.ctrl = (int(cfg.get("ctrl", 1)) + 1) % 3
 		_save_cfg()
 		ctl_txt.call())
 	vb.add_child(bcm2)
@@ -11740,7 +11759,7 @@ func _ga_frame(g: Dictionary, dt: float) -> void:
 	var k = get_viewport().get_visible_rect().size.x / GA_W
 	var f: Label = hud.fire
 	f.modulate.a = 0.0
-	if int(cfg.get("ctrl", 1)) == 1:
+	if int(cfg.get("ctrl", 1)) >= 1:
 		# Wisch-Lenkung: nur der kleine FIRE-Kreis feuert, der Rest ist Lenkfläche
 		f.offset_left = -62.0 * k
 		f.offset_right = 62.0 * k
@@ -11908,6 +11927,7 @@ func _ga_draw(c: Control) -> void:
 # (Stärke über die Kurve „Wischweg“, schnelles Wischen gibt Extra über „Wischtempo“). Schiebt man weiter als
 # den vollen Ausschlag, wandert die Mitte mit, damit der Rückweg sofort wirkt. Kurz abheben hält die Lenkung fest.
 # Zwei schnelle Tipper (ohne Wischen) – mit welchem Finger auch immer – feuern die Waffe.
+var glide_in = 0.0   # Gleit-Modus: gewünschte Spur −1 … 1 (aus Wisch-Lenkung)
 var sw = {"idx": -1, "ax": 0.0, "x": 0.0, "v": 0.0, "hold": 0.0, "keep": 0.0, "last": 0.0, "m": 0.0, "vm": 0.0}
 var tinfo = {}
 var tap_last = {"t": -9.0, "p": Vector2.ZERO}
@@ -11919,7 +11939,7 @@ func _sw_w() -> float:
 
 func _sw_down(i: int, p: Vector2) -> void:
 	tinfo[i] = {"t": Time.get_ticks_msec() / 1000.0, "p": p, "mv": false}
-	if int(cfg.get("ctrl", 1)) != 1:
+	if int(cfg.get("ctrl", 1)) < 1:
 		return
 	if sw.idx < 0:
 		sw.idx = i
