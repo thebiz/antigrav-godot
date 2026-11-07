@@ -710,12 +710,12 @@ const FXS = {
 		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0], ["trim", "Nose trim (down +)", -1.0, 1.0, 0.0],
 		["weight", "Tassel weight", 0.1, 3.0, 1.0], ["swing", "Tassel swing", 0.1, 3.0, 1.0], ["wind", "Tassel wind (driving)", 0.0, 3.0, 1.0],
 		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0],
-		["center", "Auto-center nose", 0.0, 3.0, 1.0], ["spdst", "Softer steering at speed", 0.0, 2.0, 0.5]],
+		["center", "Auto-center nose", 0.0, 3.0, 1.0], ["spdst", "Softer steering at speed", 0.0, 2.0, 0.25]],
 	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0],
 		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35],
 		["revmode", "Swipe: reverse = counter-steer (0 off / 1 on)", 0.0, 1.0, 1.0], ["revbuf", "Swipe: reverse buffer", 0.0, 0.04, 0.008], ["velmin", "Swipe: speed boost threshold", 0.0, 0.9, 0.35],
 		["psens", "Pointer: sensitivity", 0.5, 8.0, 3.0], ["paccel", "Pointer: acceleration", 0.0, 4.0, 1.0],
-		["glide", "Glide: follow time", 0.05, 1.0, 0.25], ["gwidth", "Glide: reach to edge", 0.3, 1.0, 0.85], ["gpull", "Glide: curve & boost pull", 0.0, 2.0, 0.5]],
+		["glide", "Glide: follow time", 0.05, 1.0, 0.25], ["gwidth", "Glide: reach to edge", 0.3, 1.0, 0.85], ["gpull", "Glide: curve pull", 0.0, 2.0, 0.5]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -6690,7 +6690,7 @@ const FX_INFO = {
 	"steer.hold": "Wisch-Lenkung: wie lange die Lenkung festgehalten wird, wenn du den Daumen kurz abhebst (z. B. zum Doppeltippen). Setzt du in der Zeit wieder auf, lenkst du nahtlos weiter.",
 	"steer.glide": "Gleit-Modus: wie schnell das Schiff zur Stelle rutscht, die dein Daumen vorgibt (und beim Loslassen zurück zur Mitte). Kleiner = flink, größer = weich und träge.",
 	"steer.gwidth": "Gleit-Modus: wie weit du das Schiff bei vollem Wisch zum Rand schieben kannst. 1 = bis kurz vor die Bande.",
-	"steer.gpull": "Gleit-Modus: wie stark Kurven und Boost das Schiff nach außen ziehen. Dagegen musst du anwischen. 0 = Schiff bleibt immer genau dort, wo du es hinschiebst.",
+	"steer.gpull": "Gleit- und Touchpad-Modus: wie stark Kurven das Schiff leicht nach außen ziehen (Boost zieht nicht extra). 0 = Schiff bleibt immer genau dort, wo du es hinschiebst.",
 	"steer.revmode": "1 = Wischst du zurück, lenkt das Schiff sofort sanft in die Gegenrichtung (die Mitte springt unter deinen Daumen). 0 = wie ein Joystick: erst wenn du über die Mitte zurück bist, lenkst du in die andere Richtung.",
 	"steer.revbuf": "Wie weit (Anteil der Bildschirmbreite) du zurückwischen musst, bis es als Richtungswechsel zählt. Schluckt Daumenzittern. Klein halten, sonst fühlt sich der Wechsel verzögert an.",
 	"steer.velmin": "Ab welchem Wischtempo der Extra-Schub überhaupt greift. Höher = nur ein klarer, schneller Ruck gibt Extra, normale Bewegungen bleiben immer sanft.",
@@ -8925,7 +8925,9 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	var yk = YAW_P * float(SH.steerk) if is_p else YAW_AI
 	if is_p:
 		# bei hohem Tempo sanfter lenken, sonst schießt das Schiff zur Seite
-		yk /= 1.0 + float(SH.get("spdst", 0.5)) * maxf(0.0, s.spd / maxf(1.0, base_spd) - 0.7) * 1.5
+		# geglättetes Tempo: beim Boost-Feld wird die Lenkung fließend weicher, nie schlagartig
+		s.sps = lerpf(float(s.get("sps", s.spd)), s.spd, 1.0 - exp(-dt / 0.5))
+		yk /= 1.0 + float(SH.get("spdst", 0.25)) * maxf(0.0, float(s.sps) / maxf(1.0, base_spd) - 0.8)
 	s.psi = clampf(s.psi + (s.u * yk + turn) * dt, -0.9, 0.9)
 	if is_p and not s.air:
 		# Auto-center: ohne Lenken dreht sich die Nase wieder in Fahrtrichtung
@@ -8950,9 +8952,9 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		# loslassen = zurück zur Mitte. Kurven und Boost ziehen etwas nach außen, die Ränder federn ab.
 		var SG: Dictionary = fx.steer
 		var lim = T.TW - 0.35
-		var pull = clampf(T.kap(z) * maxf(1.0, s.spd) * 6.0, -1.0, 1.0) * float(SG.gpull) * (0.5 + s.boost) * lim * 0.5
+		var pull = clampf(T.kap(z) * maxf(1.0, s.spd) * 6.0, -1.0, 1.0) * float(SG.gpull) * lim * 0.25   # nur Kurven, Boost zieht nicht extra
 		var tgt = clampf(glide_in * float(SG.gwidth) * lim + pull, -lim, lim)
-		var tau = maxf(0.05, float(SG.glide)) * (1.0 + 0.5 * clampf(s.boost, 0.0, 1.0))
+		var tau = maxf(0.05, float(SG.glide))   # beim Boost genauso flink wie sonst
 		var dl = (tgt - s.lat) * (1.0 - exp(-dt / tau))
 		var want = atan2(dl / maxf(dt, 1e-4), maxf(1.0, s.spd))
 		s.vpsi = clampf(want, -0.6, 0.6)
