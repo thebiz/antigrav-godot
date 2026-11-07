@@ -714,6 +714,7 @@ const FXS = {
 	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0],
 		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35],
 		["revmode", "Swipe: reverse = counter-steer (0 off / 1 on)", 0.0, 1.0, 1.0], ["revbuf", "Swipe: reverse buffer", 0.0, 0.04, 0.008], ["velmin", "Swipe: speed boost threshold", 0.0, 0.9, 0.35],
+		["psens", "Pointer: sensitivity", 0.5, 8.0, 3.0], ["paccel", "Pointer: acceleration", 0.0, 4.0, 1.0],
 		["glide", "Glide: follow time", 0.05, 1.0, 0.25], ["gwidth", "Glide: reach to edge", 0.3, 1.0, 0.85], ["gpull", "Glide: curve & boost pull", 0.0, 2.0, 0.5]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
@@ -4513,11 +4514,11 @@ func _menu() -> void:
 		_save_cfg()
 		bhd.text = "HUD style: " + HN[int(cfg.hud)])
 	sp.add_child(bhd)
-	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center"]
-	var bct = _btn("Steering: " + CN[clampi(int(cfg.get("ctrl", 1)), 0, 2)])
+	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center", "Touchpad – move like a mouse"]
+	var bct = _btn("Steering: " + CN[clampi(int(cfg.get("ctrl", 1)), 0, 3)])
 	bct.add_theme_font_size_override("font_size", 30)
 	bct.pressed.connect(func():
-		cfg.ctrl = (int(cfg.get("ctrl", 1)) + 1) % 3
+		cfg.ctrl = (int(cfg.get("ctrl", 1)) + 1) % 4
 		_save_cfg()
 		bct.text = "Steering: " + CN[int(cfg.ctrl)])
 	sp.add_child(bct)
@@ -4697,6 +4698,7 @@ func _start() -> void:
 		ships[i].sk0 = ships[i].sk
 	state = "intro"
 	t_state = 0.0
+	ptr_lat = 0.0
 	ui.root.visible = false
 	hud.layer.visible = true
 	if int(cfg.get("comic", 1)) == 1 and not free_ride and rpf.is_empty() and (shot_s in ["", "?"] or shot_s.contains("comic")):
@@ -6692,6 +6694,8 @@ const FX_INFO = {
 	"steer.revmode": "1 = Wischst du zurück, lenkt das Schiff sofort sanft in die Gegenrichtung (die Mitte springt unter deinen Daumen). 0 = wie ein Joystick: erst wenn du über die Mitte zurück bist, lenkst du in die andere Richtung.",
 	"steer.revbuf": "Wie weit (Anteil der Bildschirmbreite) du zurückwischen musst, bis es als Richtungswechsel zählt. Schluckt Daumenzittern. Klein halten, sonst fühlt sich der Wechsel verzögert an.",
 	"steer.velmin": "Ab welchem Wischtempo der Extra-Schub überhaupt greift. Höher = nur ein klarer, schneller Ruck gibt Extra, normale Bewegungen bleiben immer sanft.",
+	"steer.psens": "Touchpad-Modus: wie weit das Schiff pro Daumenweg rutscht. 3 = ein Drittel Bildschirmbreite schiebt es von der Mitte bis an den Rand. Höher = weniger Daumenweg nötig.",
+	"steer.paccel": "Touchpad-Modus: Mausbeschleunigung. Schnelle Bewegungen schieben weiter, langsame bleiben fein. Gilt nur im Moment der Bewegung – abbremsen und sanft zurück ist sofort wieder fein. 0 = immer gleich.",
 	"steer.dtap": "Wie schnell zwei Tipper aufeinander folgen müssen, damit die Waffe feuert. Größer = leichter auszulösen, aber eher aus Versehen.",
 	"steer.delay": "Verzögerung zwischen Tippen und Lenken. Normalerweise 0 lassen, höher fühlt sich schwammig an.",
 	"env.city": "Hochhäuser neben der Strecke an oder aus.",
@@ -8941,7 +8945,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.15))
 		s.slow = 1.0
 		s.slowT = 0.0
-	if is_p and not ap and not s.out and int(cfg.get("ctrl", 1)) == 2 and (racing or state == "count"):
+	if is_p and not ap and not s.out and int(cfg.get("ctrl", 1)) >= 2 and (racing or state == "count"):
 		# Gleit-Modus: das Schiff fährt die Kurven selbst und gleitet zur Spur, die der Daumen vorgibt;
 		# loslassen = zurück zur Mitte. Kurven und Boost ziehen etwas nach außen, die Ränder federn ab.
 		var SG: Dictionary = fx.steer
@@ -9617,6 +9621,9 @@ func _process(delta: float) -> void:
 		if sws != null:
 			steer = sws
 			steer_btn = int(signf(steer)) if absf(steer) > 0.01 else 0
+	if int(cfg.get("ctrl", 1)) == 3 and state != "done":
+		steer = ptr_lat
+		steer_btn = 0
 	last_steer = steer
 	glide_in = clampf(steer, -1.0, 1.0)
 	if T.S:
@@ -10450,7 +10457,7 @@ func _shot() -> void:
 					ie.position = Vector2(e[2], 900)
 					Input.parse_input_event(ie)
 				if shot_n in [44, 46, 50, 55, 62, 66, 90, 120]:
-					print("SWT n=", shot_n, " lat=", ships[0].lat, " z=", ships[0].z, " steer=", last_steer, " m=", sw.m, " idx=", sw.idx, " wpn=", ships[0].wpn, " fire=", fire_req)
+					print("SWT n=", shot_n, " ptr=", ptr_lat, " lat=", ships[0].lat, " z=", ships[0].z, " steer=", last_steer, " m=", sw.m, " idx=", sw.idx, " wpn=", ships[0].wpn, " fire=", fire_req)
 			if shot_n == 60 and shot_s.contains(",ko"):
 				_comic_start("ko", 1)
 			if shot_n >= 2 and p.size() > 2 and p[2].begins_with("st"):
@@ -11597,10 +11604,10 @@ func _stt_build() -> void:
 	pnl.add_child(vb)
 	var bcm2 = _btn("")
 	bcm2.add_theme_font_size_override("font_size", 24)
-	var ctl_txt = func(): bcm2.text = "Lenken: " + ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)"][clampi(int(cfg.get("ctrl", 1)), 0, 2)]
+	var ctl_txt = func(): bcm2.text = "Lenken: " + ["TIPPEN links / rechts", "WISCHEN  (Doppeltipp = Feuer)", "GLEITEN  (Mitte halten, wischen = rüberrutschen)", "TOUCHPAD  (wie ein Mauszeiger)"][clampi(int(cfg.get("ctrl", 1)), 0, 3)]
 	ctl_txt.call()
 	bcm2.pressed.connect(func():
-		cfg.ctrl = (int(cfg.get("ctrl", 1)) + 1) % 3
+		cfg.ctrl = (int(cfg.get("ctrl", 1)) + 1) % 4
 		_save_cfg()
 		ctl_txt.call())
 	vb.add_child(bcm2)
@@ -11637,7 +11644,8 @@ func _stt_build() -> void:
 		pr.add_child(b)
 	stt.rows = []
 	for r in [["ship", "steer", "Trägheit  (weniger = reagiert schneller)", 0.1], ["ship", "steerk", "Lenkkraft  (mehr = engere Kurven)", 0.05], ["steer", "ptime", "Anlaufzeit  (kürzer = sofort volle Kraft)", 0.05],
-			["ship", "center", "Auto-Gerade  (mehr = Nase stellt sich schneller gerade)", 0.25], ["ship", "spdst", "Tempo-Dämpfung  (mehr = ruhiger bei Speed)", 0.1]]:
+			["ship", "center", "Auto-Gerade  (mehr = Nase stellt sich schneller gerade)", 0.25], ["ship", "spdst", "Tempo-Dämpfung  (mehr = ruhiger bei Speed)", 0.1],
+			["steer", "psens", "Touchpad: Empfindlichkeit  (mehr = weniger Daumenweg)", 0.25], ["steer", "paccel", "Touchpad: Beschleunigung  (mehr = schnelle Züge weiter)", 0.25]]:
 		var row = HBoxContainer.new()
 		row.add_theme_constant_override("separation", 10)
 		vb.add_child(row)
@@ -11978,6 +11986,7 @@ func _ga_draw(c: Control) -> void:
 # (Stärke über die Kurve „Wischweg“, schnelles Wischen gibt Extra über „Wischtempo“). Schiebt man weiter als
 # den vollen Ausschlag, wandert die Mitte mit, damit der Rückweg sofort wirkt. Kurz abheben hält die Lenkung fest.
 # Zwei schnelle Tipper (ohne Wischen) – mit welchem Finger auch immer – feuern die Waffe.
+var ptr_lat = 0.0    # Touchpad-Modus: Spur −1 … 1, bleibt stehen, wenn man loslässt
 var glide_in = 0.0   # Gleit-Modus: gewünschte Spur −1 … 1 (aus Wisch-Lenkung)
 var sw = {"idx": -1, "ax": 0.0, "x": 0.0, "v": 0.0, "hold": 0.0, "keep": 0.0, "last": 0.0, "m": 0.0, "vm": 0.0}
 var tinfo = {}
@@ -12008,6 +12017,14 @@ func _sw_drag(i: int, p: Vector2, vel: Vector2) -> void:
 		tinfo[i].mv = true
 	if i != sw.idx:
 		return
+	if int(cfg.get("ctrl", 1)) == 3:
+		# wie ein Mauszeiger: nur die Bewegung zählt, Beschleunigung nur im Moment (keine Nachwirkung)
+		var W = _sw_w()
+		var vn = clampf(absf(vel.x) / (W * 2.0), 0.0, 1.0)
+		var gain = float(fx.steer.psens) * (1.0 + float(fx.steer.paccel) * vn * vn)
+		ptr_lat = clampf(ptr_lat + (p.x - sw.x) / W * gain, -1.0, 1.0)
+		sw.x = p.x
+		return
 	sw.x = p.x
 	# Richtungswechsel erkennen: weiteste Stelle in Wischrichtung merken; zurück um mehr als den Puffer = Umkehr
 	var buf = float(fx.steer.revbuf) * _sw_w()
@@ -12024,7 +12041,7 @@ func _sw_drag(i: int, p: Vector2, vel: Vector2) -> void:
 		sw.ext = p.x
 		sw.v = 0.0
 		vel = Vector2.ZERO
-		if float(fx.steer.revmode) > 0.5:
+		if float(fx.steer.revmode) > 0.5 and int(cfg.get("ctrl", 1)) == 1:
 			# Mitte unter den Daumen (plus den Puffer, den er schon zurückgelegt hat): sanftes Gegenlenken ab sofort
 			sw.ax = p.x + dr * buf
 	sw.v = lerpf(float(sw.v), vel.x, 0.5)
