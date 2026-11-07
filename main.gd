@@ -141,6 +141,25 @@ func _ready() -> void:
 		if OS.get_environment("SHOTPATH") != "":
 			get_tree().create_timer(4.0).timeout.connect(func():
 				var sc: ScrollContainer = ui.setp
+				if OS.get_environment("SCRTEST") != "":
+					var tv0 = cfg.tips
+					var steps = [[true, Vector2(360, 900)], [Vector2(360, 880)], [Vector2(360, 800)], [Vector2(360, 650)], [false, Vector2(360, 650)]]
+					for st in steps:
+						var e
+						if st.size() == 2:
+							e = InputEventScreenTouch.new()
+							e.pressed = st[0]
+							e.position = st[1]
+						else:
+							e = InputEventScreenDrag.new()
+							e.position = st[0]
+							e.relative = Vector2(0, -60)
+						e.index = 0
+						Input.parse_input_event(e)
+						await get_tree().process_frame
+						await get_tree().process_frame
+					await get_tree().create_timer(0.8).timeout
+					print("SCRTEST scroll=", sc.scroll_vertical, " cfg_changed=", cfg.tips != tv0, " speed=", cfg.speed)
 				sc.scroll_vertical = int(OS.get_environment("SCROLL").to_int())
 				await get_tree().create_timer(0.5).timeout
 				get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
@@ -4303,10 +4322,32 @@ func _menu() -> void:
 	setsc.visible = false
 	root.add_child(setsc)
 	ui.setp = setsc
+	# eigene, gut greifbare Scrollleiste mit Abstand zum Inhalt (nichts überlappt)
+	var vsb: VScrollBar = setsc.get_v_scroll_bar()
+	var sbg = StyleBoxFlat.new()
+	sbg.bg_color = Color(1, 1, 1, 0.06)
+	sbg.set_corner_radius_all(8)
+	sbg.content_margin_left = 14
+	var sgr = StyleBoxFlat.new()
+	sgr.bg_color = Color(1.0, 0.55, 0.2, 0.75)
+	sgr.set_corner_radius_all(8)
+	sgr.content_margin_left = 14
+	var sgh = sgr.duplicate()
+	sgh.bg_color = Color(1.0, 0.65, 0.3, 0.95)
+	vsb.add_theme_stylebox_override("scroll", sbg)
+	vsb.add_theme_stylebox_override("grabber", sgr)
+	vsb.add_theme_stylebox_override("grabber_highlight", sgh)
+	vsb.add_theme_stylebox_override("grabber_pressed", sgh)
+	vsb.custom_minimum_size = Vector2(16, 0)
+	var smg = MarginContainer.new()
+	smg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	smg.add_theme_constant_override("margin_right", 22)
+	smg.add_theme_constant_override("margin_bottom", 40)
+	setsc.add_child(smg)
 	var sp = VBoxContainer.new()
 	sp.add_theme_constant_override("separation", 14)
 	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	setsc.add_child(sp)
+	smg.add_child(sp)
 	sp.add_theme_constant_override("separation", 8)
 	var top = HBoxContainer.new()
 	top.add_theme_constant_override("separation", 16)
@@ -4351,13 +4392,14 @@ func _menu() -> void:
 	ui.gfx = []
 	for q in range(3):
 		var b = _btn(["Low", "Medium", "High"][q])
+		b.add_theme_font_size_override("font_size", 30)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.toggle_mode = true
 		b.pressed.connect(func(): cfg.gfx = q; _refresh_ui(); _apply_cfg(); _save_cfg(); _rewarm())
 		gr.add_child(b)
 		ui.gfx.append(b)
-	var twin = HBoxContainer.new()
-	twin.add_theme_constant_override("separation", 24)
+	var twin = VBoxContainer.new()   # Look und Fields untereinander: volle Breite, nichts gequetscht
+	twin.add_theme_constant_override("separation", 8)
 	sp.add_child(twin)
 	var lcol = VBoxContainer.new()
 	lcol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -4575,6 +4617,8 @@ func _show_replays(on: bool) -> void:
 
 func _show_settings(on: bool) -> void:
 	ui.setp.visible = on
+	if on:
+		_scr_prep(ui.setp)
 	ui.main.visible = not on
 	ui.dim.visible = on
 	for t in ui.title:
@@ -4796,6 +4840,9 @@ func _input(ev: InputEvent) -> void:
 			fingers[ev.index] = true
 		else:
 			fingers.erase(ev.index)
+	if ui.has("setp") and (ui.setp as Control).is_visible_in_tree() and _scr_input(ev, ui.setp):
+		get_viewport().set_input_as_handled()
+		return
 	if state == "lab":
 		_lab_input(ev)
 		return
@@ -12018,3 +12065,83 @@ func _sw_steer(dt: float):
 			rel_t = 0.0
 		return float(sw.last)
 	return null
+
+
+# ---------------------------------------------------------------- Fingerscrollen in Listen mit Knöpfen und Reglern
+# Senkrecht wischen = scrollen (auch wenn der Finger auf einem Knopf oder Regler startet; der Knopf löst dann nicht aus).
+# Regler bewegen sich nur bei einem klar waagrechten Zug. Kurzes Tippen = Knopf wie gewohnt.
+var scr = {}
+
+
+func _scr_prep(sc: ScrollContainer) -> void:
+	# Regler nehmen den Finger nicht mehr selbst – wir bewegen sie, wenn der Zug waagrecht ist
+	for n in sc.find_children("*", "Slider", true, false):
+		(n as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+func _scr_input(ev: InputEvent, sc: ScrollContainer) -> bool:
+	if ev is InputEventScreenTouch:
+		if ev.pressed:
+			if not scr.is_empty() and scr.idx != ev.index:
+				return false
+			if not sc.get_global_rect().has_point(ev.position):
+				return false
+			var sl = null
+			for n in sc.find_children("*", "Slider", true, false):
+				if (n as Control).is_visible_in_tree() and (n as Control).get_global_rect().grow_individual(0, 18, 0, 18).has_point(ev.position):
+					sl = n
+			scr = {"idx": ev.index, "p": ev.position, "sv": sc.scroll_vertical, "mode": "", "sl": sl, "vel": 0.0, "lt": Time.get_ticks_msec()}
+			return false
+		if scr.is_empty() or scr.idx != ev.index:
+			return false
+		var mode: String = scr.mode
+		var v = float(scr.vel)
+		scr = {}
+		if mode == "scroll":
+			_scr_fling(sc, v)
+			return true
+		return mode == "slide"
+	if ev is InputEventScreenDrag and not scr.is_empty() and scr.idx == ev.index:
+		var d: Vector2 = ev.position - scr.p
+		if scr.mode == "":
+			if absf(d.y) > 16.0 and absf(d.y) > absf(d.x):
+				scr.mode = "scroll"
+				_scr_cancel_press()
+			elif absf(d.x) > 14.0 and absf(d.x) > absf(d.y) and scr.sl != null:
+				scr.mode = "slide"
+				_scr_cancel_press()
+		if scr.mode == "scroll":
+			sc.scroll_vertical = int(float(scr.sv) - d.y)
+			var now = Time.get_ticks_msec()
+			var dtm = maxf(1.0, float(now - int(scr.lt)))
+			scr.vel = lerpf(float(scr.vel), -ev.relative.y / dtm * 1000.0, 0.4)
+			scr.lt = now
+			return true
+		if scr.mode == "slide":
+			var sl: Range = scr.sl
+			var r = (sl as Control).get_global_rect()
+			var f = clampf((ev.position.x - r.position.x) / maxf(1.0, r.size.x), 0.0, 1.0)
+			sl.value = lerpf(sl.min_value, sl.max_value, f)
+			return true
+	return false
+
+
+# angefangenen Knopfdruck abbrechen, sobald klar ist, dass gescrollt wird
+func _scr_cancel_press() -> void:
+	var hc = get_viewport().gui_get_hovered_control()
+	while hc != null and not (hc is BaseButton):
+		hc = hc.get_parent() as Control
+	if hc is BaseButton and not (hc as BaseButton).disabled:
+		var b: BaseButton = hc
+		b.disabled = true
+		b.set_deferred("disabled", false)
+	get_viewport().gui_release_focus()
+
+
+# Schwung: nach dem Loslassen läuft die Liste kurz weiter
+func _scr_fling(sc: ScrollContainer, v: float) -> void:
+	if absf(v) < 200.0:
+		return
+	var tw = create_tween()
+	var target = sc.scroll_vertical + int(v * 0.25)
+	tw.tween_property(sc, "scroll_vertical", target, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
