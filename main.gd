@@ -117,7 +117,7 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--jungle"):
 		cfg.look = 2
 	T.J = _jungle()   # eigene Streckenführung im Dschungel
-	T.S = pending_test or OS.get_cmdline_user_args().has("--steertest")
+	T.S = pending_test or (OS.get_cmdline_user_args().has("--steertest") and OS.get_environment("AG_RELOADED") == "")
 	if T.S:
 		pending_test = false
 		T.J = false
@@ -125,7 +125,7 @@ func _ready() -> void:
 		_start.call_deferred()
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
-	if OS.get_cmdline_user_args().has("--free"):
+	if OS.get_cmdline_user_args().has("--free") and OS.get_environment("AG_RELOADED") == "":
 		free_ride = true
 	if pending_free:
 		pending_free = false
@@ -10566,7 +10566,7 @@ var shot_s = "?"   # Testbild-Auftrag von der Kommandozeile (einmal gelesen)
 func _shot() -> void:
 	if shot_s == "?":
 		shot_s = ""
-		for a in OS.get_cmdline_user_args():
+		for a in (OS.get_cmdline_user_args() if OS.get_environment("AG_RELOADED") == "" else []):
 			if a.begins_with("--shot="):
 				shot_s = a
 	if shot_s == "":
@@ -10750,6 +10750,23 @@ func _shot() -> void:
 					_notification(NOTIFICATION_WM_GO_BACK_REQUEST)
 					print("BACKTEST second press: paused=", get_tree().paused)
 					get_tree().quit())
+			if shot_n == 50 and shot_s.contains("pathtest"):
+				# Test: Pause → Restart/Menu von hier aus; danach muss die (neu geladene) Szene wieder laufen
+				var act = OS.get_environment("PATHACT")
+				var tree = get_tree()
+				var spath = p[0]
+				_pause(true)
+				print("PATH before act=", act, " state=", state, " T.S=", T.S, " free=", free_ride)
+				if act == "menu":
+					_to_menu()
+				else:
+					_race_again()
+				var tm3 = tree.create_timer(14.0, true)
+				tm3.timeout.connect(func():
+					var sc = tree.current_scene
+					print("PATH after paused=", tree.paused, " state=", sc.get("state"), " warm_t=", sc.get("warm_t"), " T.S=", T.S, " free=", sc.get("free_ride"), " race_t=", sc.get("race_t"))
+					tree.root.get_viewport().get_texture().get_image().save_png(spath)
+					tree.quit())
 			if shot_n == 50 and shot_s.contains("pausetest"):
 				_pause(true)
 				var tm = get_tree().create_timer(1.5, true)
@@ -11650,6 +11667,14 @@ func _scale_tex() -> ImageTexture:
 
 # Neu laden mit Ladebildschirm: erst das Bild zeigen, dann die Szene bauen (das hängt ein paar Sekunden)
 func _reload() -> void:
+	# Pause unbedingt aufheben – sonst lädt die neue Szene eingefroren und der Ladebalken bleibt stehen
+	get_tree().paused = false
+	if paused_ui != null and is_instance_valid(paused_ui):
+		paused_ui.queue_free()
+	paused_ui = null
+	Engine.time_scale = 1.0
+	AudioServer.playback_speed_scale = 1.0
+	OS.set_environment("AG_RELOADED", "1")   # Testaufrufe vom Rechner (--shot, --steertest …) gelten nur für den ersten Start
 	_ld_show(0.12)
 	await get_tree().process_frame
 	await get_tree().process_frame
