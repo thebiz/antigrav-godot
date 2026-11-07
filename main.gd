@@ -11694,24 +11694,34 @@ func _stt_build() -> void:
 	var sr = HBoxContainer.new()
 	sr.add_theme_constant_override("separation", 10)
 	vb.add_child(sr)
+	# Tempo stufenlos: 10 … 150 % vom normalen Renntempo
 	var sl = Label.new()
-	sl.text = "Tempo"
 	sl.add_theme_font_size_override("font_size", 24)
+	sl.custom_minimum_size = Vector2(190, 0)
 	sr.add_child(sl)
-	stt.sb = []
-	for v in [0.25, 0.5, 0.75, 1.0]:
-		var b2 = _btn("%d %%" % int(v * 100.0))
-		b2.add_theme_font_size_override("font_size", 24)
-		b2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b2.toggle_mode = true
-		b2.button_pressed = absf(stt_spd - v) < 0.01
-		var vv = v
-		b2.pressed.connect(func():
-			stt_spd = vv
-			for e in stt.sb:
-				(e[0] as Button).set_pressed_no_signal(absf(float(e[1]) - vv) < 0.01))
-		sr.add_child(b2)
-		stt.sb.append([b2, v])
+	var hs = HSlider.new()
+	hs.min_value = 0.1
+	hs.max_value = 1.5
+	hs.step = 0.01
+	hs.value = stt_spd
+	hs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hs.custom_minimum_size = Vector2(0, 64)
+	hs.add_theme_icon_override("grabber", _dot(40))
+	hs.add_theme_icon_override("grabber_highlight", _dot(46))
+	var tsb = StyleBoxFlat.new()
+	tsb.bg_color = Color(1, 1, 1, 0.25)
+	tsb.content_margin_top = 6
+	tsb.content_margin_bottom = 6
+	tsb.set_corner_radius_all(6)
+	hs.add_theme_stylebox_override("slider", tsb)
+	var upd = func(v: float):
+		stt_spd = v
+		sl.text = "Tempo %d %%" % int(round(v * 100.0))
+	hs.value_changed.connect(upd)
+	upd.call(stt_spd)
+	sr.add_child(hs)
+	stt.sb = hs
 	var rowbox = VBoxContainer.new()
 	rowbox.add_theme_constant_override("separation", 12)
 	vb.add_child(rowbox)
