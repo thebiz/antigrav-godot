@@ -396,7 +396,7 @@ func _sounds() -> void:
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
-			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
+			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav", "hum.wav", "crackle.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
 	for c in ["ren", "vega", "kato", "mira"]:
@@ -404,7 +404,7 @@ func _sounds() -> void:
 			var pth = "res://sfx/cv_%s_%s.wav" % [c, k]
 			if ResourceLoader.exists(pth):
 				snd["cv_%s_%s" % [c, k]] = load(pth)
-	for k in ["engine", "idle", "field"]:
+	for k in ["engine", "idle", "field", "hum", "crackle"]:
 		var p = AudioStreamPlayer.new()
 		p.stream = _looped(snd[k])
 		p.volume_db = -80.0
@@ -513,6 +513,27 @@ func _sound_update(dt: float) -> void:
 	var tv = 0.7 if scr else 0.0
 	scr_v += (tv - scr_v) * (1.0 - exp(-dt / (0.02 if scr else 0.08)))
 	loops.field.volume_db = linear_to_db(maxf(0.0005, scr_v))
+	# Schwebe-Ringe: Hochspannungs-Brummen mit Knistern – im Stand gut zu hören, lauter beim Boosten und dicht an Gegnern
+	var prox = 0.0
+	for i in range(1, ships.size()):
+		var o: Dictionary = ships[i]
+		if not o.out:
+			var dd = Vector2((o.z - g.z) * 0.5, o.lat - g.lat).length()
+			prox = maxf(prox, clampf(1.0 - dd / 2.2, 0.0, 1.0))
+	var live = not g.out and state != "lab" and state != "bench"
+	var hv = 0.0
+	var cv = 0.0
+	if live:
+		hv = (0.1 if state == "menu" else 0.2) + 0.14 * g.boost + 0.22 * prox + 0.06 * (1.0 - clampf(sp, 0.0, 1.0))
+		cv = (0.04 if state == "menu" else 0.07) + 0.4 * prox + 0.3 * g.boost + 0.35 * scr_v + 0.12 * clampf(absf(last_steer), 0.0, 1.0)
+		if state == "done":
+			hv *= 0.5
+			cv *= 0.5
+	hv *= float(fx.sound.get("hum", 1.0))
+	cv *= float(fx.sound.get("hum", 1.0))
+	loops.hum.volume_db = linear_to_db(maxf(0.0005, hv))
+	loops.hum.pitch_scale = clampf(1.0 + 0.05 * sp + 0.04 * g.boost, 0.5, 2.0)
+	loops.crackle.volume_db = linear_to_db(maxf(0.0005, cv))
 	for i in range(1, ships.size()):
 		var o: Dictionary = ships[i]
 		var nd: Node3D = o.node
@@ -725,7 +746,7 @@ const FXS = {
 	"city": [["holo", "Holograms", 0.0, 4.0, 1.0], ["hsize", "Hologram size", 0.3, 3.0, 1.0], ["hflick", "Hologram glitch", 0.0, 12.0, 1.0], ["hhue", "Hologram color", -0.5, 0.5, 0.0],
 		["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
 		["mega", "Mega towers", 0.0, 3.0, 1.0]],
-	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
+	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["hum", "Hover hum (ring voltage)", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
 		["grit", "Grit", 0.0, 2.0, 0.0], ["echo", "Echo", 0.0, 2.0, 0.0], ["etime", "Echo time", 0.2, 3.0, 1.0], ["reverb", "Reverb", 0.0, 2.0, 0.0], ["room", "Room size", 0.0, 1.0, 0.6],
 		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
 		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
@@ -3721,6 +3742,22 @@ func _hud() -> void:
 		l.horizontal_alignment = al
 		cl.add_child(l)
 		return l
+	# Pause: kleiner Knopf oben in der Mitte (nur Anzeige – der Tipp wird in _input abgefangen, bevor er lenkt)
+	var pzb = Button.new()
+	pzb.text = "II"
+	pzb.add_theme_font_size_override("font_size", 34)
+	pzb.add_theme_stylebox_override("normal", _style(Color(0, 0, 0, 0.35), Color(1, 1, 1, 0.3)))
+	pzb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pzb.focus_mode = Control.FOCUS_NONE
+	pzb.anchor_left = 0.5
+	pzb.anchor_right = 0.5
+	pzb.offset_left = -44
+	pzb.offset_right = 44
+	pzb.offset_top = 26
+	pzb.offset_bottom = 106
+	pzb.visible = false
+	cl.add_child(pzb)
+	hud.pausebtn = pzb
 	hud.top = mk.call(34, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.top.anchor_right = 1.0
 	hud.top.offset_top = 70
@@ -3927,12 +3964,10 @@ func _hud() -> void:
 	b1.pressed.connect(_replay_start)
 	bx.add_child(b1)
 	var b2 = _btn("RACE AGAIN")
-	b2.pressed.connect(func():
-		restart = true
-		_reload())
+	b2.pressed.connect(func(): _race_again())
 	bx.add_child(b2)
 	var b3 = _btn("MENU")
-	b3.pressed.connect(func(): _reload())
+	b3.pressed.connect(func(): _to_menu())
 	bx.add_child(b3)
 	# Leistungsbericht in die Zwischenablage – zum Einfügen im Chat
 	var b4 = _btn("COPY PERFORMANCE REPORT")
@@ -4692,12 +4727,17 @@ func _pick_ship(d: int) -> void:
 	_spawn_ships()
 	_ship_sounds()
 	_refresh_ui()
+	if not race0.is_empty():
+		ships0 = []
+		for o in ships:
+			ships0.append((o as Dictionary).duplicate(true))   # neuer Gleiter: Startstand für „Race again“ mitnehmen
 
 
 var free_ride = false   # freies Fahren: keine Gegner, kein Schaden, keine Rundenzahl – zum Einstellen in Ruhe
 
 
 func _start() -> void:
+	race_kids = get_children()
 	if free_ride:
 		for i in range(1, ships.size()):
 			ships[i].out = true
@@ -4874,6 +4914,9 @@ func _input(ev: InputEvent) -> void:
 		if ev.pressed:
 			if state == "kill":
 				_kc_end()
+				return
+			if hud.has("pausebtn") and (hud.pausebtn as Control).visible and (hud.pausebtn as Control).get_global_rect().grow(24).has_point(ev.position):
+				_pause(true)
 				return
 			if state == "race" and fire_rect.has_point(ev.position):
 				fire_req = true
@@ -7555,6 +7598,7 @@ func _weapons(dt: float, racing: bool) -> void:
 	var vp = get_viewport().get_visible_rect().size
 	var r = (hud.fire as Control).get_global_rect()
 	fire_rect = r.grow(20) if r.size.x > 0 else Rect2(vp.x * 0.5 - 130, vp.y - 270, 260, 200)
+	hud.pausebtn.visible = state in ["intro", "count", "race"] and fin.is_empty()
 	for o in ships:
 		if o.idx > 0 and (o.node as Node3D).has_meta("bar"):
 			var bar: MeshInstance3D = (o.node as Node3D).get_meta("bar")
@@ -8575,6 +8619,8 @@ func _warm_step(delta: float) -> void:
 	warm_cover.queue_free()
 	warm_t = -1.0
 	_ld_hide()
+	if state == "menu":
+		_race_snap()
 
 
 # ---------------------------------------------------------------- Kill-Cam: Zeitlupe, wenn du einen Gegner erledigst – erst seitlich bis zum Treffer,
@@ -9121,7 +9167,14 @@ func _ai_inp(o: Dictionary, t: float, dt: float) -> float:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if get_tree().paused:
+			_pause(false)   # Zurück im Pausemenü = weiterfahren
+			return
 		_go_back()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED:
+		# App verlassen (Anruf, Home-Taste): mitten im Rennen automatisch anhalten
+		if state in ["intro", "count", "race"] and fin.is_empty() and kc.is_empty():
+			_pause(true)
 
 
 var back_t = -10.0
@@ -9172,8 +9225,10 @@ func _go_back() -> void:
 			_kc_end()
 		elif state == "lab":
 			_lab_close()
+		elif state in ["intro", "count", "race"] and fin.is_empty():
+			_pause(true)
 		else:
-			_reload()
+			_to_menu()
 
 
 # ---------------------------------------------------------------- Leistungstest: feste Szene, jeder Effekt einmal aus
@@ -9500,6 +9555,7 @@ func _show_records(on: bool) -> void:
 func _victory() -> void:
 	var cl = CanvasLayer.new()
 	cl.layer = 8
+	cl.set_meta("rfx", true)   # beim Neustart wegräumen
 	add_child(cl)
 	var l = Label.new()
 	l.text = "VICTORY"
@@ -9523,11 +9579,11 @@ func _victory() -> void:
 	l.pivot_offset = Vector2(get_viewport().get_visible_rect().size.x * 0.5, 90)
 	l.scale = Vector2(0.2, 0.2)
 	l.modulate.a = 0.0
-	var tw = create_tween()
+	var tw = l.create_tween()
 	tw.tween_property(l, "scale", Vector2(1.18, 1.18), 0.28).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(l, "modulate:a", 1.0, 0.2)
 	tw.tween_property(l, "scale", Vector2(1.0, 1.0), 0.25)
-	var tp = create_tween().set_loops()
+	var tp = l.create_tween().set_loops()
 	tp.tween_property(l, "modulate", Color(1.25, 1.2, 1.0, 1.0), 0.6).set_delay(0.6)
 	tp.tween_property(l, "modulate", Color(1, 1, 1, 1), 0.6)
 	_flash(Color(1.0, 0.9, 0.6), 0.5)
@@ -10482,10 +10538,14 @@ func _shot() -> void:
 					pending_rp = "user://replays/" + fs[fs.size() - 1]
 					_reload()
 					return
-			if shot_n == 2 and p.size() > 2:
+			if shot_n == 2 and p.size() > 2 and p[2] != "menu":
 				_start()
 				if p[2] != "intro":
 					state = "race"
+			if shot_n == 40 and p.size() > 2 and p[2] == "menu":
+				print("MENUSTART race0=", not race0.is_empty(), " warm_t=", warm_t)
+				_start()
+				state = "race"
 			if p.size() > 3 and p[3].begins_with("go") and state == "race" and t_state >= float(p[3].substr(2)):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				print("GOSHOT z=", ships[0].z, " spd=", ships[0].spd, " cam=", cam.global_position, " fig=", starter.n.global_position if not starter.is_empty() else Vector3.ZERO)
@@ -10526,6 +10586,46 @@ func _shot() -> void:
 					Input.parse_input_event(ie)
 				if shot_n in [44, 46, 50, 55, 62, 66, 90, 120]:
 					print("SWT n=", shot_n, " ptr=", ptr_lat, " lat=", ships[0].lat, " z=", ships[0].z, " steer=", last_steer, " m=", sw.m, " idx=", sw.idx, " wpn=", ships[0].wpn, " fire=", fire_req)
+			if shot_s.contains("again"):
+				# Test: Rennen mit Effekten „beenden“, dann ohne Neuladen neu starten
+				if shot_n == 45:
+					print("AGAIN start kids=", get_child_count(), " z=", ships[0].z)
+					set_meta("k45", get_children())
+				if shot_n == 66:
+					var k45: Array = get_meta("k45")
+					for n in get_children():
+						if not k45.has(n):
+							print("AGAIN new: ", n.get_class(), " ", n.name)
+				if shot_n == 50:
+					_explode(ships[0].z + 4.0, 0.0, true)
+					_gbomb(ships[0].z + 6.0, 0.0)
+					ships[2].en = 0.01
+					_dmg(ships[2], 0.5, 0)
+					_drop_mines(ships[0])
+					_add_shot(ships[0], false, false)
+				if shot_n == 58:
+					print("AGAIN mid kids=", get_child_count(), " fx=", fxs.size(), " mines=", mines.size(), " out2=", ships[2].out)
+					state = "done"
+					_victory()
+					_show_resb()
+				if shot_n == 62:
+					if shot_s.contains("againmenu"):
+						_pause(true)
+						_to_menu()
+						print("AGAIN menu state=", state, " paused=", get_tree().paused)
+					else:
+						var ok = _soft_reset()
+						print("AGAIN soft=", ok)
+						_start()
+				if shot_n == 64:
+					print("AGAIN after kids=", get_child_count(), " fx=", fxs.size(), " mines=", mines.size(), " out2=", ships[2].out, " vis2=", (ships[2].node as Node3D).visible, " z=", ships[0].z, " en2=", ships[2].en, " state=", state, " race_t=", race_t)
+			if shot_n == 50 and shot_s.contains("pausetest"):
+				_pause(true)
+				var tm = get_tree().create_timer(1.5, true)
+				tm.timeout.connect(func():
+					get_viewport().get_texture().get_image().save_png(p[0])
+					print("PAUSESHOT paused=", get_tree().paused)
+					get_tree().quit())
 			if shot_n == 60 and shot_s.contains(",ko"):
 				_comic_start("ko", 1)
 			if shot_n >= 2 and p.size() > 2 and p[2].begins_with("st"):
@@ -11204,6 +11304,7 @@ func _fin_update(dt: float) -> void:
 		# an den Düsen: Platz und Zeit einblenden
 		var cl = CanvasLayer.new()
 		cl.layer = 9
+		cl.set_meta("rfx", true)
 		add_child(cl)
 		var l = _lbl(str(hud.res.text).replace("  ·  ", "\n"), 84)
 		l.add_theme_color_override("font_color", Color(1.0, 0.86, 0.35))
@@ -12340,3 +12441,230 @@ func _lane_draw(c: Control) -> void:
 		c.draw_colored_polygon(pts, col)
 		pts.append(pts[0])
 		c.draw_polyline(pts, Color(0, 0, 0, 0.7), 1.5, true)
+
+
+# ---------------------------------------------------------------- Neustart ohne Neuladen und Pause
+# „Race again“ und „Menu“ bauen die Strecke nicht neu auf: Schiffe und Rennzustand gehen auf den Stand
+# direkt nach dem Vorwärmen zurück, Effekte des letzten Rennens werden weggeräumt – das geht sofort.
+const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves", "fire_req", "t_state", "race_t", "steer_btn", "btn_t",
+	"rel_t", "rel_v", "last_steer", "st_hist", "touches", "cam_psi", "cam_d", "post_spd", "scr_v", "gl_v", "expo_v", "kmax", "sg_a",
+	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp", "megaw",
+	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
+	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last", "lane_cur", "lane_fl", "ptr_lat", "glide_in", "sw", "tinfo",
+	"tap_last", "last_c", "tun_k", "cm"]
+var race0 = {}
+var ships0 = []
+var race_kids = []
+var paused_ui: CanvasLayer = null
+
+
+func _race_snap() -> void:
+	race0 = {}
+	for k in RACE_VARS:
+		var v = get(k)
+		race0[k] = v.duplicate(true) if (v is Array or v is Dictionary) else v
+	ships0 = []
+	for o in ships:
+		ships0.append((o as Dictionary).duplicate(true))
+
+
+func _free_fx_entry(e) -> void:
+	if e is Node:
+		if is_instance_valid(e):
+			(e as Node).queue_free()
+	elif e is Dictionary:
+		for v in (e as Dictionary).values():
+			if v is Node and is_instance_valid(v) and not (v as Node).has_meta("keep"):
+				var isship = false
+				for o in ships:
+					if o.node == v:
+						isship = true
+				if not isship:
+					(v as Node).queue_free()
+
+
+# Rennen zurücksetzen (Strecke bleibt stehen). false = geht nicht, dann klassisch neu laden.
+func _soft_reset() -> bool:
+	if race0.is_empty() or ships0.size() != ships.size() or not rpf.is_empty() or T.S or free_ride or not vx.is_empty():
+		return false
+	get_tree().paused = false
+	if paused_ui != null and is_instance_valid(paused_ui):
+		paused_ui.queue_free()
+	paused_ui = null
+	Engine.time_scale = 1.0
+	AudioServer.playback_speed_scale = 1.0
+	# Effekte des letzten Rennens wegräumen
+	for k in ["shots", "mines", "fxs", "walls", "bwaves", "megaw", "zaps"]:
+		for e in get(k):
+			_free_fx_entry(e)
+	for k in ["quake", "quake2"]:
+		if get(k) != null:
+			_free_fx_entry(get(k))
+	for k in ["shots", "mines", "walls", "swalls"]:
+		for n in rp.get(k, []):
+			if is_instance_valid(n):
+				n.queue_free()
+	if fin.has("lbl") and is_instance_valid(fin.lbl):
+		(fin.lbl as Node).queue_free()
+	for n in get_children():
+		if n.has_meta("rfx"):
+			n.queue_free()
+		elif (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D) and not race_kids.has(n) and not tun_l.has(n) and not nlights.has(n) and n != lk_n and not n.has_meta("keep"):
+			n.queue_free()
+		elif n is GPUParticles3D:
+			n.speed_scale = 1.0
+		elif (n is AudioStreamPlayer or n is AudioStreamPlayer3D) and not loops.values().has(n):
+			n.queue_free()   # noch klingende Einzel-Geräusche
+	if not cm.is_empty():
+		for v in cm.values():
+			if v is CanvasLayer and is_instance_valid(v):
+				v.queue_free()
+	# Rennzustand zurück
+	for k in RACE_VARS:
+		var v = race0[k]
+		set(k, v.duplicate(true) if (v is Array or v is Dictionary) else v)
+	fx_gen += 1
+	for i in range(ships.size()):
+		var o: Dictionary = ships[i]
+		var o0: Dictionary = ships0[i]
+		for k in o.keys():
+			if not o0.has(k) and not (o[k] is Object):
+				o.erase(k)
+		for k in o0.keys():
+			var v = o0[k]
+			if v is Object:
+				continue
+			o[k] = v.duplicate(true) if (v is Array or v is Dictionary) else v
+		var nd: Node3D = o.node
+		nd.visible = true
+		if nd.has_meta("eng"):
+			var ep: AudioStreamPlayer3D = nd.get_meta("eng")
+			if not ep.playing:
+				ep.play()
+		_shield_vis(o)
+	_orbs_update(0.0, false)
+	_rset("qs", 0.0)
+	_rset("qs2", 0.0)
+	if lk_n != null:
+		lk_n.visible = false
+	if lk_txt != null:
+		lk_txt.visible = false
+	# Anzeige zurück
+	hud.resb.visible = false
+	hud.board.visible = false
+	hud.rdim.visible = false
+	hud.res.text = ""
+	hud.res.visible = true
+	if hud.has("rpx"):
+		hud.rpx.visible = false
+	if flash_rect != null:
+		flash_rect.color = Color(0, 0, 0, 0)
+	state = "menu"
+	_lap_pos(ships[0].z)
+	return true
+
+
+func _race_again() -> void:
+	if _soft_reset():
+		_start()
+	else:
+		if T.S:
+			pending_test = true
+		elif free_ride:
+			pending_free = true
+		else:
+			restart = true
+		_reload()
+
+
+func _to_menu() -> void:
+	if _soft_reset():
+		menu_t = 0.0
+		hud.layer.visible = false
+		ui.root.visible = true
+		if ui.has("setp"):
+			(ui.setp as Control).visible = false
+	else:
+		_reload()
+
+
+# Pause: alles friert ein, darüber ein kleines Menü (läuft weiter, obwohl das Spiel steht)
+func _pause(on: bool) -> void:
+	if not on:
+		get_tree().paused = false
+		if paused_ui != null and is_instance_valid(paused_ui):
+			paused_ui.queue_free()
+		paused_ui = null
+		touches.clear()
+		return
+	if get_tree().paused:
+		return
+	touches.clear()
+	get_tree().paused = true
+	var cl = CanvasLayer.new()
+	cl.layer = 30
+	cl.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(cl)
+	paused_ui = cl
+	var dim = ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.62)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cl.add_child(dim)
+	var bx = VBoxContainer.new()
+	bx.anchor_left = 0.5
+	bx.anchor_right = 0.5
+	bx.anchor_top = 0.5
+	bx.anchor_bottom = 0.5
+	bx.offset_left = -240
+	bx.offset_right = 240
+	bx.offset_top = -420
+	bx.offset_bottom = 420
+	bx.add_theme_constant_override("separation", 20)
+	bx.alignment = BoxContainer.ALIGNMENT_CENTER
+	cl.add_child(bx)
+	var tl = _lbl("PAUSED", 64)
+	tl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bx.add_child(tl)
+	var b1 = _btn("RESUME", true)
+	b1.pressed.connect(func(): _pause(false))
+	bx.add_child(b1)
+	var bc = _btn("")
+	bc.add_theme_font_size_override("font_size", 30)
+	var cset = func(): bc.text = "Steering: " + CTRL_N[clampi(int(cfg.get("ctrl", 1)), 0, 4)]
+	cset.call()
+	bc.pressed.connect(func():
+		_set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 5)
+		cset.call())
+	bx.add_child(bc)
+	var vl = _lbl("", 30)
+	vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bx.add_child(vl)
+	var hs = HSlider.new()
+	hs.min_value = 0.0
+	hs.max_value = 1.0
+	hs.step = 0.05
+	hs.value = float(cfg.vol)
+	hs.custom_minimum_size = Vector2(0, 64)
+	hs.add_theme_icon_override("grabber", _dot(40))
+	hs.add_theme_icon_override("grabber_highlight", _dot(46))
+	var tsb = StyleBoxFlat.new()
+	tsb.bg_color = Color(1, 1, 1, 0.25)
+	tsb.content_margin_top = 6
+	tsb.content_margin_bottom = 6
+	tsb.set_corner_radius_all(6)
+	hs.add_theme_stylebox_override("slider", tsb)
+	var vset = func(v: float):
+		vl.text = "Volume  %d %%" % int(round(v * 100.0))
+	vset.call(hs.value)
+	hs.value_changed.connect(func(v):
+		cfg.vol = v
+		vset.call(v)
+		AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.001, float(cfg.vol))))
+		_save_cfg())
+	bx.add_child(hs)
+	var b2 = _btn("RESTART")
+	b2.pressed.connect(func(): _race_again())
+	bx.add_child(b2)
+	var b3 = _btn("MENU")
+	b3.pressed.connect(func(): _to_menu())
+	bx.add_child(b3)
