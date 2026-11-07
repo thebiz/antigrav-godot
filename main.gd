@@ -173,7 +173,10 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--replays"):
 		_show_replays.call_deferred(true)
 	if OS.get_cmdline_user_args().has("--lab"):
-		get_tree().create_timer(2.0).timeout.connect(_lab_open)
+		get_tree().create_timer(2.0).timeout.connect(func():
+			_lab_open()
+			if OS.get_environment("LABTAB") != "":
+				_lab_tab(OS.get_environment("LABTAB")))
 	if OS.get_cmdline_user_args().has("--toastdemo"):
 		get_tree().create_timer(2.5).timeout.connect(func():
 			_toast("Open " + _live_addr() + " in the PC browser (same Wi-Fi)")
@@ -407,7 +410,7 @@ func _sounds() -> void:
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
-			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav", "hum.wav", "crackle.wav"]:
+			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
 	for c in ["ren", "vega", "kato", "mira"]:
@@ -415,7 +418,7 @@ func _sounds() -> void:
 			var pth = "res://sfx/cv_%s_%s.wav" % [c, k]
 			if ResourceLoader.exists(pth):
 				snd["cv_%s_%s" % [c, k]] = load(pth)
-	for k in ["engine", "idle", "field", "hum", "crackle"]:
+	for k in ["engine", "idle", "field"]:
 		var p = AudioStreamPlayer.new()
 		p.stream = _looped(snd[k])
 		p.volume_db = -80.0
@@ -524,27 +527,6 @@ func _sound_update(dt: float) -> void:
 	var tv = 0.7 if scr else 0.0
 	scr_v += (tv - scr_v) * (1.0 - exp(-dt / (0.02 if scr else 0.08)))
 	loops.field.volume_db = linear_to_db(maxf(0.0005, scr_v))
-	# Schwebe-Ringe: Hochspannungs-Brummen mit Knistern – im Stand gut zu hören, lauter beim Boosten und dicht an Gegnern
-	var prox = 0.0
-	for i in range(1, ships.size()):
-		var o: Dictionary = ships[i]
-		if not o.out:
-			var dd = Vector2((o.z - g.z) * 0.5, o.lat - g.lat).length()
-			prox = maxf(prox, clampf(1.0 - dd / 2.2, 0.0, 1.0))
-	var live = not g.out and state != "lab" and state != "bench"
-	var hv = 0.0
-	var cv = 0.0
-	if live:
-		hv = (0.1 if state == "menu" else 0.2) + 0.14 * g.boost + 0.22 * prox + 0.06 * (1.0 - clampf(sp, 0.0, 1.0))
-		cv = (0.04 if state == "menu" else 0.07) + 0.4 * prox + 0.3 * g.boost + 0.35 * scr_v + 0.12 * clampf(absf(last_steer), 0.0, 1.0)
-		if state == "done":
-			hv *= 0.5
-			cv *= 0.5
-	hv *= float(fx.sound.get("hum", 1.0))
-	cv *= float(fx.sound.get("hum", 1.0))
-	loops.hum.volume_db = linear_to_db(maxf(0.0005, hv))
-	loops.hum.pitch_scale = clampf(1.0 + 0.05 * sp + 0.04 * g.boost, 0.5, 2.0)
-	loops.crackle.volume_db = linear_to_db(maxf(0.0005, cv))
 	for i in range(1, ships.size()):
 		var o: Dictionary = ships[i]
 		var nd: Node3D = o.node
@@ -746,7 +728,7 @@ const FXS = {
 	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0],
 		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35],
 		["revmode", "Swipe: reverse = counter-steer (0 off / 1 on)", 0.0, 1.0, 1.0], ["revbuf", "Swipe: reverse buffer", 0.0, 0.04, 0.008], ["velmin", "Swipe: speed boost threshold", 0.0, 0.9, 0.35],
-		["psens", "Pointer: sensitivity", 0.5, 8.0, 3.0], ["paccel", "Pointer: acceleration", 0.0, 4.0, 1.0], ["vib", "Lanes: vibration (0 off / 1 on)", 0.0, 1.0, 1.0], ["ltime", "Lane tap: full change time (outer to outer)", 0.1, 1.2, 0.35], ["lhold", "Lane tap: hold time for the next lane", 0.1, 1.0, 0.25],
+		["psens", "Pointer: sensitivity", 0.5, 8.0, 3.0], ["paccel", "Pointer: acceleration", 0.0, 4.0, 1.0], ["vib", "Lanes: vibration (0 off / 1 on)", 0.0, 1.0, 1.0], ["ltime", "Lane tap: full change time (outer to outer)", 0.1, 1.2, 0.35], ["lhold", "Lane tap: hold time for the next lane", 0.1, 1.0, 0.25], ["lbeep", "Lanes: change beep volume (0 = off)", 0.0, 2.0, 1.0],
 		["glide", "Glide: follow time", 0.05, 1.0, 0.25], ["gwidth", "Glide: reach to edge", 0.3, 1.0, 0.85], ["gpull", "Glide: curve pull", 0.0, 2.0, 0.5]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
@@ -757,7 +739,7 @@ const FXS = {
 	"city": [["holo", "Holograms", 0.0, 4.0, 1.0], ["hsize", "Hologram size", 0.3, 3.0, 1.0], ["hflick", "Hologram glitch", 0.0, 12.0, 1.0], ["hhue", "Hologram color", -0.5, 0.5, 0.0],
 		["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
 		["mega", "Mega towers", 0.0, 3.0, 1.0]],
-	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["hum", "Hover hum (ring voltage)", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
+	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
 		["grit", "Grit", 0.0, 2.0, 0.0], ["echo", "Echo", 0.0, 2.0, 0.0], ["etime", "Echo time", 0.2, 3.0, 1.0], ["reverb", "Reverb", 0.0, 2.0, 0.0], ["room", "Room size", 0.0, 1.0, 0.6],
 		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
 		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
@@ -6668,7 +6650,7 @@ const FX_MODES = {
 	"steer.ptime": [0], "steer.delay": [0], "steer.rtime": [0, 1],
 	"steer.swrange": [1, 2], "steer.velk": [1], "steer.velmin": [1], "steer.revmode": [1], "steer.revbuf": [1], "steer.hold": [1, 2],
 	"steer.glide": [2, 3, 4], "steer.gwidth": [2, 3], "steer.gpull": [2, 3],
-	"steer.psens": [3, 4], "steer.paccel": [3, 4], "steer.vib": [4, 5], "steer.ltime": [5], "steer.lhold": [5], "steer.dtap": [1, 2, 3, 4],
+	"steer.psens": [3, 4], "steer.paccel": [3, 4], "steer.vib": [4, 5], "steer.ltime": [5], "steer.lhold": [5], "steer.lbeep": [4, 5], "steer.dtap": [1, 2, 3, 4],
 	"ship.steer": [0, 1], "ship.steerk": [0, 1], "ship.grip": [0, 1], "ship.drift": [0, 1], "ship.center": [0, 1], "ship.spdst": [0, 1]}
 const CTRL_CURVES = [["press", "release"], ["swipe", "swvel", "release"], ["swipe"], [], [], []]
 # Fahrbahn in drei gleich breite Drittel geteilt (bis knapp an die Leuchtkante); jede Spur liegt mittig in ihrem Drittel
@@ -9826,7 +9808,7 @@ func _process(delta: float) -> void:
 				lane_fl = 1.0
 				if float(fx.steer.vib) > 0.5:
 					Input.vibrate_handheld(22)
-				_snd("beep", -18.0, 2.6 + 0.15 * lane_cur)
+				_lane_beep()
 			steer = float(lane_cur)
 			lane_fl = maxf(0.0, lane_fl - dt * 3.0)
 			if hud.has("lanei"):
@@ -10279,6 +10261,7 @@ func _lab_tab(t: String) -> void:
 		lb.add_theme_font_size_override("font_size", 26)
 		lb.custom_minimum_size = Vector2(0, 44)
 		lb.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+		lb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART   # lange Reglernamen brechen um statt das Labor aus dem Bild zu schieben
 		lab.lst.add_child(lb)
 		var hs = HSlider.new()
 		hs.min_value = it[2]
@@ -12007,7 +11990,7 @@ func _stt_vals() -> void:
 	for e in stt.get("rows", []):
 		var r: Array = e[0]
 		var v = float(fx[r[0]][r[1]])
-		(e[1] as Label).text = ("%.2f s" % v) if r[1] in ["ptime", "glide"] else (("An" if v > 0.5 else "Aus") if r[1] == "vib" else ("%.2f" % v))
+		(e[1] as Label).text = ("%.2f s" % v) if r[1] in ["ptime", "glide"] else (("An" if v > 0.5 else "Aus") if r[1] == "vib" else (("Aus" if v < 0.01 else "%d %%" % int(round(v * 100.0))) if r[1] == "lbeep" else ("%.2f" % v)))
 
 
 func _steer_preset(i: int) -> void:
@@ -12543,8 +12526,9 @@ const STT_ROWS = {
 	2: [["steer", "swrange", "Wischweg bis zum Rand  (mehr = feiner)", 0.02], ["steer", "glide", "Folgezeit  (weniger = flinker)", 0.05], ["steer", "gwidth", "Reichweite zum Rand", 0.05]],
 	3: [["steer", "psens", "Empfindlichkeit  (mehr = weniger Daumenweg)", 0.25], ["steer", "paccel", "Beschleunigung  (mehr = schnelle Züge weiter)", 0.25], ["steer", "glide", "Folgezeit  (weniger = flinker)", 0.05]],
 	4: [["steer", "psens", "Empfindlichkeit  (mehr = kürzerer Wisch pro Spur)", 0.25], ["steer", "paccel", "Beschleunigung  (schneller Ruck = ganz rüber)", 0.25],
-		["steer", "glide", "Einrasten  (weniger = springt flinker in die Spur)", 0.05], ["steer", "vib", "Vibration  (0 aus, 1 an)", 1.0]],
-	5: [["steer", "ltime", "Spurwechsel ganz außen → ganz außen  (Sekunden)", 0.05], ["steer", "lhold", "Gedrückt halten → nächste Spur nach  (Sekunden)", 0.05], ["steer", "vib", "Vibration  (0 aus / 1 an)", 1.0]]}
+		["steer", "glide", "Einrasten  (weniger = springt flinker in die Spur)", 0.05], ["steer", "vib", "Vibration  (0 aus, 1 an)", 1.0],
+		["steer", "lbeep", "Piep beim Spurwechsel  (0 = aus)", 0.25]],
+	5: [["steer", "ltime", "Spurwechsel ganz außen → ganz außen  (Sekunden)", 0.05], ["steer", "lhold", "Gedrückt halten → nächste Spur nach  (Sekunden)", 0.05], ["steer", "vib", "Vibration  (0 aus / 1 an)", 1.0], ["steer", "lbeep", "Piep beim Spurwechsel  (0 = aus)", 0.25]]}
 
 const STT_MN = ["Tippen", "Wischen", "Gleiten", "Touchpad", "Spuren", "Spur antippen"]
 const STT_MH = ["Linke oder rechte Bildschirmhälfte halten", "Wischen lenkt, Doppeltipp feuert", "Wischen schiebt rüber, loslassen = zurück zur Mitte", "Daumen bewegen wie einen Mauszeiger", "Wischen wählt links, Mitte oder rechts",
@@ -12876,4 +12860,11 @@ func _lane_step(dir: int) -> void:
 		lane_fl = 1.0
 		if float(fx.steer.vib) > 0.5:
 			Input.vibrate_handheld(22)
-		_snd("beep", -18.0, 2.6 + 0.15 * lane_cur)
+		_lane_beep()
+
+
+# Piep beim Spurwechsel – Lautstärke (oder aus) über „Lanes: change beep volume“
+func _lane_beep() -> void:
+	var v = float(fx.steer.get("lbeep", 1.0))
+	if v > 0.01:
+		_snd("beep", -18.0 + linear_to_db(v), 2.6 + 0.15 * lane_cur)
