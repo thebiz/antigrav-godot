@@ -9209,7 +9209,11 @@ func _ai_inp(o: Dictionary, t: float, dt: float) -> float:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		if get_tree().paused:
-			_pause(false)   # Zurück im Pausemenü = weiterfahren
+			# Zurück im Pausemenü = weiterfahren – aber nicht die zweite Meldung desselben Tastendrucks,
+			# die direkt nach dem Öffnen der Pause kommt (sonst geht die Pause sofort wieder zu)
+			if Time.get_ticks_msec() / 1000.0 - back_t >= 0.25:
+				back_t = Time.get_ticks_msec() / 1000.0
+				_pause(false)
 			return
 		_go_back()
 	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED:
@@ -10694,6 +10698,19 @@ func _shot() -> void:
 				if shot_n >= 45:
 					var tg = lane_cur * LANE_W
 					print("LT n=", shot_n, " t=", snappedf(race_t - float(get_meta("lt0")), 0.001), " lane=", lane_cur, " lat=", snappedf(ships[0].lat, 0.001), " psi=", snappedf(ships[0].psi, 0.01), " spd=", snappedf(ships[0].spd, 0.1))
+			if shot_n == 50 and shot_s.contains("backtest"):
+				# Test: Android meldet Zurück doppelt (Taste + Systemmeldung) – Pause muss offen bleiben
+				var ke = InputEventKey.new()
+				ke.keycode = KEY_BACK
+				ke.pressed = true
+				_input(ke)
+				_notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+				print("BACKTEST after double: paused=", get_tree().paused)
+				var tm2 = get_tree().create_timer(0.6, true)
+				tm2.timeout.connect(func():
+					_notification(NOTIFICATION_WM_GO_BACK_REQUEST)
+					print("BACKTEST second press: paused=", get_tree().paused)
+					get_tree().quit())
 			if shot_n == 50 and shot_s.contains("pausetest"):
 				_pause(true)
 				var tm = get_tree().create_timer(1.5, true)
