@@ -3969,6 +3969,7 @@ func _hud() -> void:
 	var b3 = _btn("MENU")
 	b3.pressed.connect(func(): _to_menu())
 	bx.add_child(b3)
+	_fit(bx)
 	# Leistungsbericht in die Zwischenablage – zum Einfügen im Chat
 	var b4 = _btn("COPY PERFORMANCE REPORT")
 	b4.add_theme_font_size_override("font_size", 22)
@@ -4184,12 +4185,17 @@ func _show_resb() -> void:
 
 func _resb_arm(dt: float) -> void:
 	if not hud.resb.visible:
+		if hud.has("ga") and hud.ga != null:
+			(hud.ga as CanvasItem).modulate.a = 1.0
 		return
 	resb_t += dt
 	if not resb_armed and resb_t > 1.3 and fingers.is_empty():
 		resb_armed = true
 	var a = clampf((resb_t - 1.3) / 0.35, 0.0, 1.0) if resb_armed else 0.0
 	hud.resb.modulate.a = a
+	# Altar-Anzeige unten ausblenden, solange die Ergebnis-Knöpfe da sind (sonst liegen sie übereinander)
+	if hud.has("ga") and hud.ga != null:
+		(hud.ga as CanvasItem).modulate.a = 1.0 - a
 	for b in hud.resbtn:
 		(b as Control).mouse_filter = Control.MOUSE_FILTER_STOP if resb_armed else Control.MOUSE_FILTER_IGNORE
 
@@ -4278,13 +4284,14 @@ func _menu() -> void:
 	root.move_child(shade, dim.get_index())
 	# Hauptseite
 	var box = VBoxContainer.new()
-	box.add_theme_constant_override("separation", 20)
+	box.add_theme_constant_override("separation", 16)
 	box.anchor_left = 0.06
 	box.anchor_right = 0.94
 	box.anchor_top = 1.0
 	box.anchor_bottom = 1.0
-	box.offset_top = -752
-	box.offset_bottom = -70
+	box.offset_top = -60
+	box.offset_bottom = -60
+	box.grow_vertical = Control.GROW_DIRECTION_BEGIN   # wächst nach oben, steht nie unten über den Rand
 	root.add_child(box)
 	ui.main = box
 	var row = HBoxContainer.new()
@@ -4359,6 +4366,11 @@ func _menu() -> void:
 	ui.credit.modulate = Color(1, 1, 1, 0.4)
 	ui.credit.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(ui.credit)
+	# einheitliche Nebenknöpfe: gleiche Schrift, gleiche Höhe
+	for b in [bfr, bst, brl, bhp, brc, bs, blab, bq]:
+		(b as Button).add_theme_font_size_override("font_size", 30)
+		(b as Button).custom_minimum_size = Vector2(0, 88)
+	_fit(box)
 	# Einstellungen
 	# scrollbar, damit auch die unteren Einträge auf jedem Bildschirm erreichbar sind
 	var setsc = ScrollContainer.new()
@@ -4561,13 +4573,20 @@ func _menu() -> void:
 		_save_cfg()
 		bhd.text = "HUD style: " + HN[int(cfg.hud)])
 	sp.add_child(bhd)
-	var CN = ["Tap left / right", "Swipe (double-tap = fire)", "Glide – swipe to shift, auto-center", "Touchpad – move like a mouse", "Lanes – left / middle / right", "Lane tap – left / right = one lane, middle = fire"]
-	var bct = _btn("Steering: " + CN[clampi(int(cfg.get("ctrl", 1)), 0, 5)])
+	# Knopf mit kurzem Namen, Erklärung darunter (bricht um, kann nie breiter als der Bildschirm werden)
+	var CH = ["Tap left or right to steer", "Swipe to steer, double-tap to fire", "Swipe to shift, returns to the middle", "Move your thumb like a mouse", "Swipe to pick left, middle or right lane", "Tap left / right: one lane over · tap middle: fire"]
+	var bct = _btn("Steering: " + CTRL_N[clampi(int(cfg.get("ctrl", 1)), 0, 5)])
 	bct.add_theme_font_size_override("font_size", 30)
+	var cth = _lbl(CH[clampi(int(cfg.get("ctrl", 1)), 0, 5)], 22)
+	cth.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cth.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cth.modulate = Color(1, 1, 1, 0.65)
 	bct.pressed.connect(func():
 		_set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 6)
-		bct.text = "Steering: " + CN[int(cfg.ctrl)])
+		bct.text = "Steering: " + CTRL_N[int(cfg.ctrl)]
+		cth.text = CH[int(cfg.ctrl)])
 	sp.add_child(bct)
+	sp.add_child(cth)
 	var blv = _btn("Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off"))
 	blv.add_theme_font_size_override("font_size", 30)
 	blv.pressed.connect(func():
@@ -4664,6 +4683,8 @@ func _show_replays(on: bool) -> void:
 
 
 func _show_settings(on: bool) -> void:
+	if on:
+		_fit(ui.setp)
 	ui.setp.visible = on
 	if on:
 		_scr_prep(ui.setp)
@@ -10579,6 +10600,10 @@ func _shot() -> void:
 				if shot_n == 3 and float(p[1]) > 0.0:
 					ships[0].z = float(p[1])
 				return
+			if shot_n == 50 and shot_s.contains("resbtest"):
+				state = "done"
+				t_state = 0.0
+				_show_resb()
 			if shot_n == 60 and shot_s.contains("finwin"):
 				state = "done"
 				t_state = 0.0
@@ -12737,3 +12762,14 @@ func _pause(on: bool) -> void:
 	var b3 = _btn("MENU")
 	b3.pressed.connect(func(): _to_menu())
 	bx.add_child(b3)
+
+
+# Sicherheitsnetz für Menüs: Knöpfe, die eine Zeile füllen, kürzen zu langen Text mit „…“,
+# statt das ganze Menü über den Bildschirmrand zu schieben.
+func _fit(root: Node) -> void:
+	for c in root.find_children("*", "Button", true, false):
+		var b: Button = c
+		var fills = (b.size_flags_horizontal & Control.SIZE_EXPAND) != 0 or b.get_parent() is VBoxContainer
+		if fills and not (b is CheckBox):
+			b.clip_text = true
+			b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
