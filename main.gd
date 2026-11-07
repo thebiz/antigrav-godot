@@ -1423,14 +1423,14 @@ func _build_track() -> void:
 		if zc < 25.0 or zc > 715.0 or T.gap(zc + 1.4) or T.gap(zc) or T.gap(zc + 3.0):
 			continue
 		var bx = _bpx(k)
-		_strip("pad", zc, zc + 3.0, bx - 0.36, bx + 0.36, 0.008, 0.008)
+		_strip("pad", zc, zc + 3.0, bx - PAD_HW, bx + PAD_HW, 0.008, 0.008)
 	# Waffenfelder: bunter Ring auf jedem zweiten Feld
 	for wk in range(0, 21, 2):
 		var zw = _wzp(wk)
 		if zw < 25.0 or zw > 715.0 or T.gap(zw + 1.0):
 			continue
 		var wx = _wpx(wk)
-		_strip("wpad", zw - 0.25, zw + 2.25, wx - 0.5, wx + 0.5, 0.009, 0.009)
+		_strip("wpad", zw - 0.25, zw + 2.25, wx - PAD_HW, wx + PAD_HW, 0.009, 0.009)
 		wpads.append([zw + 1.0, wx])
 	# Tore mit Lampen (nicht im Tunnel), Werbetafeln, Stützen
 	var gk = 1
@@ -6592,6 +6592,7 @@ const FX_MODES = {
 	"ship.steer": [0, 1], "ship.steerk": [0, 1], "ship.grip": [0, 1], "ship.drift": [0, 1], "ship.center": [0, 1], "ship.spdst": [0, 1]}
 const CTRL_CURVES = [["press", "release"], ["swipe", "swvel", "release"], ["swipe"], [], []]
 const LANE_W = 1.4   # Abstand der drei Spuren (links −1, Mitte 0, rechts 1)
+const PAD_HW = 0.6   # halbe Breite der Boost- und Waffenfelder: füllt eine Spur fast ganz aus
 
 # Erklärungen zu den Reglern (Tooltip auf der Live-Seite am PC)
 const FX_INFO = {
@@ -9091,7 +9092,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	# Boost-Feld
 	var k = int(round(s.z / 35.0))
 	var fz = (s.z - _bzp(k)) / 35.0
-	if fz >= 0.0 and fz < 0.08 and _pad_ok(_bzp(k)) and not s.air and absf(s.lat - _bpx(k)) < 0.36 and k != s.padK and racing:
+	if fz >= 0.0 and fz < 0.08 and _pad_ok(_bzp(k)) and not s.air and absf(s.lat - _bpx(k)) < PAD_HW and k != s.padK and racing:
 		s.padK = k
 		s.boost = 1.0
 		if is_p:
