@@ -12166,6 +12166,8 @@ func _shot() -> void:
 				else:
 					_race_again()
 					print("SR again state=", state)
+			if OS.get_environment("SRN") != "" and shot_n == int(OS.get_environment("SRN")) + 200:
+				print("MUSIC valid=", is_instance_valid(music_p), " playing=", music_p.playing if is_instance_valid(music_p) else false, " k=", music_k, " f=", music_f)
 			if shot_s.contains("srtest") and shot_n == 50:
 				print("SR valid=", props.map(func(d): return is_instance_valid(d.n)))
 			if shot_s.contains("prtest") and shot_n > 41 and shot_n % 4 == 0:
@@ -14129,7 +14131,7 @@ func _soft_reset() -> bool:
 			n.queue_free()
 		elif n is GPUParticles3D:
 			n.speed_scale = 1.0
-		elif (n is AudioStreamPlayer or n is AudioStreamPlayer3D) and not loops.values().has(n):
+		elif (n is AudioStreamPlayer or n is AudioStreamPlayer3D) and not loops.values().has(n) and n != music_p:
 			n.queue_free()   # noch klingende Einzel-Geräusche
 	if not cm.is_empty():
 		for v in cm.values():
@@ -14347,6 +14349,14 @@ var music_f = 0.0
 func _music_update(dt: float) -> void:
 	if music_p == null:
 		return
+	if not is_instance_valid(music_p):
+		# (wurde früher beim Neustart des Rennens mit weggeräumt – dann war die Musik stumm)
+		music_p = AudioStreamPlayer.new()
+		music_p.bus = "Music"
+		music_p.volume_db = -80.0
+		add_child(music_p)
+		music_k = ""
+		music_f = 0.0
 	var want = "music_menu" if state in ["menu", "lab", "bench"] else "music_race"
 	if float(cfg.get("music", 0.6)) < 0.01:
 		want = ""
