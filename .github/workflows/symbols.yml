@@ -26,8 +26,8 @@ jobs:
           for z in *.zip; do [ -f "$z" ] && unzip -q -o "$z" -d "x_${z%.zip}"; done
           for z in *.tar.xz; do [ -f "$z" ] && mkdir -p x_t && tar -xf "$z" -C x_t; done
           find . -name "*.so*" -o -name "*.debug" | head -50
-          ADDR="0x3f8b23c 0x3f8b3e8 0x15a5da8 0x3fad134 0x3c3d7e8 0x15a6884 0x2389e30 0x2916540 0x3fad71c 0x23bfaa0 0x23be61c 0x23bf02c 0x125a4a4 0x11fc954 0x1212ae0"
-          for f in $(find . -type f \( -name "libgodot_android*.so*" -o -name "*.debug" \)); do
+          ADDR="0x3c3d7e0 0x15a6884 0x15a689c 0x3fad134 0x3c3d7e8 0x2389e30"
+          for f in $(find . -path "*template_release*arm64*" -name "libgodot_android.so"); do
             echo "== $f"; file "$f"
             readelf -n "$f" 2>/dev/null | grep -i "build id" || true
             if readelf -n "$f" 2>/dev/null | grep -qi 270121fef88100c19643517c328b5868e01d345c; then echo "*** passende BuildId ***"; fi
