@@ -62,17 +62,17 @@ var ui = {}
 var menu_t = 0.0
 var last_c = 99
 # Waffen und Energie (wie im alten Spiel)
-const WP = [["rak", 0.2], ["lenk", 0.2], ["mine", 0.12], ["schild", 0.09], ["turbo", 0.11], ["beben", 0.08], ["auto", 0.05], ["wand", 0.07], ["orbs", 0.08]]
+const WP = [["rak", 0.15], ["lenk", 0.15], ["turret", 0.1], ["mine", 0.12], ["schild", 0.09], ["turbo", 0.11], ["beben", 0.08], ["auto", 0.05], ["wand", 0.07], ["orbs", 0.08]]
 const WP_AI = [["lenk", 0.35], ["rak", 0.25], ["mine", 0.2], ["schild", 0.1], ["turbo", 0.1]]
 # eigene Farbe je Waffe, damit man sie im Augenwinkel unterscheiden kann
 const WC = {"rak": Color(1.0, 0.55, 0.12), "lenk": Color(1.0, 0.18, 0.22), "mine": Color(1.0, 0.86, 0.1), "orbs": Color(0.3, 0.6, 1.0),
-	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95)}
+	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95), "turret": Color(0.72, 1.0, 0.2)}
 # kurze Erklärung je Waffe (Hinweise beim ersten Mal und „How to play“)
 const WD = {"rak": "Flies straight ahead – aim by steering.", "lenk": "Locks onto the rival ahead and hits for sure.",
 	"mine": "Drops mines behind you.", "schild": "Protects you from two hits.", "turbo": "A big burst of speed.",
 	"beben": "A shock wave rolls ahead and throws rivals off course.", "auto": "Autopilot for 5 seconds – steers for you.",
-	"wand": "An energy wall ahead – rivals flying through it get zapped.", "orbs": "Glowing orbs circle you and hit anyone close."}
-const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS"}
+	"wand": "An energy wall ahead – rivals flying through it get zapped.", "orbs": "Glowing orbs circle you and hit anyone close.", "turret": "A gun on your ship fires at nearby rivals on its own for 10 seconds."}
+const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS", "turret": "TURRET"}
 var shots = []
 var mines = []
 var fxs = []
@@ -405,7 +405,7 @@ func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
-			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
+			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "vo_turret.wav", "gun.wav", "minedrop.wav",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
@@ -4669,7 +4669,7 @@ func _dot(r: int) -> ImageTexture:
 
 func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
-	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Textures: ambientCG (CC0) · Voices: Kokoro TTS (Apache 2.0) · Characters & start girl: John, 3D via Tripo AI · “Jungle Tree” by gelmi.com.br, CC BY 4.0 · private use only"
+	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Textures: ambientCG (CC0) · Voices: ElevenLabs · Characters & start girl: John, 3D via Tripo AI · “Jungle Tree” by gelmi.com.br, CC BY 4.0 · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
 	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
 	ui.sl.res.text = "Resolution  %d %%" % int(round(float(cfg.res) * 100.0))
@@ -5685,7 +5685,7 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 	if o.shield > 0.0:
 		# Schild: hält einen Waffentreffer aus (Rakete, Orb, Mine, Wand, Beben …), beim zweiten ist er weg;
 		# Superwaffen zerschlagen ihn sofort. Rempeln schluckt er einfach.
-		if sup or kind != "ram":
+		if sup or (kind != "ram" and kind != "gun"):
 			o.shh = int(o.get("shh", 0)) + (2 if sup else 1)
 			if o.shh >= 2:
 				_shield_break(o)
@@ -6035,6 +6035,12 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			g.ahold = false
 			g.sauto = sup
 			_snd("shield")
+		"turret":
+			g.turret = 12.0 if sup else 10.0
+			g.tsup = sup
+			g.tmega = false
+			g.tcd = 0.3
+			_snd("pick", 0.0, 0.7)
 
 
 # MEGA: jede Waffe hat ihre eigene, große Wirkung – stark, aber kein Sofortsieg (höchstens ~40 % Schaden je Gegner)
@@ -6094,6 +6100,13 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 					quake = _quake_make(g.z + 3.0, 1.0, quake)
 					quake.sup = true
 					_snd("boom", 3.0, 0.55))
+		"turret":
+			# 15 s Doppelgeschütz: schneller, trifft öfter, nimmt abwechselnd zwei Gegner ins Visier
+			g.turret = 15.0
+			g.tsup = true
+			g.tmega = true
+			g.tcd = 0.2
+			_snd("pick", 2.0, 0.6)
 		"auto":
 			# 8 s Autopilot, dabei geschützt
 			g.auto = 8.0
@@ -6492,6 +6505,12 @@ func _wicon(c: CanvasItem, p: Vector2, s: float, w: String, col: Color) -> void:
 			c.draw_arc(p, s * 0.2, 0.0, TAU, 16, col, lw, true)
 			for a in [PI * 0.5, PI * 1.17, PI * 1.83]:
 				c.draw_line(p + Vector2(cos(a), sin(a)) * s * 0.2, p + Vector2(cos(a), sin(a)) * s * 0.8, col, lw, true)
+		"turret":
+			# Geschützturm: Kuppel mit Doppellauf
+			c.draw_arc(p + Vector2(0, s * 0.35), s * 0.55, PI, TAU, 20, col, lw, true)
+			c.draw_line(p + Vector2(-s * 0.75, s * 0.35), p + Vector2(s * 0.75, s * 0.35), col, lw, true)
+			c.draw_line(p + Vector2(-s * 0.12, -s * 0.15), p + Vector2(-s * 0.12, -s * 0.95), col, lw, true)
+			c.draw_line(p + Vector2(s * 0.12, -s * 0.15), p + Vector2(s * 0.12, -s * 0.95), col, lw, true)
 		"wand":
 			for i in range(4):
 				var x = -s * 0.75 + i * s * 0.5
@@ -6572,7 +6591,7 @@ func _show_help(on: bool) -> void:
 		["wpad", "Weapon pad", "A spinning ring. Fly through it to pick up a random weapon."],
 		["fire", "Fire", "Tap the round FIRE button at the bottom to use your weapon."],
 		["#", "Weapons", ""]]
-	for w in ["rak", "lenk", "mine", "orbs", "wand", "beben", "schild", "turbo", "auto"]:
+	for w in ["rak", "lenk", "turret", "mine", "orbs", "wand", "beben", "schild", "turbo", "auto"]:
 		rows.append([w, WN[w].capitalize(), WD[w]])
 	rows += [["#", "Power-ups", ""],
 		["super", "Super", "Keep your weapon and fly over 2 more weapon pads – it turns SUPER: stronger and gold."],
@@ -7647,6 +7666,7 @@ func _weapons(dt: float, racing: bool) -> void:
 	for o in ships:
 		_shield_vis(o)
 	_orbs_update(dt, true)
+	_turret_update(dt)
 
 
 # ---------------------------------------------------------------- Energiewand: Wabengitter, Lauflicht, zuckende Blitze
@@ -8086,6 +8106,8 @@ func _replay(dt: float) -> void:
 					_big(ev[1], ev[2])
 				"vo":
 					_snd(ev[1], ev[2])
+				"gun":
+					_gun_tracer(ships[ev[1]], ships[ev[2]], ev[3])
 	if rp.t > F[F.size() - 1].t + 0.4:
 		_replay_end()
 		return
@@ -8111,6 +8133,7 @@ func _replay(dt: float) -> void:
 	g.sorb = f0.get("so", false)
 	g.auto = 0.0
 	_orbs_update(dt, false)
+	_tracers_update(dt)
 	var ps = _pool("shots", f0.w.size(), func():
 		var cap = CapsuleMesh.new()
 		cap.radius = 0.06
@@ -10454,6 +10477,14 @@ func _shot() -> void:
 				if shot_n > 40 and shot_n < 75:
 					var k2 = int(get_meta("ak"))
 					print("AS n=", shot_n, " dz=", snappedf(_bzp(k2) - g.z, 0.1), " lat=", snappedf(g.lat, 0.01), " pad=", snappedf(_bpx(k2), 0.01), " boost=", snappedf(g.boost, 0.01), " padK=", g.padK, " k=", k2)
+			if shot_s.contains("turrettest") and state == "race":
+				var g = ships[0]
+				if shot_n == 40:
+					ships[1].z = g.z + 7.0
+					ships[1].lat = g.lat + 0.8
+					_fire_w(g, "turret", shot_s.contains("tsup"))
+				if shot_n >= 40 and shot_n % 5 == 0:
+					print("TT n=", shot_n, " turret=", snappedf(float(g.get("turret", 0.0)), 0.01), " en=", [ships[1].en, ships[2].en, ships[3].en], " dz=", [ships[1].z - g.z, ships[2].z - g.z, ships[3].z - g.z], " tracers=", tracers.size(), " shots=", g.get("tsh", 0), " sh1=", snappedf(ships[1].shield, 0.1), " prot=", _prot(ships[1]), " out1=", ships[1].out)
 			if shot_n == 50 and shot_s.contains("backtest"):
 				# Test: Android meldet Zurück doppelt (Taste + Systemmeldung) – Pause muss offen bleiben
 				var ke = InputEventKey.new()
@@ -10859,7 +10890,7 @@ func _comic_build(kind: String) -> void:
 			var vk = randi() % 3   # nur einer der Verlierer meckert hörbar, sonst wird's ein Durcheinander
 			for i in [1, 2, 3]:
 				var ch2: Array = CHARS[i]
-				pn.append({"ch": ch2, "img": _cm_img(ch2[3] + "_1"), "line": _pick(CM_WIN[ch2[3]]), "t0": 0.8 + k2 * 0.3, "fy": 0.45, "vo": "cv_%s_mad" % ch2[3] if k2 == vk else ""})
+				pn.append({"ch": ch2, "img": _cm_img(ch2[3] + "_1"), "line": _pick(CM_WIN[ch2[3]]), "t0": 0.8 + k2 * 0.3, "fy": 0.45, "vo": "cv_%s_lose" % ch2[3] if k2 == vk else ""})
 				k2 += 1
 			stamp = ["VICTORY!", Color(1.0, 0.8, 0.2)]
 			hold = true
@@ -10871,9 +10902,9 @@ func _comic_build(kind: String) -> void:
 			hold = true
 		"ko":
 			var v: Array = CHARS[clampi(who, 1, 3)]
-			pn.append({"ch": v, "img": _cm_img("ko_" + v[3]), "line": _pick(CM_KO[v[3]]), "t0": 0.0, "fy": 0.5, "noname": false, "vo": "cv_%s_ko" % v[3]})
+			pn.append({"ch": v, "img": _cm_img("ko_" + v[3]), "line": _pick(CM_KO[v[3]]), "t0": 0.0, "fy": 0.5, "noname": false, "vo": "cv_%s_mad" % v[3]})
 			stamp = ["K.O.!", Color(1.0, 0.85, 0.15)]
-			end = 2.8
+			end = 3.3
 			_snd("cm_crash", -3.0)
 	var ns = pn.size()
 	var st = pn[ns - 1].t0 + 0.5
@@ -10919,6 +10950,10 @@ func _comic_update(dt: float) -> void:
 			_snd("cm_pop", -9.0, randf_range(0.95, 1.1))
 			if str(pd.get("vo", "")) != "":
 				_snd(pd.vo, 2.0)
+	# K.o.-Seite: erst flucht der Getroffene, dann setzt Ren kühl nach („Verschwinde.“)
+	if cm.kind == "ko" and cm.t >= 2.15 and not cm.get("rko", false) and cm.skip < 0.0:
+		cm.rko = true
+		_snd("cv_ren_ko", 2.0)
 	if cm.t >= cm.st + 0.15 and not cm.get("sth", false) and cm.skip < 0.0:
 		cm.sth = true
 		cm.shake = 1.4
@@ -11967,6 +12002,9 @@ func _ga_draw(c: Control) -> void:
 		_ga_txt(c, Vector2(471, 1405 + bounce), nm, 22 if nm.length() < 7 else 18, Color(gc, 1.0) if not spin else TXT, 1, 5)
 		if (sup or mega) and not spin:
 			_ga_txt(c, Vector2(471, 1290), "MEGA" if mega else "SUPER", 18, gc, 1, 5)
+	elif float(g.get("turret", 0.0)) > 0.0:
+		_wicon(c, Vector2(471, 1340), 40.0, "turret", Color(WC.turret, 0.9))
+		_ga_txt(c, Vector2(471, 1405), "TURRET %.1f" % float(g.turret), 18, WC.turret, 1, 5)
 	elif g.auto > 0.0:
 		_wicon(c, Vector2(471, 1340), 40.0, "auto", Color(0.5, 0.95, 1.0, 0.9))
 		_ga_txt(c, Vector2(471, 1405), "AUTO %.1f" % g.auto, 20, Color(0.5, 0.95, 1.0), 1, 5)
@@ -12119,7 +12157,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp", "megaw",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
-	"last_c", "tun_k", "cm"]
+	"last_c", "tun_k", "cm", "tracers"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
@@ -12382,3 +12420,177 @@ func _assist(s: Dictionary, dt: float) -> void:
 	var f = 1.0 - exp(-dt * k)
 	s.vpsi += (want - s.vpsi) * f
 	s.psi += (want - s.psi) * f * 0.6
+
+
+# ---------------------------------------------------------------- Geschütz (Turret): feuert 10 s lang selbst auf Gegner in der Nähe
+var gun_mat: StandardMaterial3D
+var tracers = []
+
+
+# kleiner Geschützturm oben auf dem Schiff (Kuppel + Doppellauf), dreht sich zum Ziel
+func _turret_node(o: Dictionary) -> Node3D:
+	var nd: Node3D = o.node
+	if nd.has_meta("turret"):
+		return nd.get_meta("turret")
+	# nur das eigentliche Schiffsmodell vermessen (ohne Düsenflammen, Leuchtringe, Schild …)
+	var model: Node3D = null
+	for ch in nd.get_children():
+		if ch is Node3D and not (ch is MeshInstance3D) and not (ch is Light3D) and ch.find_children("*", "MeshInstance3D", true, false).size() > 0:
+			model = ch
+			break
+	var top = 0.26
+	var zc = 0.0
+	var first = true
+	var ab = AABB()
+	if model != null:
+		for mi in model.find_children("*", "MeshInstance3D", true, false):
+			var m: MeshInstance3D = mi
+			if m.mesh == null or not m.is_visible_in_tree() or m.name.contains("Glow") or m.name.contains("Jet") or m.name.contains("Boost"):
+				continue
+			var b = nd.global_transform.affine_inverse() * m.global_transform * m.get_aabb()
+			ab = b if first else ab.merge(b)
+			first = false
+	if not first:
+		top = ab.end.y
+		zc = ab.get_center().z + ab.size.z * 0.12
+	var t = Node3D.new()
+	t.position = Vector3(0.0, top - 0.02, zc)
+	# Schiffsmodelle sind unterschiedlich skaliert – das Geschütz soll immer gleich groß wirken
+	var sc: Vector3 = nd.global_transform.basis.get_scale()
+	t.scale = Vector3(1.0 / maxf(0.001, sc.x), 1.0 / maxf(0.001, sc.y), 1.0 / maxf(0.001, sc.z))
+	var mt = StandardMaterial3D.new()
+	mt.albedo_color = Color(0.12, 0.12, 0.14)
+	mt.metallic = 0.85
+	mt.roughness = 0.35
+	mt.emission_enabled = true
+	mt.emission = Color(WC.turret) * 0.12
+	var base = MeshInstance3D.new()
+	var sm = SphereMesh.new()
+	sm.radius = 0.13
+	sm.height = 0.13
+	sm.is_hemisphere = true
+	base.mesh = sm
+	base.material_override = mt
+	t.add_child(base)
+	var head = Node3D.new()
+	head.position = Vector3(0, 0.06, 0)
+	t.add_child(head)
+	for x in [-0.035, 0.035]:
+		var br = MeshInstance3D.new()
+		var cm = CylinderMesh.new()
+		cm.top_radius = 0.022
+		cm.bottom_radius = 0.028
+		cm.height = 0.38
+		br.mesh = cm
+		br.material_override = mt
+		br.rotation = Vector3(PI * 0.5, 0, 0)
+		br.position = Vector3(x, 0.0, 0.19)
+		head.add_child(br)
+	t.set_meta("head", head)
+	t.visible = false
+	nd.add_child(t)
+	nd.set_meta("turret", t)
+	return t
+
+
+func _tracers_update(dt: float) -> void:
+	for i in range(tracers.size() - 1, -1, -1):
+		var e = tracers[i]
+		e.t += dt
+		if not is_instance_valid(e.mi):
+			tracers.remove_at(i)
+		elif e.t > 0.09:
+			(e.mi as Node).queue_free()
+			tracers.remove_at(i)
+		else:
+			((e.mi as MeshInstance3D).material_override as StandardMaterial3D).albedo_color.a = 1.0 - e.t / 0.09
+
+
+func _turret_update(dt: float) -> void:
+	_tracers_update(dt)
+	for o in ships:
+		var tl = float(o.get("turret", 0.0))
+		if tl <= 0.0 and not (o.node as Node3D).has_meta("turret"):
+			continue
+		var tn = _turret_node(o)
+		if tl <= 0.0 or o.out or state != "race":
+			tn.visible = false
+			if tl > 0.0 and (o.out or state == "done"):
+				o.turret = 0.0
+			continue
+		tn.visible = true
+		o.turret = tl - dt
+		# Ziel: nächster Gegner im Umkreis (bis 40 voraus, 8 dahinter)
+		var tg = null
+		var best = 1e9
+		var alt = null
+		for x in ships:
+			if x.idx == o.idx or x.out:
+				continue
+			var dz = x.z - o.z
+			if dz < -8.0 or dz > 40.0:
+				continue
+			var d = Vector2(dz, (x.lat - o.lat) * 2.0).length()
+			if d < best:
+				alt = tg
+				best = d
+				tg = x
+			elif alt == null:
+				alt = x
+		var head: Node3D = tn.get_meta("head")
+		if tg != null:
+			if o.get("tmega", false) and alt != null and int(o.get("tsh", 0)) % 2 == 1:
+				tg = alt
+			var tp: Vector3 = (tg.node as Node3D).global_position + Vector3(0, 0.15, 0)
+			var hp = head.global_position
+			if hp.distance_to(tp) > 0.2:
+				var want = head.global_transform.looking_at(tp, Vector3.UP, true).basis
+				head.global_transform.basis = head.global_transform.basis.slerp(want.orthonormalized(), 1.0 - exp(-dt * 18.0)).orthonormalized()
+		else:
+			head.rotation = head.rotation.lerp(Vector3.ZERO, 1.0 - exp(-dt * 6.0))
+		o.tcd = float(o.get("tcd", 0.0)) - dt
+		if tg == null or o.tcd > 0.0:
+			continue
+		var mega = o.get("tmega", false)
+		var sup = o.get("tsup", false)
+		o.tcd = 0.11 if mega else (0.15 if sup else 0.22)
+		o.tsh = int(o.get("tsh", 0)) + 1
+		var dz2 = tg.z - o.z
+		var hit = randf() < (0.9 if mega else (0.85 if absf(dz2) < 22.0 else 0.65))
+		_gun_tracer(o, tg, hit)
+		_rev(["gun", o.idx, tg.idx, hit])
+		if hit:
+			_dmg(tg, 0.014 if mega else (0.012 if sup else 0.01), o.idx, "gun")
+
+
+# Leuchtspur vom Lauf zum Ziel (Treffer: aufs Schiff, sonst knapp daneben) mit Mündungsblitz
+func _gun_tracer(o: Dictionary, tg: Dictionary, hit: bool) -> void:
+	if gun_mat == null:
+		gun_mat = StandardMaterial3D.new()
+		gun_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		gun_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		gun_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		gun_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var tn = _turret_node(o)
+	var head: Node3D = tn.get_meta("head")
+	var a: Vector3 = head.global_position + head.global_transform.basis.z * 0.38
+	var b: Vector3 = (tg.node as Node3D).global_position + Vector3(0, 0.15, 0)
+	if not hit:
+		b += Vector3(randf_range(-0.9, 0.9), randf_range(0.2, 0.7), randf_range(-0.5, 0.5))
+	var im = ImmediateMesh.new()
+	var mi = MeshInstance3D.new()
+	mi.mesh = im
+	var m: StandardMaterial3D = gun_mat.duplicate()
+	m.albedo_color = Color(WC.turret.r * 2.4, WC.turret.g * 2.4, WC.turret.b * 2.4, 1.0)
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var side = (b - a).cross(cam.global_position - a).normalized() * 0.025
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for q in [a - side, a + side, b + side, a - side, b + side, b - side]:
+		im.surface_add_vertex(q)
+	im.surface_end()
+	add_child(mi)
+	tracers.append({"mi": mi, "t": 0.0})
+	_snd("gun", -12.0 if o.idx == 0 else -16.0, randf_range(0.92, 1.08), a)
+	if hit and tg.idx == 0:
+		shake = maxf(shake, 0.12)
