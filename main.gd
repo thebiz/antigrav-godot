@@ -62,17 +62,17 @@ var ui = {}
 var menu_t = 0.0
 var last_c = 99
 # Waffen und Energie (wie im alten Spiel)
-const WP = [["rak", 0.15], ["lenk", 0.15], ["turret", 0.1], ["mine", 0.12], ["schild", 0.09], ["turbo", 0.11], ["beben", 0.08], ["auto", 0.05], ["wand", 0.07], ["orbs", 0.08]]
+const WP = [["rak", 0.2], ["lenk", 0.2], ["mine", 0.12], ["schild", 0.09], ["turbo", 0.11], ["beben", 0.08], ["auto", 0.05], ["wand", 0.07], ["orbs", 0.08]]
 const WP_AI = [["lenk", 0.35], ["rak", 0.25], ["mine", 0.2], ["schild", 0.1], ["turbo", 0.1]]
 # eigene Farbe je Waffe, damit man sie im Augenwinkel unterscheiden kann
 const WC = {"rak": Color(1.0, 0.55, 0.12), "lenk": Color(1.0, 0.18, 0.22), "mine": Color(1.0, 0.86, 0.1), "orbs": Color(0.3, 0.6, 1.0),
-	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95), "turret": Color(0.72, 1.0, 0.2)}
+	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95)}
 # kurze Erklärung je Waffe (Hinweise beim ersten Mal und „How to play“)
 const WD = {"rak": "Flies straight ahead – aim by steering.", "lenk": "Locks onto the rival ahead and hits for sure.",
 	"mine": "Drops mines behind you.", "schild": "Protects you from two hits.", "turbo": "A big burst of speed.",
 	"beben": "A shock wave rolls ahead and throws rivals off course.", "auto": "Autopilot for 5 seconds – steers for you.",
-	"wand": "An energy wall ahead – rivals flying through it get zapped.", "orbs": "Glowing orbs circle you and hit anyone close.", "turret": "A gun on your ship fires at nearby rivals on its own for 10 seconds."}
-const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS", "turret": "TURRET"}
+	"wand": "An energy wall ahead – rivals flying through it get zapped.", "orbs": "Glowing orbs circle you and hit anyone close."}
+const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS"}
 var shots = []
 var mines = []
 var fxs = []
@@ -202,7 +202,6 @@ func _ready() -> void:
 	_build_track()
 	_build_city()
 	_spawn_ships()
-	_nav_apply()
 	cam = Camera3D.new()
 	cam.fov = 52.0
 	cam.near = 0.08
@@ -408,7 +407,7 @@ func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
-			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "vo_turret.wav", "gun.wav", "minedrop.wav",
+			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
 			"cbeep.wav", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
@@ -734,7 +733,7 @@ const FXS = {
 		["soft", "Soft bounce", 0.0, 2.0, 1.0], ["beam", "Pillar light", 0.0, 10.0, 1.0], ["hitw", "Hit width", 0.2, 1.0, 0.5]],
 	"ship": [["height", "Hover height", 0.2, 8.0, 1.0], ["bob", "Hover bob", 0.0, 10.0, 1.0], ["pitch", "Nose pitch", 0.0, 8.0, 1.0],
 		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0],
-		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0], ["trim", "Nose trim (down +)", -1.0, 1.0, 0.0],
+		["trim", "Nose trim (down +)", -1.0, 1.0, 0.0],
 		["weight", "Tassel weight", 0.1, 3.0, 1.0], ["swing", "Tassel swing", 0.1, 3.0, 1.0], ["wind", "Tassel wind (driving)", 0.0, 3.0, 1.0],
 		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0]],
 	# Lenkung – nur diese vier Werte (eingestellt wird auf der Teststrecke am Handy)
@@ -1117,28 +1116,41 @@ func _tex_metal(nm: String, c: Color, scale: float, rough: float, metal: float =
 	return m
 
 
-const NAV_CODE = """
-shader_type spatial;
-render_mode unshaded,shadows_disabled;
-uniform vec3 c=vec3(1.,.1,.1);uniform float k=1.;uniform float rt=1.;uniform float ph=0.;
-void fragment(){float t=fract(TIME*.7*rt+ph);float b=step(t,.08)+.5*step(.16,t)*step(t,.22);ALBEDO=c*(.25+b*7.)*k;}
-"""
-var nav_m = {}
+# Wand-Textur aus den Bildvorlagen: Farbe + Rauheit, Struktur und eigene Leuchtteile (Lampen); v wird bei Bedarf umgedreht
+func _tex_wall(nm: String, su: float, sv: float, flip: float) -> StandardMaterial3D:
+	var m = StandardMaterial3D.new()
+	var tc: Texture2D = load("res://tex/%s_cr.png" % nm)
+	m.albedo_texture = tc
+	m.albedo_color = Color(0.85, 0.85, 0.88) if not _noir() else Color(0.7, 0.7, 0.7)
+	m.metallic = 0.55
+	m.roughness_texture = tc
+	m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_ALPHA
+	m.roughness = 1.0
+	m.normal_enabled = true
+	m.normal_texture = load("res://tex/%s_n.png" % nm)
+	m.normal_scale = 0.9
+	m.emission_enabled = true
+	m.emission_texture = load("res://tex/%s_e.jpg" % nm)
+	m.emission = Color(1, 1, 1) if not _noir() else Color(0.75, 0.75, 0.75)
+	m.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY   # sonst addiert Godot Farbe + Bild und alles leuchtet weiß
+	m.emission_energy_multiplier = 2.4
+	m.uv1_scale = Vector3(su, -sv if flip > 0.5 else sv, 1.0)
+	m.uv1_offset = Vector3(0.0, 1.0 if flip > 0.5 else 0.0, 0.0)
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	return m
 
 
-func nav_mat(sd: float) -> ShaderMaterial:
-	if not nav_m.has(sd):
-		var m = _shader_mat(NAV_CODE)
-		m.set_shader_parameter("c", Vector3(0.1, 1.0, 0.3) if sd < 0.0 else Vector3(1.0, 0.08, 0.06))   # von hinten gesehen: links rot, rechts grün
-		m.set_shader_parameter("ph", 0.0 if sd < 0.0 else 0.5)
-		nav_m[sd] = m
-	return nav_m[sd]
-
-
-func _nav_apply() -> void:
-	for m in nav_m.values():
-		(m as ShaderMaterial).set_shader_parameter("k", float(fx.ship.nav))
-		(m as ShaderMaterial).set_shader_parameter("rt", float(fx.ship.navb))
+# Werbetafel mit einem der vier Motive (Atlas 2x2), zur Strecke gewandt, ungespiegelt
+func _board(z: float, sd: float, k: int) -> void:
+	st_z = z
+	var f = T.frame(z)
+	var c: Vector3 = f.c + f.rr * (sd * (T.TW + 0.405)) + f.uu * 0.86
+	var rt: Vector3 = -f.fw * sd * 0.72   # von der Strecke aus gesehen „rechts“
+	var up: Vector3 = f.uu * 0.72
+	var o = Vector2(float(k % 2), float(k / 2)) * 0.5
+	keep_wind = true
+	_quad(_st("boards"), c - rt + up, c + rt + up, c + rt - up, c - rt - up, -f.rr * sd, o, o + Vector2(0.5, 0.0), o + Vector2(0.5, 0.5), o + Vector2(0.0, 0.5))
+	keep_wind = false
 
 
 func _neon(c: Color, e: float = 5.0) -> StandardMaterial3D:
@@ -1374,10 +1386,12 @@ func _strip(key: String, z0: float, z1: float, la: float, lb: float, ha: float, 
 			n = n.normalized()
 			if n.dot(f.uu) < -0.2 or (absf(n.dot(f.uu)) <= 0.2 and n.dot(f.rr * signf(la + lb + 0.0001)) > 0.0):
 				n = -n
-			if key == "wall":
-				# Leitplanke: Texturkoordinaten längs (z) und quer (Höhe/Breite des Bandes)
+			if key == "wall" or key == "wallcap":
+				# Leitplanke: Texturkoordinaten längs (z) und quer (Höhe/Breite des Bandes);
+				# von innen gesehen soll die Schrift nicht spiegeln: rechts läuft u gegen die Fahrtrichtung
 				var L = absf(lb - la) + absf(hb - ha)
-				_quad(_st(key), prev[0], prev[1], p[1], p[0], n, Vector2(z - 0.5, 0.0), Vector2(z - 0.5, L), Vector2(z, L), Vector2(z, 0.0))
+				var sg = -1.0 if la + lb > 0.0 else 1.0
+				_quad(_st(key), prev[0], prev[1], p[1], p[0], n, Vector2((z - 0.5) * sg, 0.0), Vector2((z - 0.5) * sg, L), Vector2(z * sg, L), Vector2(z * sg, 0.0))
 			else:
 				_quad(_st(key), prev[0], prev[1], p[1], p[0], n)
 		prev = p
@@ -1437,7 +1451,7 @@ func _build_track() -> void:
 	# Leitplanken: Metallwand innen, Deckel, Neonband (links Cyan, rechts Magenta)
 	for sd in ([] if _jungle() else [-1.0, 1.0]):   # Dschungel: keine Leitplanken, der Erdwall begrenzt die Piste
 		_strip("wall", 20.0, 720.0, sd * TW, sd * TW, -0.06, 0.46)
-		_strip("wall", 20.0, 720.0, sd * TW, sd * (TW + 0.12), 0.46, 0.46)
+		_strip("wallcap", 20.0, 720.0, sd * TW, sd * (TW + 0.12), 0.46, 0.46)
 		_strip("neonL" if sd < 0 else "neonR", 20.0, 720.0, sd * (TW - 0.012), sd * (TW - 0.012), 0.30, 0.36)
 		# Leuchtkante auf der Fahrbahn
 		_strip("neonL" if sd < 0 else "neonR", 20.0, 720.0, sd * (TW - 0.16), sd * (TW - 0.11), 0.006, 0.006)
@@ -1485,8 +1499,12 @@ func _build_track() -> void:
 		if zc > 715.0 or T.in_tun(zc, 2.0) or _jungle():
 			continue
 		var sd = 1.0 if k % 2 == 0 else -1.0
-		_box("metal", zc, sd * (TW + 0.42), 0.42, 0.03, 0.3, 1.6)
-		_box("board" + str(k % 3), zc, sd * (TW + 0.385), 0.42, 0.006, 0.26, 1.5)
+		if _noir():
+			_box("metal", zc, sd * (TW + 0.42), 0.42, 0.03, 0.3, 1.6)
+			_box("board" + str(k % 3), zc, sd * (TW + 0.385), 0.42, 0.006, 0.26, 1.5)
+		else:
+			_box("metal", zc, sd * (TW + 0.44), 0.86, 0.03, 0.76, 0.78)
+			_board(zc, sd, k % 4)
 	for k in range(2, 51):
 		var zc = k * 14.0 + 7.0
 		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle():
@@ -1516,14 +1534,23 @@ func _build_track() -> void:
 					# Texturkoordinaten: längs der Röhre (z) und rundherum (Bogenlänge)
 					var v0 = R * (-am + 2.0 * am * i / na)
 					var v1 = R * (-am + 2.0 * am * (i + 1) / na)
-					_quad(_st("tube"), pr[i][0], ring[i][0], ring[i + 1][0], pr[i + 1][0], ring[i][1], Vector2(z2 - 1.0, v0), Vector2(z2, v0), Vector2(z2, v1), Vector2(z2 - 1.0, v1))
+					var ua = z2 - 1.0
+					var ub = z2
+					if not _jungle():
+						# v: 0 an der Decke, 1 unten an der Fahrbahn; u von innen gesehen ungespiegelt
+						var sg = 1.0 if i < na / 2 else -1.0
+						ua *= sg
+						ub *= sg
+						v0 = absf(-am + 2.0 * am * i / na) / am
+						v1 = absf(-am + 2.0 * am * (i + 1) / na) / am
+					_quad(_st("tube"), pr[i][0], ring[i][0], ring[i + 1][0], pr[i + 1][0], ring[i][1], Vector2(ua, v0), Vector2(ub, v0), Vector2(ub, v1), Vector2(ua, v1))
 			pr = ring
 			z2 += 1.0
 		var zt: float = tu[0] + 1.0 if not _jungle() else 9999.0   # Erdtunnel: keine Leuchtringe
 		var ti = 0
 		while zt < tu[1]:
 			_ring("ringC" if ti % 5 != 4 else "ringM", zt, R - 0.03, 0.4, 0.025, am * 0.98, 30)
-			zt += 1.43
+			zt += 2.86   # weniger Ringe, damit man die Tunnelwände sieht
 			ti += 1
 		if not _jungle():
 			_strip("tlight", tu[0], tu[1], -0.06, 0.06, 0.4 + R - 0.04, 0.4 + R - 0.04)
@@ -1539,7 +1566,7 @@ uniform float rgl=1.;
 // Textur „Metal 046 B“ (ambientCG, CC0): Farbe + Rauheit (Alpha) und Oberflächenstruktur
 uniform sampler2D tcr:source_color,filter_linear_mipmap,repeat_enable;
 uniform sampler2D tn:hint_normal,filter_linear_mipmap,repeat_enable;
-uniform float tk=1.;uniform float ts=2.4;uniform float jg=0.;
+uniform float tk=1.;uniform float ts=2.4;uniform float jg=0.;uniform float nr=0.;uniform float ds=0.;
 uniform vec3 ncl=vec3(0.,.78,1.);uniform vec3 ncr=vec3(1.,.06,.42);uniform float nk=1.;   // Neonschein der Leitplanken   // Glanz der Fahrbahn (FX Lab): mehr = glatter, schärfere Spiegelungen
 varying float wz;varying float qh;
 float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
@@ -1556,9 +1583,10 @@ void fragment(){
 	float edge=step(2.4-.42,abs(x))*step(abs(x),2.4-.34);
 	float hz=step(.5,fract(z*.5));
 	base=mix(base,mix(vec3(.75,.62,.08),vec3(.05),hz),edge);
-	vec2 tuv=vec2(x,z)/ts;
+	vec2 tuv=nr>.5?vec2(z/4.8,(x+2.4)/4.8):vec2(x,z)/ts;
 	vec4 tc=texture(tcr,tuv);
 	base*=mix(vec3(1.),clamp(tc.rgb/.05,0.,3.5),.85*tk*(1.-edge));
+	if(nr>.5){base=mix(vec3(.11),tc.rgb*1.15,tk);base=mix(base,vec3(dot(base,vec3(.3,.59,.11))),ds);seam=0.;edge=0.;}   // nasser Asphalt mit gelben Randstrichen
 	base*=1.-seam*.7;
 	if(jg>.5){base=tc.rgb*vec3(.75,.58,.42);seam=0.;edge=0.;}   // Dschungel: lehmiger Matsch statt Metallplatten
 	// Struktur der Textur auf die Normale (Tangenten aus den Bildableitungen – die Fahrbahn hat keine eigenen)
@@ -1579,15 +1607,19 @@ void fragment(){
 	float shn=(exp(-dl*1.6)*.25+exp(-dl*5.)*.75)*(.08+frn*1.8)*(1.-seam*.6)*(1.-edge*.5);
 	EMISSION+=(x<0.?ncl:ncr)*shn*nk*.22;
 }""", [["vec3(.75,.62,.08)", "vec3(.8,.3,.02)"]]))
-	mats.road.set_shader_parameter("tcr", load("res://tex/road_cr.png" if not _jungle() else "res://tex/mud_cr.png"))
-	mats.road.set_shader_parameter("tn", load("res://tex/road_n.png" if not _jungle() else "res://tex/mud_n.png"))
+	mats.road.set_shader_parameter("tcr", load("res://tex/road2_cr.png" if not _jungle() else "res://tex/mud_cr.png"))
+	mats.road.set_shader_parameter("tn", load("res://tex/road2_n.png" if not _jungle() else "res://tex/mud_n.png"))
+	if not _jungle():
+		mats.road.set_shader_parameter("nr", 1.0)
+		mats.road.set_shader_parameter("ds", 0.85 if _noir() else 0.0)
 	if _jungle():
 		mats.road.set_shader_parameter("jg", 1.0)
 		mats.road.set_shader_parameter("ts", 3.0)
 	# Leitplanken: zerkratzter Stahl „Metal 038“, Tunnel: „Metal Plates 006“ (beide ambientCG, CC0)
-	mats["wall"] = _tex_metal("rail", Color(0.36, 0.37, 0.4), 0.7, 0.22, 0.85, 0.07) if not _jungle() else _tex_metal("bark", Color(0.42, 0.38, 0.32), 0.8, 0.85, 0.0)
+	mats["wall"] = _tex_wall("barrier", 1.0 / (4.0 * 0.43), 1.0 / 0.52, 1.0) if not _jungle() else _tex_metal("bark", Color(0.42, 0.38, 0.32), 0.8, 0.85, 0.0)
+	mats["wallcap"] = _tex_metal("rail", Color(0.36, 0.37, 0.4), 0.7, 0.22, 0.85, 0.07)
 	mats["metal"] = _metal(Color(0.09, 0.095, 0.11), 0.3)
-	mats["tube"] = _tex_metal("tube", Color(0.24, 0.24, 0.27), 0.5, 0.28, 0.9, 0.05, Color(0.35, 0.55, 0.6)) if not _jungle() else _tex_metal("mud", Color(0.38, 0.31, 0.22), 0.35, 0.95, 0.0)
+	mats["tube"] = _tex_wall("tunnel", 1.0 / (5.0 * 3.6), 1.0, 0.0) if not _jungle() else _tex_metal("mud", Color(0.38, 0.31, 0.22), 0.35, 0.95, 0.0)
 	if _jungle():
 		mats["root"] = _tex_metal("bark", Color(0.45, 0.4, 0.33), 0.7, 0.85, 0.0, 0.03, Color(0.3, 0.9, 0.6))
 		mats["jfloor"] = _tex_metal("mud", Color(0.62, 0.52, 0.38), 0.33, 0.9, 0.0, 0.07, Color(0.55, 0.42, 0.28))
@@ -1600,6 +1632,12 @@ void fragment(){
 	mats["board0"] = _neon(Color(0.8, 0.8, 0.85) if _noir() else Color(0.1, 0.4, 1.0), 2.2)
 	mats["board1"] = _neon(OR if _noir() else Color(1.0, 0.2, 0.5), 2.2)
 	mats["board2"] = _neon(Color(0.35, 0.35, 0.37) if _noir() else Color(1.0, 0.7, 0.1), 2.2)
+	mats["boards"] = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,cull_disabled,shadows_disabled;
+uniform sampler2D tx:source_color,filter_linear_mipmap;uniform float k=1.3;
+void fragment(){ALBEDO=texture(tx,UV).rgb*k;}""")
+	mats.boards.set_shader_parameter("tx", load("res://tex/boards.jpg"))
 	mats["pad"] = _shader_mat(_nz("""
 shader_type spatial;
 render_mode unshaded,cull_disabled;
@@ -1625,7 +1663,10 @@ void fragment(){
 	mats["start"] = _shader_mat("""
 shader_type spatial;
 render_mode unshaded,cull_disabled;
-void fragment(){vec2 q=floor(vec2(UV.x*2.,UV.y*12.));ALBEDO=vec3(mod(q.x+q.y,2.)*.85+.02);}""")
+uniform sampler2D tx:source_color,filter_linear_mipmap,repeat_enable;uniform float ds=0.;
+void fragment(){vec3 c=texture(tx,vec2(UV.y*2.,UV.x)).rgb;ALBEDO=mix(c,vec3(dot(c,vec3(.3,.59,.11))),ds)*.9;}""")
+	mats.start.set_shader_parameter("tx", load("res://tex/start.jpg"))
+	mats.start.set_shader_parameter("ds", 0.85 if _noir() else 0.0)
 	# je Abschnitt ein Mesh – so kann der Renderer alles außerhalb des Blickfelds (und des Schattenbereichs) weglassen
 	var chunks = {}
 	for ck in sts.keys():
@@ -1637,7 +1678,7 @@ void fragment(){vec2 q=floor(vec2(UV.x*2.,UV.y*12.));ALBEDO=vec3(mod(q.x+q.y,2.)
 		if key == "jfloor" or (key == "road" and _jungle()):
 			st = _smooth_st(st)
 		st.index()
-		if key == "wall" or key == "tube" or key == "root" or key == "jfloor":
+		if key == "wall" or key == "wallcap" or key == "tube" or key == "root" or key == "jfloor":
 			st.generate_tangents()   # für die Oberflächenstruktur der Texturen
 		if not chunks.has(ci):
 			chunks[ci] = ArrayMesh.new()
@@ -1753,18 +1794,20 @@ func _build_city() -> void:
 	city_mat = _shader_mat(_nz("""
 shader_type spatial;
 uniform float wl=1.;uniform float wh=0.;uniform float eg=1.;
+uniform sampler2D fa:source_color,filter_linear_mipmap;
 vec3 hr(vec3 c,float a){vec3 k=vec3(.57735);float ca=cos(a);return c*ca+cross(k,c)*sin(a)+k*dot(k,c)*(1.-ca);}
 varying vec3 wp;varying vec3 wn;varying vec4 cd;
 void vertex(){wp=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;wn=normalize((MODEL_MATRIX*vec4(NORMAL,0.)).xyz);cd=INSTANCE_CUSTOM;}
 float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
 void fragment(){
 	float side=1.-step(.9,abs(wn.y));float u=abs(wn.x)>.5?wp.z:wp.x;
-	vec2 g=vec2(u*.55,wp.y*.42);vec2 gi=floor(g),gf=fract(g);
-	float win=step(.22,gf.x)*step(gf.x,.78)*step(.3,gf.y)*step(gf.y,.82)*side;float hh=h21(gi+floor(cd.a*3.));
-	vec3 wc=hh>.93?vec3(.4,.85,1.):(hh>.86?vec3(1.,.4,.75):vec3(1.,.78,.5));
-	ALBEDO=vec3(.015,.017,.025);METALLIC=.7;ROUGHNESS=.18;
-	EMISSION=hr(wc,wh*6.2832)*win*step(1.-.4*wl,hh)*step(.01,wl)*2.2+cd.rgb*smoothstep(cd.a-.8,cd.a-.3,wp.y)*step(wp.y,cd.a)*side*5.*eg;
-}""", [["vec3(.4,.85,1.):(hh>.86?vec3(1.,.4,.75):vec3(1.,.78,.5))", "vec3(1.,.36,.03):(hh>.86?vec3(.9):vec3(.7))"]]))
+	float vi=floor(h21(vec2(cd.a*.731,cd.a*.177))*4.);vec2 ao=vec2(mod(vi,2.),floor(vi/2.))*.5;
+	vec2 t=vec2(u,-wp.y)/14.;vec3 tx=textureGrad(fa,ao+fract(t)*.5,dFdx(t)*.5,dFdy(t)*.5).rgb;
+	tx=tx;
+	ALBEDO=mix(vec3(.015,.017,.025),tx*.12,side);METALLIC=.6;ROUGHNESS=.25;
+	EMISSION=hr(tx*tx*1.9,wh*6.2832)*side*wl+cd.rgb*smoothstep(cd.a-.8,cd.a-.3,wp.y)*step(wp.y,cd.a)*side*5.*eg;
+}""", [["tx=tx;", "tx=vec3(dot(tx,vec3(.3,.59,.11)))*vec3(1.,.93,.85);"]]))
+	city_mat.set_shader_parameter("fa", load("res://tex/facade.jpg"))
 	box.material = city_mat
 	bld_mm = MultiMesh.new()
 	bld_mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -2412,7 +2455,8 @@ const HOLO_SPOTS = [[80.0, 1.0, "dancer"], [300.0, -1.0, "dancer"], [455.0, 1.0,
 	[128.0, -1.0, "koi"], [392.0, 1.0, "koi"], [615.0, -1.0, "koi"]]
 const DANCER_H = 1.66   # Größe der Figur im Modell (m)
 # Hologramm-Figuren: [Datei, Höhe im Modell, dreht sich (stehende Figur)]
-const HOLO_FIGS = [["res://holo/dancer.glb", 1.66, false], ["res://holo/fig_woman1.glb", 1.0, true], ["res://holo/fig_robot.glb", 1.0, true], ["res://holo/fig_woman2.glb", 1.0, true]]
+# fig_woman3: Blade-Runner-Frau (Tripo, Mixamo-Skelett) – tanzt mit dem Samba des Tänzers (zur Laufzeit übertragen)
+const HOLO_FIGS = [["res://holo/dancer.glb", 1.66, false], ["res://holo/fig_woman1.glb", 1.0, true], ["res://holo/fig_robot.glb", 1.0, true], ["res://holo/fig_woman2.glb", 1.0, true], ["res://holo/fig_woman3.glb", 0.0, false, "samba"]]
 const HOLO_H = 45.0     # Höhe der Hologramme in der Stadt (m)
 
 const HOLO_CODE = """
@@ -2665,6 +2709,9 @@ func _holo_node(kind: String) -> Dictionary:
 				(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				(mi as MeshInstance3D).extra_cull_margin = 0.6
 			var fg = {"n": n, "h": fd[1], "spin": fd[2]}
+			if fd.size() > 3 and not h.figs.is_empty() and h.figs[0].has("ap"):
+				fg = _holo_samba(n, h.figs[0], fg)
+				n = fg.n
 			var aps = n.find_children("*", "AnimationPlayer", true, false)
 			if not aps.is_empty():
 				var ap: AnimationPlayer = aps[0]
@@ -2693,12 +2740,140 @@ func _holo_node(kind: String) -> Dictionary:
 	return h
 
 
+# Fremde Figur mit gleichem (Mixamo-)Skelett: Tanz vom Tänzer übernehmen. Gerechnet wird in Weltrichtung –
+# jede Knochendrehung relativ zur Grundhaltung wird übertragen, damit unterschiedliche Knochenachsen nicht stören.
+func _holo_samba(n: Node3D, src: Dictionary, fg: Dictionary) -> Dictionary:
+	var sap: AnimationPlayer = src.ap
+	var sroot: Node3D = src.n
+	var ss: Skeleton3D = sroot.find_children("*", "Skeleton3D", true, false)[0]
+	var dsl = n.find_children("*", "Skeleton3D", true, false)
+	if dsl.is_empty():
+		return fg
+	var ds: Skeleton3D = dsl[0]
+	var a: Animation = sap.get_animation("SambaDance")
+	var sx: Transform3D = _rel_xf(sroot, ss)
+	var dx: Transform3D = _rel_xf(n, ds)
+	var qs: Quaternion = sx.basis.get_rotation_quaternion()
+	var qd: Quaternion = dx.basis.get_rotation_quaternion()
+	var nb = ds.get_bone_count()
+	var smap = {}
+	for b in range(ss.get_bone_count()):
+		smap[ss.get_bone_name(b)] = b
+	var srest = []
+	for b in range(ss.get_bone_count()):
+		srest.append(qs * ss.get_bone_global_rest(b).basis.get_rotation_quaternion())
+	var drest = []
+	for b in range(nb):
+		drest.append(qd * ds.get_bone_global_rest(b).basis.get_rotation_quaternion())
+	# Grundhaltung angleichen: der Tänzer steht im T, die neue Figur im A (Arme unten) – je Knochen die Richtung
+	# zum Kind-Knochen der neuen Figur auf die des Tänzers drehen, sonst hängen die Arme beim Tanz 50° zu tief
+	var fix = []
+	for b in range(nb):
+		var r = Quaternion.IDENTITY
+		var sb = smap.get(ds.get_bone_name(b), -1)
+		var ch = ds.get_bone_children(b)
+		var c = -1
+		for k in ch:
+			if ds.get_bone_name(k).contains("Spine") or ds.get_bone_name(k).contains("Neck"):
+				c = k
+		if c < 0 and not ch.is_empty():
+			c = ch[0]
+		if sb >= 0 and c >= 0 and smap.has(ds.get_bone_name(c)):
+			var sc = smap[ds.get_bone_name(c)]
+			var vd: Vector3 = (dx * ds.get_bone_global_rest(c).origin - dx * ds.get_bone_global_rest(b).origin).normalized()
+			var vs: Vector3 = (sx * ss.get_bone_global_rest(sc).origin - sx * ss.get_bone_global_rest(sb).origin).normalized()
+			if vd.length() > 0.5 and vs.length() > 0.5 and vd.dot(vs) < 0.9999:
+				r = Quaternion(vd, vs)
+		elif ds.get_bone_parent(b) >= 0:
+			r = fix[ds.get_bone_parent(b)]
+		fix.append(r)
+	for b in range(nb):
+		drest[b] = fix[b] * drest[b]
+	var sp = str(_rel_path(sroot, ss)) + ":"
+	var rtr = []
+	for b in range(ss.get_bone_count()):
+		rtr.append(a.find_track(NodePath(sp + ss.get_bone_name(b)), Animation.TYPE_ROTATION_3D))
+	var hs = smap.get("mixamorig_Hips", -1)
+	var hd = ds.find_bone("mixamorig_Hips")
+	var ptr = a.find_track(NodePath(sp + "mixamorig_Hips"), Animation.TYPE_POSITION_3D) if hs >= 0 else -1
+	var na = Animation.new()
+	na.length = a.length
+	na.loop_mode = Animation.LOOP_LINEAR
+	var dp = str(_rel_path(n, ds)) + ":"
+	var otr = []
+	for b in range(nb):
+		var ti = na.add_track(Animation.TYPE_ROTATION_3D)
+		na.track_set_path(ti, NodePath(dp + ds.get_bone_name(b)))
+		otr.append(ti)
+	var htr = -1
+	var hr0 = 1.0
+	if ptr >= 0 and hd >= 0:
+		htr = na.add_track(Animation.TYPE_POSITION_3D)
+		na.track_set_path(htr, NodePath(dp + "mixamorig_Hips"))
+		hr0 = (dx * ds.get_bone_global_rest(hd).origin).y / maxf(0.001, (sx * ss.get_bone_global_rest(hs).origin).y)
+	var t = 0.0
+	while t <= a.length + 0.001:
+		var sg = []
+		sg.resize(ss.get_bone_count())
+		for b in range(ss.get_bone_count()):
+			var lq: Quaternion = a.rotation_track_interpolate(rtr[b], t) if rtr[b] >= 0 else ss.get_bone_rest(b).basis.get_rotation_quaternion()
+			var pb = ss.get_bone_parent(b)
+			sg[b] = (sg[pb] * lq) if pb >= 0 else lq
+		var dg = []
+		dg.resize(nb)
+		for b in range(nb):
+			var g: Quaternion
+			var sb = smap.get(ds.get_bone_name(b), -1)
+			if sb >= 0:
+				var dlt: Quaternion = (qs * sg[sb]) * srest[sb].inverse()
+				g = qd.inverse() * (dlt * drest[b])
+			else:
+				g = ds.get_bone_global_rest(b).basis.get_rotation_quaternion()
+			dg[b] = g
+			var pb = ds.get_bone_parent(b)
+			var lq2: Quaternion = (dg[pb].inverse() * g) if pb >= 0 else g
+			na.rotation_track_insert_key(otr[b], t, lq2.normalized())
+		if htr >= 0:
+			var sw: Vector3 = sx * a.position_track_interpolate(ptr, t) - sx * ss.get_bone_rest(hs).origin
+			var dw: Vector3 = dx * ds.get_bone_rest(hd).origin + sw * hr0
+			na.position_track_insert_key(htr, t, dx.affine_inverse() * dw)
+		t += 1.0 / 24.0
+	var lib = AnimationLibrary.new()
+	lib.add_animation("SambaDance", na)
+	var ap = AnimationPlayer.new()
+	ap.name = "AnimationPlayer"
+	n.add_child(ap)
+	ap.add_animation_library("", lib)
+	# Füße auf 0, Mitte über dem Platz; in einen Halter packen (die Figur selbst wird pro Bild skaliert)
+	var bb = AABB()
+	var first = true
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		var bx: AABB = _rel_xf(n, mi) * (mi as MeshInstance3D).get_aabb()
+		bb = bx if first else bb.merge(bx)
+		first = false
+	var hold = Node3D.new()
+	n.position = -Vector3(bb.get_center().x, bb.position.y, bb.get_center().z)
+	hold.add_child(n)
+	fg.n = hold
+	fg.h = bb.size.y
+	return fg
+
+
+func _rel_path(top: Node, n: Node) -> String:
+	var parts = []
+	var c: Node = n
+	while c != null and c != top:
+		parts.push_front(str(c.name))
+		c = c.get_parent()
+	return "/".join(parts)
+
+
 func _holos_make() -> void:
 	for kind in ["dancer", "dancer"]:   # Koi-Fische entfernt
 		var h = _holo_node(kind)
 		_sp(h.mat, "sd", float(holos.size()) * 1.37)
 		if kind == "dancer":
-			h.fi = (holos.size() * 2) % HOLO_FIGS.size()   # die zwei Plätze starten mit verschiedenen Figuren
+			h.fi = [HOLO_FIGS.size() - 1, 0][holos.size() % 2]   # die zwei Plätze starten verschieden – zuerst die neue Frau
 			h.swt = 4.0 * holos.size()
 			for a in OS.get_cmdline_user_args():
 				if a.begins_with("--holofig="):
@@ -3075,6 +3250,9 @@ func _city_live() -> void:
 				gx = maxf(gx, clampf(-h.swt / 0.4 + 0.5, 0.0, 1.0))
 			if h.swt >= 0.0 and h.swt < 0.45:
 				gx = maxf(gx, 1.0 - h.swt / 0.45)
+			if OS.get_environment("HOLODBG") != "":
+				gx = 0.0
+				_sp(mat, "fl", 0.0)
 			_sp(mat, "gx", gx)
 			for k in range(h.figs.size()):
 				var fg: Dictionary = h.figs[k]
@@ -3138,14 +3316,6 @@ func _ship_node(idx: int) -> Node3D:
 	m.scale = Vector3(s, s, s)
 	m.position = -Vector3(bb.get_center().x, bb.position.y, bb.get_center().z) * s
 	root.set_meta("bb", AABB(Vector3(-bb.size.x * 0.5, 0.0, -bb.size.z * 0.5) * s, bb.size * s))
-	# Positionslichter wie am Flugzeug: rot links, grün rechts, kurzer Blitz (FX Lab „Ship“: Nav lights)
-	for sd in [-1.0, 1.0]:
-		var nl = MeshInstance3D.new()
-		nl.mesh = _lowsphere(0.022, 8, 4)
-		nl.material_override = nav_mat(sd)
-		nl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		nl.position = Vector3(sd * bb.size.x * s * 0.47, bb.size.y * s * 0.45, bb.size.z * s * 0.05)
-		root.add_child(nl)
 	var lt = OmniLight3D.new()
 	lt.light_color = Color(0.6, 0.4, 1.0)
 	lt.light_energy = 1.4
@@ -5708,7 +5878,7 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 	if o.shield > 0.0:
 		# Schild: hält einen Waffentreffer aus (Rakete, Orb, Mine, Wand, Beben …), beim zweiten ist er weg;
 		# Superwaffen zerschlagen ihn sofort. Rempeln schluckt er einfach.
-		if sup or (kind != "ram" and kind != "gun"):
+		if sup or (kind != "ram"):
 			o.shh = int(o.get("shh", 0)) + (2 if sup else 1)
 			if o.shh >= 2:
 				_shield_break(o)
@@ -6059,12 +6229,6 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			g.ahold = false
 			g.sauto = sup
 			_snd("shield")
-		"turret":
-			g.turret = 12.0 if sup else 10.0
-			g.tsup = sup
-			g.tmega = false
-			g.tcd = 0.3
-			_snd("pick", 0.0, 0.7)
 
 
 # MEGA: jede Waffe hat ihre eigene, große Wirkung – stark, aber kein Sofortsieg (höchstens ~40 % Schaden je Gegner)
@@ -6124,13 +6288,6 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 					quake = _quake_make(g.z + 3.0, 1.0, quake)
 					quake.sup = true
 					_snd("boom", 3.0, 0.55))
-		"turret":
-			# 15 s Doppelgeschütz: schneller, trifft öfter, nimmt abwechselnd zwei Gegner ins Visier
-			g.turret = 15.0
-			g.tsup = true
-			g.tmega = true
-			g.tcd = 0.2
-			_snd("pick", 2.0, 0.6)
 		"auto":
 			# 8 s Autopilot, dabei geschützt
 			g.auto = 8.0
@@ -6529,12 +6686,6 @@ func _wicon(c: CanvasItem, p: Vector2, s: float, w: String, col: Color) -> void:
 			c.draw_arc(p, s * 0.2, 0.0, TAU, 16, col, lw, true)
 			for a in [PI * 0.5, PI * 1.17, PI * 1.83]:
 				c.draw_line(p + Vector2(cos(a), sin(a)) * s * 0.2, p + Vector2(cos(a), sin(a)) * s * 0.8, col, lw, true)
-		"turret":
-			# Geschützturm: Kuppel mit Doppellauf
-			c.draw_arc(p + Vector2(0, s * 0.35), s * 0.55, PI, TAU, 20, col, lw, true)
-			c.draw_line(p + Vector2(-s * 0.75, s * 0.35), p + Vector2(s * 0.75, s * 0.35), col, lw, true)
-			c.draw_line(p + Vector2(-s * 0.12, -s * 0.15), p + Vector2(-s * 0.12, -s * 0.95), col, lw, true)
-			c.draw_line(p + Vector2(s * 0.12, -s * 0.15), p + Vector2(s * 0.12, -s * 0.95), col, lw, true)
 		"wand":
 			for i in range(4):
 				var x = -s * 0.75 + i * s * 0.5
@@ -6615,7 +6766,7 @@ func _show_help(on: bool) -> void:
 		["wpad", "Weapon pad", "A spinning ring. Fly through it to pick up a random weapon."],
 		["fire", "Fire", "Tap the round FIRE button at the bottom to use your weapon."],
 		["#", "Weapons", ""]]
-	for w in ["rak", "lenk", "turret", "mine", "orbs", "wand", "beben", "schild", "turbo", "auto"]:
+	for w in ["rak", "lenk", "mine", "orbs", "wand", "beben", "schild", "turbo", "auto"]:
 		rows.append([w, WN[w].capitalize(), WD[w]])
 	rows += [["#", "Power-ups", ""],
 		["super", "Super", "Keep your weapon and fly over 2 more weapon pads – it turns SUPER: stronger and gold."],
@@ -6770,8 +6921,6 @@ const FX_INFO = {
 	"ship.steerk": "Lenkkraft bei vollem Einschlag: wie schnell sich das Schiff dreht. Höher = engere Kurven, aber nervöser.",
 	"ship.grip": "Wie stark das Schiff in die Richtung fliegt, in die die Nase zeigt. Höher = folgt der Nase sofort, niedriger = rutscht weiter geradeaus.",
 	"ship.drift": "Wie stark das Schiff in Kurven seitlich wegdriftet. 0 = kein Driften.",
-	"ship.nav": "Helligkeit der roten und grünen Positionslichter.",
-	"ship.navb": "Wie schnell die Positionslichter blinken.",
 	"ship.trim": "Grundhaltung: plus = Nase zeigt mehr zum Boden, minus = Nase höher.",
 	"ship.weight": "Gewicht der Ketten und Quasten. Höher = hängen straff nach unten.",
 	"ship.swing": "Wie lange Ketten und Quasten nachschwingen. Höher = pendeln länger.",
@@ -7080,8 +7229,6 @@ func _fx_changed(t: String, key: String) -> void:
 		_pillar_apply()
 	if t == "jungle":
 		_jungle_apply()
-	if t == "ship":
-		_nav_apply()
 	if t == "city":
 		if key == "mega":
 			_city_fill()
@@ -7691,7 +7838,6 @@ func _weapons(dt: float, racing: bool) -> void:
 	for o in ships:
 		_shield_vis(o)
 	_orbs_update(dt, true)
-	_turret_update(dt)
 
 
 # ---------------------------------------------------------------- Energiewand: Wabengitter, Lauflicht, zuckende Blitze
@@ -8131,8 +8277,6 @@ func _replay(dt: float) -> void:
 					_big(ev[1], ev[2])
 				"vo":
 					_snd(ev[1], ev[2])
-				"gun":
-					_gun_tracer(ships[ev[1]], ships[ev[2]], ev[3])
 	if rp.t > F[F.size() - 1].t + 0.4:
 		_replay_end()
 		return
@@ -8158,7 +8302,6 @@ func _replay(dt: float) -> void:
 	g.sorb = f0.get("so", false)
 	g.auto = 0.0
 	_orbs_update(dt, false)
-	_tracers_update(dt)
 	var ps = _pool("shots", f0.w.size(), func():
 		var cap = CapsuleMesh.new()
 		cap.radius = 0.06
@@ -8501,8 +8644,6 @@ func _warm_step(delta: float) -> void:
 		_orbs_update(0.0, false)
 		_drop_mines(g)
 		_add_shot(g, false, false)
-		_turret_node(g).visible = true   # Geschütz-Modell schon beim Start einmal zeichnen (kein Ruckler beim ersten Einsammeln)
-		_gun_tracer(g, ships[1], true)
 		warm = false
 		return
 	# ein paar Bilder lang aktualisieren, damit alles wirklich gezeichnet wird
@@ -8522,8 +8663,6 @@ func _warm_step(delta: float) -> void:
 	mines.clear()
 	g2.shield = 0.0
 	_shield_vis(g2)
-	_turret_node(g2).visible = false
-	tracers.clear()
 	g2.orbs = 0.0
 	_orbs_update(0.0, false)
 	orb_n.clear()
@@ -10105,8 +10244,6 @@ func _lab_tab(t: String) -> void:
 				_pillar_apply()
 			if t == "jungle":
 				_jungle_apply()
-			if t == "ship":
-				_nav_apply()
 			if t == "city":
 				if key == "mega":
 					_city_fill()
@@ -10516,14 +10653,6 @@ func _shot() -> void:
 				if shot_n > 40 and shot_n < 75:
 					var k2 = int(get_meta("ak"))
 					print("AS n=", shot_n, " dz=", snappedf(_bzp(k2) - g.z, 0.1), " lat=", snappedf(g.lat, 0.01), " pad=", snappedf(_bpx(k2), 0.01), " boost=", snappedf(g.boost, 0.01), " padK=", g.padK, " k=", k2)
-			if shot_s.contains("turrettest") and state == "race":
-				var g = ships[0]
-				if shot_n == 40:
-					ships[1].z = g.z + 7.0
-					ships[1].lat = g.lat + 0.8
-					_fire_w(g, "turret", shot_s.contains("tsup"))
-				if shot_n >= 40 and shot_n % 5 == 0:
-					print("TT n=", shot_n, " turret=", snappedf(float(g.get("turret", 0.0)), 0.01), " en=", [ships[1].en, ships[2].en, ships[3].en], " dz=", [ships[1].z - g.z, ships[2].z - g.z, ships[3].z - g.z], " tracers=", tracers.size(), " shots=", g.get("tsh", 0), " sh1=", snappedf(ships[1].shield, 0.1), " prot=", _prot(ships[1]), " out1=", ships[1].out)
 			if shot_n == 50 and shot_s.contains("backtest"):
 				# Test: Android meldet Zurück doppelt (Taste + Systemmeldung) – Pause muss offen bleiben
 				var ke = InputEventKey.new()
@@ -10812,6 +10941,17 @@ func _camera(dt: float) -> void:
 		cam.global_position = nd0.global_position - bz.z * 1.1 + bz.y * 0.75 + bz.x * 0.55
 		cam.look_at(nd0.global_position + bz.y * 0.2, Vector3.UP)
 		cam.fov = 50.0
+		return
+	if OS.get_environment("VIEWCAM") != "":
+		# nur zum Testen: freie Kamera „z,seitlich,Höhe,Drehung(Grad)“ – schaut längs der Strecke, gedreht um die Hochachse
+		var vp = OS.get_environment("VIEWCAM").split(",")
+		var vf = T.frame(float(vp[0]))
+		var ya = deg_to_rad(float(vp[3]))
+		cam.global_position = vf.c + vf.rr * float(vp[1]) + vf.uu * float(vp[2])
+		cam.look_at(cam.global_position + vf.fw * cos(ya) + vf.rr * sin(ya) - vf.uu * 0.08, vf.uu)
+		cam.fov = 60.0
+		for o in ships:
+			(o.node as Node3D).visible = false
 		return
 	if OS.get_environment("TOPCAM") != "":
 		# nur zum Testen: Blick senkrecht von oben auf die Strecke
@@ -12053,9 +12193,6 @@ func _ga_draw(c: Control) -> void:
 		_ga_txt(c, Vector2(471, 1405 + bounce), nm, 22 if nm.length() < 7 else 18, Color(gc, 1.0) if not spin else TXT, 1, 5)
 		if (sup or mega) and not spin:
 			_ga_txt(c, Vector2(471, 1290), "MEGA" if mega else "SUPER", 18, gc, 1, 5)
-	elif float(g.get("turret", 0.0)) > 0.0:
-		_wicon(c, Vector2(471, 1340), 40.0, "turret", Color(WC.turret, 0.9))
-		_ga_txt(c, Vector2(471, 1405), "TURRET %.1f" % float(g.turret), 18, WC.turret, 1, 5)
 	elif g.auto > 0.0:
 		_wicon(c, Vector2(471, 1340), 40.0, "auto", Color(0.5, 0.95, 1.0, 0.9))
 		_ga_txt(c, Vector2(471, 1405), "AUTO %.1f" % g.auto, 20, Color(0.5, 0.95, 1.0), 1, 5)
@@ -12209,7 +12346,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp", "megaw",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
-	"last_c", "tun_k", "cm", "tracers"]
+	"last_c", "tun_k", "cm"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
@@ -12472,168 +12609,6 @@ func _assist(s: Dictionary, dt: float) -> void:
 	var f = 1.0 - exp(-dt * k)
 	s.vpsi += (want - s.vpsi) * f
 	s.psi += (want - s.psi) * f * 0.6
-
-
-# ---------------------------------------------------------------- Geschütz (Turret): feuert 10 s lang selbst auf Gegner in der Nähe
-var gun_mat: StandardMaterial3D
-var tracers = []
-
-
-# kleiner Geschützturm oben auf dem Schiff (Kuppel + Doppellauf), dreht sich zum Ziel
-func _turret_node(o: Dictionary) -> Node3D:
-	var nd: Node3D = o.node
-	if nd.has_meta("turret"):
-		return nd.get_meta("turret")
-	# nur das eigentliche Schiffsmodell vermessen (ohne Düsenflammen, Leuchtringe, Schild …)
-	var model: Node3D = null
-	for ch in nd.get_children():
-		if ch is Node3D and not (ch is MeshInstance3D) and not (ch is Light3D) and ch.find_children("*", "MeshInstance3D", true, false).size() > 0:
-			model = ch
-			break
-	var top = 0.26
-	var zc = 0.0
-	var first = true
-	var ab = AABB()
-	if model != null:
-		for mi in model.find_children("*", "MeshInstance3D", true, false):
-			var m: MeshInstance3D = mi
-			if m.mesh == null or not m.is_visible_in_tree() or m.name.contains("Glow") or m.name.contains("Jet") or m.name.contains("Boost"):
-				continue
-			var b = nd.global_transform.affine_inverse() * m.global_transform * m.get_aabb()
-			ab = b if first else ab.merge(b)
-			first = false
-	if not first:
-		top = ab.end.y
-		zc = ab.get_center().z + ab.size.z * 0.12
-	var t = Node3D.new()
-	t.position = Vector3(0.0, top - 0.02, zc)
-	# Schiffsmodelle sind unterschiedlich skaliert – das Geschütz soll immer gleich groß wirken
-	var sc: Vector3 = nd.global_transform.basis.get_scale()
-	t.scale = Vector3(1.0 / maxf(0.001, sc.x), 1.0 / maxf(0.001, sc.y), 1.0 / maxf(0.001, sc.z))
-	# Geschützturm-Modell (Tripo): Lauf zeigt im Modell nach −X, Sockel steht auf y = 0, Drehpunkt mitten im Turm
-	var head = Node3D.new()
-	t.add_child(head)
-	var TS = 0.0055
-	var ps: PackedScene = load("res://ships/turret.glb")
-	if ps != null:
-		var mdl: Node3D = ps.instantiate()
-		var hold = Node3D.new()
-		hold.rotation = Vector3(0, PI * 0.5, 0)   # −X → nach vorn (+Z)
-		hold.scale = Vector3.ONE * TS
-		head.add_child(hold)
-		mdl.position = Vector3(-15.0, 0.0, 0.0)
-		hold.add_child(mdl)
-		for m in mdl.find_children("*", "MeshInstance3D", true, false):
-			(m as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	t.set_meta("muzzle", Vector3(0.0, 17.0 * TS, 65.0 * TS))
-	t.set_meta("head", head)
-	t.visible = false
-	nd.add_child(t)
-	nd.set_meta("turret", t)
-	return t
-
-
-func _tracers_update(dt: float) -> void:
-	for i in range(tracers.size() - 1, -1, -1):
-		var e = tracers[i]
-		e.t += dt
-		if not is_instance_valid(e.mi):
-			tracers.remove_at(i)
-		elif e.t > 0.09:
-			(e.mi as Node).queue_free()
-			tracers.remove_at(i)
-		else:
-			((e.mi as MeshInstance3D).material_override as StandardMaterial3D).albedo_color.a = 1.0 - e.t / 0.09
-
-
-func _turret_update(dt: float) -> void:
-	_tracers_update(dt)
-	for o in ships:
-		var tl = float(o.get("turret", 0.0))
-		if tl <= 0.0 and not (o.node as Node3D).has_meta("turret"):
-			continue
-		var tn = _turret_node(o)
-		if tl <= 0.0 or o.out or state != "race":
-			tn.visible = false
-			if tl > 0.0 and (o.out or state == "done"):
-				o.turret = 0.0
-			continue
-		tn.visible = true
-		o.turret = tl - dt
-		# Ziel: nächster Gegner im Umkreis (bis 40 voraus, 8 dahinter)
-		var tg = null
-		var best = 1e9
-		var alt = null
-		for x in ships:
-			if x.idx == o.idx or x.out:
-				continue
-			var dz = x.z - o.z
-			if dz < -8.0 or dz > 40.0:
-				continue
-			var d = Vector2(dz, (x.lat - o.lat) * 2.0).length()
-			if d < best:
-				alt = tg
-				best = d
-				tg = x
-			elif alt == null:
-				alt = x
-		var head: Node3D = tn.get_meta("head")
-		if tg != null:
-			if o.get("tmega", false) and alt != null and int(o.get("tsh", 0)) % 2 == 1:
-				tg = alt
-			var tp: Vector3 = (tg.node as Node3D).global_position + Vector3(0, 0.15, 0)
-			var hp = head.global_position
-			if hp.distance_to(tp) > 0.2:
-				var want = head.global_transform.looking_at(tp, Vector3.UP, true).basis
-				head.global_transform.basis = head.global_transform.basis.slerp(want.orthonormalized(), 1.0 - exp(-dt * 18.0)).orthonormalized()
-		else:
-			head.rotation = head.rotation.lerp(Vector3.ZERO, 1.0 - exp(-dt * 6.0))
-		o.tcd = float(o.get("tcd", 0.0)) - dt
-		if tg == null or o.tcd > 0.0:
-			continue
-		var mega = o.get("tmega", false)
-		var sup = o.get("tsup", false)
-		o.tcd = 0.11 if mega else (0.15 if sup else 0.22)
-		o.tsh = int(o.get("tsh", 0)) + 1
-		var dz2 = tg.z - o.z
-		var hit = randf() < (0.9 if mega else (0.85 if absf(dz2) < 22.0 else 0.65))
-		_gun_tracer(o, tg, hit)
-		_rev(["gun", o.idx, tg.idx, hit])
-		if hit:
-			_dmg(tg, 0.014 if mega else (0.012 if sup else 0.01), o.idx, "gun")
-
-
-# Leuchtspur vom Lauf zum Ziel (Treffer: aufs Schiff, sonst knapp daneben) mit Mündungsblitz
-func _gun_tracer(o: Dictionary, tg: Dictionary, hit: bool) -> void:
-	if gun_mat == null:
-		gun_mat = StandardMaterial3D.new()
-		gun_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		gun_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		gun_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		gun_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	var tn = _turret_node(o)
-	var head: Node3D = tn.get_meta("head")
-	var a: Vector3 = head.global_transform * (tn.get_meta("muzzle", Vector3(0, 0.05, 0.38)) as Vector3)
-	var b: Vector3 = (tg.node as Node3D).global_position + Vector3(0, 0.15, 0)
-	if not hit:
-		b += Vector3(randf_range(-0.9, 0.9), randf_range(0.2, 0.7), randf_range(-0.5, 0.5))
-	var im = ImmediateMesh.new()
-	var mi = MeshInstance3D.new()
-	mi.mesh = im
-	var m: StandardMaterial3D = gun_mat.duplicate()
-	m.albedo_color = Color(WC.turret.r * 2.4, WC.turret.g * 2.4, WC.turret.b * 2.4, 1.0)
-	mi.material_override = m
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var side = (b - a).cross(cam.global_position - a).normalized() * 0.025
-	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-	for q in [a - side, a + side, b + side, a - side, b + side, b - side]:
-		im.surface_add_vertex(q)
-	im.surface_end()
-	add_child(mi)
-	tracers.append({"mi": mi, "t": 0.0})
-	_snd("gun", -1.0 if o.idx == 0 else -6.0, randf_range(0.95, 1.05), null if o.idx == 0 else a)
-	if hit and tg.idx == 0:
-		shake = maxf(shake, 0.12)
 
 
 # Lautstärke der Kanäle: Stimmen deutlich lauter (Begrenzer verhindert Übersteuern), Musik nach Regler

@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dvhx3i36n185k"
-path.s3tc="res://.godot/imported/tube_n.png-af1d4378721356b42c4443dae96d32ed.s3tc.ctex"
-path.etc2="res://.godot/imported/tube_n.png-af1d4378721356b42c4443dae96d32ed.etc2.ctex"
+uid="uid://dc2038xi25xp0"
+path.s3tc="res://.godot/imported/tunnel_n.png-77022cb9d773aa4729ec8edde17e53b6.s3tc.ctex"
+path.etc2="res://.godot/imported/tunnel_n.png-77022cb9d773aa4729ec8edde17e53b6.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://tex/tube_n.png"
-dest_files=["res://.godot/imported/tube_n.png-af1d4378721356b42c4443dae96d32ed.s3tc.ctex", "res://.godot/imported/tube_n.png-af1d4378721356b42c4443dae96d32ed.etc2.ctex"]
+source_file="res://tex/tunnel_n.png"
+dest_files=["res://.godot/imported/tunnel_n.png-77022cb9d773aa4729ec8edde17e53b6.s3tc.ctex", "res://.godot/imported/tunnel_n.png-77022cb9d773aa4729ec8edde17e53b6.etc2.ctex"]
 
 [params]
 

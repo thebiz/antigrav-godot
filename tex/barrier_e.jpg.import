@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://h85gaho0gv1o"
-path.s3tc="res://.godot/imported/road_cr.png-c44af583d86322783055c8f991f58e7e.s3tc.ctex"
-path.etc2="res://.godot/imported/road_cr.png-c44af583d86322783055c8f991f58e7e.etc2.ctex"
+uid="uid://cnxmx2dvnd775"
+path.s3tc="res://.godot/imported/barrier_e.jpg-f682eb960f59989b301e36931bac1156.s3tc.ctex"
+path.etc2="res://.godot/imported/barrier_e.jpg-f682eb960f59989b301e36931bac1156.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://tex/road_cr.png"
-dest_files=["res://.godot/imported/road_cr.png-c44af583d86322783055c8f991f58e7e.s3tc.ctex", "res://.godot/imported/road_cr.png-c44af583d86322783055c8f991f58e7e.etc2.ctex"]
+source_file="res://tex/barrier_e.jpg"
+dest_files=["res://.godot/imported/barrier_e.jpg-f682eb960f59989b301e36931bac1156.s3tc.ctex", "res://.godot/imported/barrier_e.jpg-f682eb960f59989b301e36931bac1156.etc2.ctex"]
 
 [params]
 

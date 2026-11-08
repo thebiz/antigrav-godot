@@ -2,23 +2,22 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dwhesj37w8jng"
-path="res://.godot/imported/turret_sci-fi_tank_3d_model_normal.png-64404f96bb7c93629eb5d43d61d1c85d.ctex"
+uid="uid://dsx7wvj5j5k7v"
+path.s3tc="res://.godot/imported/tunnel_e.jpg-c89da1431a9e3e2f3a798fb2390003df.s3tc.ctex"
+path.etc2="res://.godot/imported/tunnel_e.jpg-c89da1431a9e3e2f3a798fb2390003df.etc2.ctex"
 metadata={
-"vram_texture": false
-}
-generator_parameters={
-"md5": "fd93d11fbb120759f0c33e157483d2d2"
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 
 [deps]
 
-source_file="res://ships/turret_sci-fi_tank_3d_model_normal.png"
-dest_files=["res://.godot/imported/turret_sci-fi_tank_3d_model_normal.png-64404f96bb7c93629eb5d43d61d1c85d.ctex"]
+source_file="res://tex/tunnel_e.jpg"
+dest_files=["res://.godot/imported/tunnel_e.jpg-c89da1431a9e3e2f3a798fb2390003df.s3tc.ctex", "res://.godot/imported/tunnel_e.jpg-c89da1431a9e3e2f3a798fb2390003df.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +39,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d2a16hjeelydg"
-path.s3tc="res://.godot/imported/road_n.png-01cbc9c832a48f29e4dcf794f7ceb66d.s3tc.ctex"
-path.etc2="res://.godot/imported/road_n.png-01cbc9c832a48f29e4dcf794f7ceb66d.etc2.ctex"
+uid="uid://chvvwqjfewhfi"
+path.s3tc="res://.godot/imported/road2_n.png-c59bdde9ee67796bcf864bd1d459e9d0.s3tc.ctex"
+path.etc2="res://.godot/imported/road2_n.png-c59bdde9ee67796bcf864bd1d459e9d0.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://tex/road_n.png"
-dest_files=["res://.godot/imported/road_n.png-01cbc9c832a48f29e4dcf794f7ceb66d.s3tc.ctex", "res://.godot/imported/road_n.png-01cbc9c832a48f29e4dcf794f7ceb66d.etc2.ctex"]
+source_file="res://tex/road2_n.png"
+dest_files=["res://.godot/imported/road2_n.png-c59bdde9ee67796bcf864bd1d459e9d0.s3tc.ctex", "res://.godot/imported/road2_n.png-c59bdde9ee67796bcf864bd1d459e9d0.etc2.ctex"]
 
 [params]
 

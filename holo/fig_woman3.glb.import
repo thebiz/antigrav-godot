@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://b8i8ar7il4fet"
-path="res://.godot/imported/turret.glb-12c60f50b7aa7b34493061b105ed54f6.scn"
+uid="uid://c6jtaht2gxgw5"
+path="res://.godot/imported/fig_woman3.glb-5e2f92ce89e2c472e693092640a40343.scn"
 
 [deps]
 
-source_file="res://ships/turret.glb"
-dest_files=["res://.godot/imported/turret.glb-12c60f50b7aa7b34493061b105ed54f6.scn"]
+source_file="res://holo/fig_woman3.glb"
+dest_files=["res://.godot/imported/fig_woman3.glb-5e2f92ce89e2c472e693092640a40343.scn"]
 
 [params]
 
