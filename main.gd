@@ -362,8 +362,6 @@ func _start_step(c: int, first: bool) -> void:
 	if first:
 		if float(S.rumble) > 0.01:
 			_start_snd(snd.get("start"), linear_to_db(float(S.rumble)))
-	if float(S.synth) > 0.01:
-		_start_snd(_synth(c <= 0), linear_to_db(float(S.synth)) - 4.0)
 
 
 # Labor: ganzer Countdown (PLAY) oder kurzes Vorhören nach dem Verstellen (letzter Piepser + GO)
@@ -387,16 +385,6 @@ func _start_play(short: bool) -> void:
 						start_prev.append(_start_snd(snd.get("go" if cc <= 0 else "cbeep"), linear_to_db(float(S.beeps)) - 2.0)))
 	if float(S.rumble) > 0.01:
 		start_prev.append(_start_snd(snd.get("start"), linear_to_db(float(S.rumble)), t0 * 0.5))
-	if float(S.synth) > 0.01:
-		var steps = [[0.0, 1], [1.0, 0]] if short else [[0.0, 3], [1.0, 2], [2.0, 1], [3.0, 0]]
-		for stp in steps:
-			var c: int = stp[1]
-			if stp[0] <= 0.0:
-				start_prev.append(_start_snd(_synth(c <= 0), linear_to_db(float(S.synth)) - 4.0))
-			else:
-				get_tree().create_timer(stp[0]).timeout.connect(func():
-					if state == "lab":
-						start_prev.append(_start_snd(_synth(c <= 0), linear_to_db(float(S.synth)) - 4.0)))
 
 
 var duck_until = 0.0
@@ -7325,10 +7313,7 @@ func _lock_update(dt: float, racing: bool) -> void:
 	var vol = float(L.vol)
 	if lk_bt <= 0.0 and vol > 0.01:
 		var db = linear_to_db(vol)
-		if lk_k >= 1.0:
-			_snd("beep", db - 14.0, 1.55 * float(L.pitch))
-			lk_bt = 0.12
-		elif not lk_snd:
+		if lk_k < 1.0 and not lk_snd:
 			lk_snd = true   # Zielerfassung: immer schneller piepsend bis zum Dauerton (ein Klang)
 			_snd("lock", db - 3.0, clampf(1.5 / maxf(0.3, LK_T * float(L.time)), 0.7, 1.6))
 			lk_bt = 0.05
