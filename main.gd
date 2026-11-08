@@ -562,7 +562,7 @@ func _sound_update(dt: float) -> void:
 	loops.idle.pitch_scale = clampf(0.75 + 0.45 * sp + 0.25 * g.boost, 0.3, 3.0)
 	loops.idle.volume_db = linear_to_db(0.32 if state != "menu" else 0.2)
 	var scr = on and absf(g.lat) >= T.TW - 0.31 and not g.air and g.spd > 1.0 and g.shield <= 0.0
-	var tv = 0.7 if scr else 0.0
+	var tv = 0.25 if scr else 0.0   # Leitplanke: nur dezent
 	scr_v += (tv - scr_v) * (1.0 - exp(-dt / (0.02 if scr else 0.08)))
 	loops.field.volume_db = linear_to_db(maxf(0.0005, scr_v))
 	# Schwebe-Summen unter dem Schiff (im Stand gut hörbar) und Hintergrund der Strecke
@@ -779,7 +779,7 @@ const FXS = {
 		["wob", "Lean wobble (look)", 0.0, 2.0, 0.0], ["nosev", "Nose turn (look)", 0.0, 1.5, 1.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
-		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
+		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["haze", "Skyline haze", 0.0, 3.0, 0.6], ["skyl", "Skyline", 0.0, 5.0, 1.0],
 		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
 		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections", 0.0, 6.0, 1.0],
 		["gloss", "Road gloss", 0.0, 4.0, 2.0], ["wet", "Wet road", 0.0, 4.0, 1.0]],
@@ -1020,6 +1020,7 @@ func _env_apply() -> void:
 	if sky_m != null:
 		sky_m.set_shader_parameter("sb", float(E.skyb) * _newr("sky", 1.0))
 		sky_m.set_shader_parameter("st", float(E.stars))
+		sky_m.set_shader_parameter("hz", float(E.get("haze", 0.6)))
 		sky_m.set_shader_parameter("sl", float(E.skyl))
 		sky_m.set_shader_parameter("mn", float(E.moon))
 		sky_m.set_shader_parameter("hu", float(E.hue_s))
@@ -1045,14 +1046,17 @@ func _env() -> void:
 	sky_mat.shader = Shader.new()
 	sky_mat.shader.code = _nz("""
 shader_type sky;
-uniform float sb=1.;uniform float st=1.;uniform float sl=1.;uniform float mn=1.;uniform float hu=0.;
+uniform float sb=1.;uniform float st=1.;uniform float sl=1.;uniform float mn=1.;uniform float hu=0.;uniform float hz=1.;
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 vec3 hr(vec3 c,float a){vec3 k=vec3(.57735);float ca=cos(a);return c*ca+cross(k,c)*sin(a)+k*dot(k,c)*(1.-ca);}
 void sky(){
 	vec3 d=EYEDIR;float h=d.y;float an=atan(d.x,d.z);
 	vec3 c=hr(mix(vec3(.04,.02,.07),vec3(.002,.003,.012),smoothstep(0.,.5,h)),hu*6.2832)*sb;
-	vec2 sp=vec2(an*90.,h*160.);vec2 ci=floor(sp);
-	c+=vec3(.8,.85,1.)*step(.986,h21(ci))*smoothstep(.03,.25,h)*(1.-step(.3,length(fract(sp)-.5)))*1.6*st;
+	// feine, scharfe Sterne: wenige, unterschiedlich hell, leicht funkelnd (keine Flecken)
+	vec2 sp=vec2(an*420.,h*760.);vec2 ci=floor(sp);float sr=h21(ci);
+	float pt=smoothstep(.22,.02,length(fract(sp)-.5-(vec2(h21(ci+1.7),h21(ci+5.3))-.5)*.5));
+	float tw=.75+.25*sin(TIME*(1.5+sr*4.)+sr*40.);
+	c+=vec3(.82,.86,1.)*step(.988,sr)*(.25+.75*pow(h21(ci+9.1),2.))*1.15*tw*pt*smoothstep(.05,.3,h)*st;
 	vec3 md=normalize(vec3(.5,.32,.8));float mo=dot(d,md);
 	c+=(vec3(.9,.92,1.)*smoothstep(.0346,.0245,length(d-md))*4.+vec3(.25,.3,.5)*pow(max(0.,mo),60.)*.35)*mn;
 	// Skyline in zwei Tiefen mit Fenstern und Neonkanten
@@ -1063,7 +1067,7 @@ void sky(){
 			vec3 wc=h21(wi+3.1)>.8?vec3(.3,.8,1.):vec3(1.,.7,.45);
 			c=vec3(.004,.005,.01)*(1.+fk)+wc*lit*(.6-fk*.2);
 			if(h>bh-.0025)c+=(h21(vec2(bx,9.))>.5?vec3(0.,.78,1.):vec3(1.,.06,.42))*1.5;}}
-	c+=hr(vec3(.5,.12,.45)*exp(-abs(h)*22.)*.22,hu*6.2832)*sb;
+	c+=hr(vec3(.5,.12,.45)*exp(-abs(h)*22.)*.22,hu*6.2832)*sb*hz;   // Dunst über der Skyline (Regler)
 	if(h<-.04)c=mix(c,vec3(.006,.005,.012),smoothstep(-.04,-.15,h));
 	COLOR=c;
 }
@@ -1544,6 +1548,7 @@ func _build_track() -> void:
 			_board(zc, sd, k % 4)
 	if not _jungle():
 		_tribunes()
+		_blimp_make()
 	for k in range(2, 51):
 		var zc = k * 14.0 + 7.0
 		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle():
@@ -2979,7 +2984,7 @@ func _holos_make() -> void:
 
 # Start-Mädel: großes Hologramm über der Strecke vor dem Feld – Arme hoch bei 3‑2‑1, bei GO runter, dann zack weg mit Glitch
 var starter = {}
-const ST_H = 15.5   # Größe in m (so groß, dass sie mit Flagge im Hochformat ganz ins Bild passt)
+const ST_H = 15.5   # Größe in m (so groß, dass sie im Hochformat ganz ins Bild passt)
 
 
 const ST_MH = 0.955   # Höhe des Start-Mädel-Modells (Kopf oben) in Modell-Einheiten
@@ -3004,94 +3009,66 @@ void fragment(){
 
 
 func _starter_make() -> void:
+	# Start-Mädel = die Hologramm-Frau (Tripo, Mixamo-Skelett), ohne Flagge; Arme werden direkt gestellt
 	var root = Node3D.new()
-	var m: Node3D = load("res://art/starter/starter.glb").instantiate()
-	# Modell steht mit z nach oben und schaut nach +x: aufrichten
-	m.transform = Transform3D.IDENTITY
-	root.add_child(m)
-	for mi in m.find_children("*", "MeshInstance3D", true, false):
-		var mm = mi as MeshInstance3D
-		var src = mm.mesh.surface_get_material(0) as StandardMaterial3D
-		var um = StandardMaterial3D.new()
-		um.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED   # Manga-Look: flach und gut sichtbar bei Nacht
-		if src != null:
-			um.albedo_texture = src.albedo_texture
-		um.albedo_color = Color(0.92, 0.9, 0.92)
-		mm.material_override = um
-		mm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mm.extra_cull_margin = 0.6
-	var sk: Skeleton3D = m.find_children("*", "Skeleton3D", true, false)[0]
+	var n: Node3D = load("res://holo/fig_woman3.glb").instantiate()
+	var mat = _shader_mat(HOLO_CODE)
+	_sp(mat, "gs", 0.25)
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).material_override = mat
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		(mi as MeshInstance3D).extra_cull_margin = 0.6
+	var sk: Skeleton3D = n.find_children("*", "Skeleton3D", true, false)[0]
+	var dx: Transform3D = _rel_xf(n, sk)
+	# Füße auf 0 (an den Knöcheln ausgerichtet), Mitte über dem Platz
+	var bb = AABB()
+	var first = true
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		var bx: AABB = _rel_xf(n, mi) * (mi as MeshInstance3D).get_aabb()
+		bb = bx if first else bb.merge(bx)
+		first = false
+	var lf = sk.find_bone("mixamorig_LeftFoot")
+	var hb = sk.find_bone("mixamorig_Hips")
+	var hd = sk.find_bone("mixamorig_HeadTop_End")
+	if hd < 0:
+		hd = sk.find_bone("mixamorig_Head")
+	var fy = (dx * sk.get_bone_global_rest(lf).origin).y if lf >= 0 else bb.position.y
+	var hp: Vector3 = dx * sk.get_bone_global_rest(hb).origin if hb >= 0 else bb.get_center()
+	var foot = fy - 0.045 * bb.size.y
+	n.position = -Vector3(hp.x, foot, hp.z)
+	var top = (dx * sk.get_bone_global_rest(hd).origin).y + (0.06 * bb.size.y if hd >= 0 and sk.get_bone_name(hd).ends_with("Head") else 0.0) if hd >= 0 else bb.end.y
+	root.add_child(n)
 	root.visible = false
 	add_child(root)
-	var d = {"n": root, "sk": sk, "arms": []}
+	var mb: Basis = dx.basis.orthonormalized().inverse()
+	var d = {"n": root, "sk": sk, "arms": [], "mat": mat, "mh": maxf(0.1, top - foot), "mb": mb}
 	for b in [["mixamorig_LeftArm", 1.0], ["mixamorig_RightArm", -1.0]]:
 		var ia = sk.find_bone(b[0])
 		var ifa = sk.find_bone(b[0].replace("Arm", "ForeArm"))
 		var ih = sk.find_bone(b[0].replace("Arm", "Hand"))
 		if ia < 0 or ifa < 0 or ih < 0:
 			continue
-		d.arms.append({"ia": ia, "ifa": ifa, "ih": ih, "s": b[1], "hg": sk.get_bone_global_rest(ih).basis,
+		var rd: Vector3 = (sk.get_bone_global_rest(ifa).origin - sk.get_bone_global_rest(ia).origin).normalized()
+		d.arms.append({"ia": ia, "ifa": ifa, "ih": ih, "s": b[1], "rd": rd, "hg": sk.get_bone_global_rest(ih).basis,
 			"pg": sk.get_bone_global_rest(sk.get_bone_parent(ia)).basis, "bg": sk.get_bone_global_rest(ia).basis, "fg": sk.get_bone_global_rest(ifa).basis})
-	# Drachenflagge in der rechten Hand: Mast entlang der Finger, Tuch weht nach außen
-	var ba = Node3D.new()   # folgt jedes Bild der Hand, Mast bleibt dabei eher senkrecht (siehe _starter_live)
-	ba.top_level = true
-	root.add_child(ba)
-	d.fp = ba
-	var pole = MeshInstance3D.new()
-	var cy = CylinderMesh.new()
-	cy.top_radius = 0.006
-	cy.bottom_radius = 0.006
-	cy.height = 0.34
-	cy.radial_segments = 8
-	cy.rings = 1
-	pole.mesh = cy
-	var pm = StandardMaterial3D.new()
-	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	pm.albedo_color = Color(0.12, 0.12, 0.14)
-	pole.material_override = pm
-	pole.position = Vector3(0, 0.13, 0)
-	ba.add_child(pole)
-	var tip = MeshInstance3D.new()
-	tip.mesh = _lowsphere(0.012, 8, 4)
-	var tm = StandardMaterial3D.new()
-	tm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	tm.albedo_color = Color(1.0, 0.15, 0.2)
-	tip.material_override = tm
-	tip.position = Vector3(0, 0.3, 0)
-	ba.add_child(tip)
-	var fl = MeshInstance3D.new()
-	var pl = PlaneMesh.new()
-	pl.size = Vector2(0.3, 0.2)
-	pl.subdivide_width = 18
-	pl.subdivide_depth = 8
-	pl.orientation = PlaneMesh.FACE_Z
-	pl.center_offset = Vector3(0.15, -0.1, 0)
-	fl.mesh = pl
-	var fm = _shader_mat(FLAG_CODE)
-	fm.set_shader_parameter("tex", load("res://art/starter/flag.jpg"))
-	fl.material_override = fm
-	fl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Tuch-x zeigt von der Hand weg (Hand-z), Tuch-y entlang des Masts
-	fl.transform = Transform3D(Basis.IDENTITY, Vector3(0, 0.29, 0))
-	ba.add_child(fl)
-	d.flag = fm
-	d.fln = fl
 	starter = d
 
 
-# Start-Mädel: Arme einzeln stellen (Grad über waagrecht, Grad nach vorn); Skelettraum: oben +z, vorn +x
+# Start-Mädel: Arme einzeln stellen (Grad über waagrecht, Grad nach vorn) – Richtung im Modellraum (oben +y, vorn +z, links +x)
 func _st_arms(d: Dictionary, upL: float, upR: float, fwdL := 0.0, fwdR := 0.0) -> void:
 	var sk: Skeleton3D = d.sk
 	for a in d.arms:
 		var sg = float(a.s)
-		var up = upL if sg > 0.0 else upR
-		var fw = fwdL if sg > 0.0 else fwdR
-		var ra = Basis(Vector3(0, 0, 1), deg_to_rad(fw) * -sg) * Basis(Vector3(1, 0, 0), deg_to_rad(up) * sg)
-		var ag: Basis = ra * (a.bg as Basis)
+		var up = deg_to_rad(upL if sg > 0.0 else upR)
+		var fw = deg_to_rad(fwdL if sg > 0.0 else fwdR)
+		var dm = Vector3(sg * cos(up) * cos(fw), sin(up), cos(up) * sin(fw)).normalized()
+		var dsk: Vector3 = ((d.mb as Basis) * dm).normalized()
+		var q = Quaternion(a.rd as Vector3, dsk)
+		var ag: Basis = Basis(q) * (a.bg as Basis)
 		sk.set_bone_pose_rotation(a.ia, ((a.pg as Basis).inverse() * ag).get_rotation_quaternion())
-		var fgp: Basis = ra * (a.fg as Basis)
+		var fgp: Basis = Basis(q) * (a.fg as Basis)
 		sk.set_bone_pose_rotation(a.ifa, (ag.inverse() * fgp).get_rotation_quaternion())
-		var rh: Basis = ra * (a.hg as Basis)
+		var rh: Basis = Basis(q) * (a.hg as Basis)
 		sk.set_bone_pose_rotation(a.ih, (fgp.inverse() * rh).get_rotation_quaternion())
 
 
@@ -3208,24 +3185,19 @@ func _starter_live() -> void:
 		return
 	var f = T.frame(T.ZST + 36.0)
 	var fw: Vector3 = (f.fw * Vector3(1, 0, 1)).normalized()
-	n.global_transform = Transform3D(Basis.looking_at(fw, Vector3.UP).scaled(Vector3.ONE * (ST_H / ST_MH)), f.c + Vector3.UP * -0.2)
+	var sc = ST_H / float(starter.mh)
+	var base: Vector3 = f.c + Vector3.UP * -0.2
+	n.global_transform = Transform3D(Basis.looking_at(fw, Vector3.UP).scaled(Vector3.ONE * sc), base)
 	_st_arms(starter, float(ps[2]), float(ps[1]), 8.0, 10.0)
-	_sp(starter.flag, "sw", float(ps[3]))
-	# Flaggenmast: an der Hand, Richtung halb Arm, halb senkrecht (beim Runterreißen ganz mit dem Arm)
-	var sk1: Skeleton3D = starter.sk
-	var hx: Transform3D = sk1.global_transform * sk1.get_bone_global_pose(sk1.find_bone("mixamorig_RightHand"))
-	var sx: Transform3D = sk1.global_transform * sk1.get_bone_global_pose(sk1.find_bone("mixamorig_RightArm"))
-	var adir: Vector3 = (hx.origin - sx.origin).normalized()
-	var wv = 0.72 if state != "race" else clampf(0.72 - t_state * 6.0, 0.0, 0.72)
-	var pdir: Vector3 = adir.lerp(Vector3.UP, wv).normalized()
-	var nrm: Vector3 = -fw
-	var outv: Vector3 = (adir - pdir * adir.dot(pdir))
-	if outv.length() < 0.05:
-		outv = nrm.cross(pdir)
-	outv = outv.normalized()
-	nrm = outv.cross(pdir).normalized()
-	var sc = ST_H / ST_MH
-	(starter.fp as Node3D).global_transform = Transform3D(Basis(outv * sc, pdir * sc, nrm * sc), hx.origin)
+	var mat: ShaderMaterial = starter.mat
+	_sp(mat, "by", base.y)
+	_sp(mat, "hh", ST_H)
+	_sp(mat, "hk", 1.0)
+	_sp(mat, "fl", 0.3)
+	_sp(mat, "c1", _v3(OR if _noir() else Color(1.0, 0.3, 0.75)))
+	_sp(mat, "c2", _v3(Color(0.9, 0.9, 0.95) if _noir() else Color(0.25, 0.85, 1.0)))
+	# bei GO: Arme runter, dann zack weg mit kräftiger Bildstörung
+	_sp(mat, "gx", clampf((t_state - 0.75) / 0.6, 0.0, 1.0) if state == "race" else 0.0)
 
 
 # Koi aus einem gebogenen Rumpf mit Schwanz-, Rücken- und Brustflossen (Länge 1, Kopf bei +z)
@@ -3447,7 +3419,7 @@ func _collide(dt: float) -> void:
 				var mid: Vector3 = ((a.node as Node3D).global_position + (b.node as Node3D).global_position) * 0.5 + Vector3(0, 0.15, 0)
 				var me = a.idx == 0 or b.idx == 0
 				var hard = kind == "bump" and rel > base_spd * 0.06
-				_snd("crash_bump" if kind == "bump" else "crash_scrape", (0.0 if hard else -5.0) if kind == "bump" else -4.0, randf_range(0.9, 1.1), null if me else mid)
+				_snd("crash_bump" if kind == "bump" else "crash_scrape", (0.0 if hard else -5.0) if kind == "bump" else -13.0, randf_range(0.9, 1.1), null if me else mid)
 				_fx_res()
 				_burst(mid, fxr.spark, 26 if hard else 14, 0.6, 3.0, 9.0, 70.0, Vector3(0, -9, 0), 0.6, 0.5, 1.0,
 					_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.15)
@@ -3589,7 +3561,8 @@ func _shatter(o: Dictionary, sd := -1) -> void:
 		var best = 0
 		var bd = 1e9
 		for gi in range(nch):
-			var d = (cen[k] as Vector3).distance_to(cen[heads[gi]]) * rn.randf_range(0.8, 1.25)
+			# Brocken 0 ist das Wrack: zieht mehr Stücke an sich (großes Hauptstück vom Rumpf)
+			var d = (cen[k] as Vector3).distance_to(cen[heads[gi]]) * rn.randf_range(0.8, 1.25) * (0.45 if gi == 0 else 1.0)
 			if d < bd:
 				bd = d
 				best = gi
@@ -3619,6 +3592,7 @@ func _shatter(o: Dictionary, sd := -1) -> void:
 		var ch = Node3D.new()
 		ch.set_meta("rfx", true)
 		ch.set_meta("deb", true)
+		var wreck = gi == 0
 		add_child(ch)
 		ch.global_position = c
 		var rad = 0.0
@@ -3641,7 +3615,18 @@ func _shatter(o: Dictionary, sd := -1) -> void:
 		debris.append({"n": ch, "z": o.z + rel.dot(f.fw) - (bp - f.c).dot(f.fw), "lat": lat, "h": hh,
 			"vz": o.spd * rn.randf_range(0.4, 0.95) + of_ * rn.randf_range(5.0, 14.0), "vl": o.spd * sin(o.vpsi) * 0.5 + ol * rn.randf_range(6.0, 13.0),
 			"vh": rn.randf_range(4.0, 10.0), "rb": B0.transposed(), "av": Vector3(rn.randf_range(-1, 1), rn.randf_range(-1, 1), rn.randf_range(-1, 1)).normalized() * rn.randf_range(4.0, 13.0),
-			"r": clampf(rad * 0.6 + 0.08, 0.08, 0.5), "t": 0.0, "m": gm, "sp": 0.0, "hit": false})
+			"r": clampf(rad * 0.6 + 0.08, 0.08, 0.5), "t": 0.0, "m": gm, "sp": 0.0, "hit": false, "kt": 0.0, "wreck": wreck})
+		if wreck:
+			# Wrack: schlittert Richtung Fahrbahnrand, bleibt liegen und qualmt weiter
+			var dd: Dictionary = debris[debris.size() - 1]
+			dd.vl = signf(lat if absf(lat) > 0.05 else 1.0) * rn.randf_range(3.0, 6.0)
+			dd.vh = rn.randf_range(2.0, 4.0)
+			dd.vz = o.spd * rn.randf_range(0.35, 0.6)
+			var smk = _dmg_emitter(fxr.smoke, 22, 2.2, 0.3, 0.9, 20.0, Vector3(0, 0.7, 0), 0.4, 0.9,
+				_ramp([[0.0, Color(0.16, 0.15, 0.15, 0)], [0.1, Color(0.12, 0.11, 0.11, 0.7)], [1.0, Color(0.06, 0.06, 0.07, 0)]], false),
+				_curve([[0.0, 0.4], [1.0, 2.0]]), false, Vector3(0.12, 0.04, 0.12), 0.0)
+			smk.emitting = true
+			ch.add_child(smk)
 	holder.queue_free()
 	# Funkenregen und glühende Splitter aus der Mitte
 	_burst(bp + f.uu * 0.3, fxr.spark, 60, 1.2, 4.0, 14.0, 180.0, Vector3(0, -10, 0), 0.5, 0.6, 1.2,
@@ -3653,10 +3638,10 @@ func _debris_update(dt: float) -> void:
 		return
 	for i in range(debris.size() - 1, -1, -1):
 		var d: Dictionary = debris[i]
-		var nd: Node3D = d.n
-		if not is_instance_valid(nd):
+		if not is_instance_valid(d.n):
 			debris.remove_at(i)
 			continue
+		var nd: Node3D = d.n
 		d.t += dt
 		d.vh -= 18.0 * dt
 		d.z += d.vz * dt
@@ -3697,14 +3682,45 @@ func _debris_update(dt: float) -> void:
 			d.rb = Basis(av2.normalized(), av2.length() * dt) * (d.rb as Basis)
 		var f = T.frame(d.z)
 		var B = Basis(-f.rr, f.uu, f.fw)
-		var sc = 1.0
-		if d.t > 6.0:
-			sc = maxf(0.0, 1.0 - (d.t - 6.0) / 1.2)   # nach einer Weile verglühen/schrumpfen
+		var sc = 1.0   # Trümmer bleiben bis zum Rennende liegen
 		nd.global_transform = Transform3D((B * (d.rb as Basis)).orthonormalized().scaled(Vector3.ONE * maxf(sc, 0.001)), f.c + f.rr * d.lat + f.uu * d.h)
-		(d.m as StandardMaterial3D).emission_energy_multiplier = maxf(0.0, 0.7 - d.t * 0.28)
-		if sc <= 0.0:
-			nd.queue_free()
-			debris.remove_at(i)
+		(d.m as StandardMaterial3D).emission_energy_multiplier = maxf(0.12 if d.get("wreck", false) else 0.0, 0.7 - d.t * 0.28)
+		if state == "race" or state == "done":
+			_debris_hits(d, dt)
+
+
+# Schiffe fahren gegen Trümmer: Brocken wird weggekickt, Schiff etwas gebremst, 1–2 % Energie; Quake wirbelt sie hoch
+func _debris_hits(d: Dictionary, dt: float) -> void:
+	d.kt = maxf(0.0, float(d.kt) - dt)
+	for q in [quake, quake2]:
+		if q != null and absf(wrapf(d.z - float(q.z), -T.LAP * 0.5, T.LAP * 0.5)) < 2.2 and d.h < 0.6:
+			d.vh = randf_range(5.0, 8.0)
+			d.vz += randf_range(4.0, 9.0) * float(q.get("dir", 1.0))
+			d.av = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
+	if d.kt > 0.0:
+		return
+	for o in ships:
+		if o.out or o.air:
+			continue
+		var dz = wrapf(d.z - o.z, -T.LAP * 0.5, T.LAP * 0.5)
+		var r: float = d.r
+		if absf(dz) < r + 0.65 and absf(d.lat - o.lat) < r + 0.32 and d.h < 0.7:
+			d.kt = 0.4
+			var away = signf(d.lat - o.lat) if absf(d.lat - o.lat) > 0.02 else (1.0 if randf() < 0.5 else -1.0)
+			var big = d.get("wreck", false)
+			d.vz = o.spd * (0.6 if big else 1.05) + randf_range(1.0, 4.0)
+			d.vl = away * randf_range(2.0, 5.0) * (0.5 if big else 1.0)
+			d.vh = randf_range(1.5, 3.5) * (0.4 if big else 1.0)
+			d.av = Vector3(randf_range(-9, 9), randf_range(-9, 9), randf_range(-9, 9)) * (0.4 if big else 1.0)
+			o.spd *= 0.86 if big else 0.95
+			if not _prot(o):
+				_dmg(o, 0.02 if big else 0.01, -1, "ram")
+			_debris_sparks(d, 10)
+			var pos: Vector3 = (d.n as Node3D).global_position
+			_snd("crash_bump", -9.0 if o.idx == 0 else -6.0, randf_range(1.0, 1.25), null if o.idx == 0 else pos)
+			if o.idx == 0:
+				shake = maxf(shake, 0.3 if big else 0.15)
+			return
 
 
 func _debris_sparks(d: Dictionary, n: int) -> void:
@@ -3750,10 +3766,10 @@ func _rear_draw(c: Control) -> void:
 # ---------------------------------------------------------------- Tribünen am Ziel (beide Seiten), Zuschauer, Jubel, Stadionsprecher
 const TRIB_Z = [[22.0, 54.0], [686.0, 718.0]]   # Abschnitte vor und hinter der Ziellinie
 const TRIB_L0 = 1.25    # Abstand hinter der Leitplanke
-const TRIB_ROWS = 8
-const TRIB_SD = 0.34    # Stufentiefe
-const TRIB_RISE = 0.17  # Stufenhöhe
-const TRIB_BASE = 0.55  # Sockel
+const TRIB_ROWS = 12
+const TRIB_SD = 0.22    # Stufentiefe (≈ 90 cm)
+const TRIB_RISE = 0.11  # Stufenhöhe (≈ 45 cm)
+const TRIB_BASE = 0.32  # Sockel (≈ 1,3 m)
 var stadium_p: AudioStreamPlayer3D = null
 var crowd_p: AudioStreamPlayer3D = null
 var neon_signs = []
@@ -3779,7 +3795,7 @@ func _tribunes() -> void:
 	var L0 = T.TW + TRIB_L0
 	var depth = TRIB_ROWS * TRIB_SD
 	var top = TRIB_BASE + TRIB_ROWS * TRIB_RISE
-	var roof_h = top + 1.35
+	var roof_h = top + 0.95
 	for seg in TRIB_Z:
 		for sd in [1.0, -1.0]:
 			var z = seg[0]
@@ -3793,7 +3809,7 @@ func _tribunes() -> void:
 				for r in range(TRIB_ROWS):
 					var hh = TRIB_BASE + (r + 1) * TRIB_RISE
 					_box("tconc", zc, sd * (L0 + (r + 0.5) * TRIB_SD), hh * 0.5, TRIB_SD * 0.5, hh * 0.5, hz)
-					_box("tseat", zc, sd * (L0 + (r + 0.62) * TRIB_SD), hh + 0.05, 0.06, 0.05, hz * 0.96)
+					_box("tseat", zc, sd * (L0 + (r + 0.62) * TRIB_SD), hh + 0.03, 0.04, 0.03, hz * 0.96)
 				# Rückwand bis unters Dach
 				_box("tconc", zc, sd * (L0 + depth + 0.06), roof_h * 0.5, 0.06, roof_h * 0.5, hz)
 				# Geländer vorn mit Leuchtkante
@@ -3817,7 +3833,7 @@ func _tribunes() -> void:
 			var sc = OR if _noir() else (Color(1.0, 0.25, 0.7) if sd > 0.0 else Color(0.25, 0.9, 1.0))
 			_neon_sign(fzm.c + fzm.rr * (sd * (L0 + depth * 0.5)) + up * (roof_h + 0.62), Basis(up.cross(zax).normalized(), up, zax), "ANTIGRAV", sc, 0.9)
 	# zwei große Schriftzüge an Häusern neben der Strecke, schräg zum Verkehr
-	for sp in [[150.0, 1.0], [430.0, -1.0], [610.0, 1.0]]:
+	for sp in [[150.0, 1.0, "ANTIGRAV"], [430.0, -1.0, "ANTIGRAV"], [610.0, 1.0, "ANTIGRAV"], [290.0, 1.0, "PIXEL-INSTITUT"]]:
 		if T.in_tun(sp[0], 8.0):
 			continue
 		var f = T.frame(sp[0])
@@ -3825,7 +3841,7 @@ func _tribunes() -> void:
 		var zax2: Vector3 = (-f.fw * 0.75 - f.rr * sd2 * 0.65).normalized()
 		zax2 = (zax2 - f.uu * zax2.dot(f.uu)).normalized()
 		var c2 = OR if _noir() else [Color(1.0, 0.2, 0.55), Color(0.3, 0.95, 1.0), Color(0.75, 0.35, 1.0)][neon_signs.size() % 3]
-		_neon_sign(f.c + f.rr * (sd2 * (T.TW + 7.5)) + f.uu * 7.0, Basis(f.uu.cross(zax2).normalized(), f.uu, zax2), "ANTIGRAV", c2, 2.4)
+		_neon_sign(f.c + f.rr * (sd2 * (T.TW + 7.5)) + f.uu * 7.0, Basis(f.uu.cross(zax2).normalized(), f.uu, zax2), sp[2], c2, 2.4 if sp[2] == "ANTIGRAV" else 1.8)
 	# Jubel als Schleife an der Ziellinie, Sprecher-Lautsprecher daneben (beide mit Dopplereffekt)
 	var f0 = T.frame(20.0)
 	crowd_p = AudioStreamPlayer3D.new()
@@ -3883,16 +3899,16 @@ func _crowd(z0: float, z1: float, sd: float, L0: float) -> void:
 		crowd_mat.set_shader_parameter("tx", load("res://art/crowd.png"))
 		crowd_mat.set_shader_parameter("k", 0.8 if _noir() else 1.15)
 	var q = QuadMesh.new()
-	q.size = Vector2(0.36, 0.54)
-	q.center_offset = Vector3(0, 0.27, 0)
+	q.size = Vector2(0.3, 0.45)   # Mensch ≈ 1,8 m
+	q.center_offset = Vector3(0, 0.225, 0)
 	var rng = RandomNumberGenerator.new()
 	rng.seed = int(z0 * 7.0 + sd * 3.0)
 	var pts = []
 	for r in range(TRIB_ROWS):
 		var z = z0 + 0.3
 		while z < z1 - 0.3:
-			z += rng.randf_range(0.3, 0.55)
-			if rng.randf() < 0.18:
+			z += rng.randf_range(0.35, 1.6)   # locker verteilt, Lücken dazwischen
+			if rng.randf() < 0.15:
 				continue
 			pts.append([z, sd * (L0 + (r + 0.55) * TRIB_SD + rng.randf_range(-0.04, 0.04)), TRIB_BASE + (r + 1) * TRIB_RISE])
 	var mm = MultiMesh.new()
@@ -3991,6 +4007,127 @@ func _neon_live(dt: float) -> void:
 		l.modulate = Color(col.r * 0.5 + 0.5, col.g * 0.5 + 0.5, col.b * 0.5 + 0.5) * 2.2 * k
 		l.outline_modulate = Color(col.r, col.g, col.b, 0.55 * k)
 		hum.volume_db = -12.0 if sg.on else -30.0
+
+
+
+# ---------------------------------------------------------------- Werbe-Zeppelin über der Stadt (Blade-Runner-Stil)
+# zieht langsam eine weite Ellipse über der Stadt; Leuchtschrift an beiden Seiten, Blinklichter, zwei Suchscheinwerfer nach unten
+const BLIMP_L = 22.0   # Länge in Einheiten (≈ 90 m)
+var blimp = {}
+const BEAM_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform vec3 c=vec3(.6,.75,1.);uniform float k=.25;
+void fragment(){float v=UV.y;float e=1.-abs(UV.x-.5)*2.;ALBEDO=c*k*pow(1.-v,1.6)*(.35+.65*e*e);}
+"""
+
+
+func _blimp_make() -> void:
+	if not ResourceLoader.exists("res://city/blimp.glb"):
+		return
+	var root = Node3D.new()
+	add_child(root)
+	var m: Node3D = load("res://city/blimp.glb").instantiate()
+	root.add_child(m)
+	m.scale = Vector3.ONE * BLIMP_L
+	for mi in m.find_children("*", "MeshInstance3D", true, false):
+		var src = (mi as MeshInstance3D).mesh.surface_get_material(0)
+		if src is StandardMaterial3D:
+			var mm = (src as StandardMaterial3D).duplicate()
+			mm.emission_enabled = true
+			mm.emission_texture = mm.albedo_texture
+			mm.emission = Color(0.75, 0.7, 0.75)   # von der Stadt angestrahlt, damit er sich vom dunklen Himmel abhebt
+			mm.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+			mm.emission_energy_multiplier = 1.6
+			(mi as MeshInstance3D).material_override = mm
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Leuchtschrift auf beiden Flanken
+	var font: Font = load("res://art/Inter-Light.otf")
+	var signs = []
+	for sd in [1.0, -1.0]:
+		var l = Label3D.new()
+		l.text = "ANTIGRAV" if sd > 0.0 else "PIXEL-INSTITUT"
+		l.font = font
+		l.font_size = 128
+		l.pixel_size = 0.028 if sd > 0.0 else 0.02
+		l.outline_size = 18
+		l.shaded = false
+		l.double_sided = false
+		var col = OR if _noir() else (Color(1.0, 0.25, 0.65) if sd > 0.0 else Color(0.3, 0.95, 1.0))
+		l.modulate = Color(col.r * 0.5 + 0.5, col.g * 0.5 + 0.5, col.b * 0.5 + 0.5) * 2.0
+		l.outline_modulate = Color(col.r, col.g, col.b, 0.5)
+		l.position = Vector3(sd * 0.15 * BLIMP_L, 0.24 * BLIMP_L, 0.0)
+		l.rotation = Vector3(0, sd * PI * 0.5, 0)
+		root.add_child(l)
+		signs.append([l, col])
+	# Blinklichter (rot oben/Heck, weiß unter der Gondel)
+	var blinks = []
+	for bp in [[Vector3(0, 0.43, -0.42), Color(1, 0.1, 0.1)], [Vector3(0, 0.02, 0.05), Color(1, 1, 1)], [Vector3(0.14, 0.24, 0.45), Color(1, 0.1, 0.1)], [Vector3(-0.14, 0.24, 0.45), Color(0.1, 1, 0.3)]]:
+		var b = MeshInstance3D.new()
+		b.mesh = _lowsphere(0.007 * BLIMP_L, 8, 4)
+		b.material_override = _glow_mat(bp[1], 8.0)
+		b.position = (bp[0] as Vector3) * BLIMP_L
+		root.add_child(b)
+		blinks.append(b)
+	# Suchscheinwerfer: zwei helle Lichtkegel nach unten, schwenken langsam
+	var beams = []
+	for k in range(2):
+		var piv = Node3D.new()
+		piv.position = Vector3(0, 0.01, 0.12 - k * 0.24) * BLIMP_L
+		root.add_child(piv)
+		var cone = MeshInstance3D.new()
+		var cy = CylinderMesh.new()
+		cy.top_radius = 0.25
+		cy.bottom_radius = 7.0
+		cy.height = 70.0
+		cy.radial_segments = 16
+		cy.rings = 1
+		cy.cap_top = false
+		cy.cap_bottom = false
+		cone.mesh = cy
+		var bm = _shader_mat(BEAM_CODE)
+		bm.set_shader_parameter("c", _v3(Color(0.9, 0.8, 0.6) if _noir() else Color(0.6, 0.8, 1.0)))
+		cone.material_override = bm
+		cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		cone.position = Vector3(0, -35.0, 0)
+		piv.add_child(cone)
+		beams.append(piv)
+	# Bahn: Ellipse um die Mitte der Strecke
+	var lo = Vector3(1e9, 1e9, 1e9)
+	var hi = -lo
+	for i in range(0, 700, 20):
+		var c: Vector3 = T.frame(20.0 + i).c
+		lo = Vector3(minf(lo.x, c.x), minf(lo.y, c.y), minf(lo.z, c.z))
+		hi = Vector3(maxf(hi.x, c.x), maxf(hi.y, c.y), maxf(hi.z, c.z))
+	blimp = {"n": root, "c": (lo + hi) * 0.5, "rx": maxf(115.0, (hi.x - lo.x) * 0.7), "rz": maxf(115.0, (hi.z - lo.z) * 0.55),
+		"y": hi.y + 36.0, "a": randf() * TAU, "signs": signs, "blinks": blinks, "beams": beams, "t": 0.0}
+
+
+func _blimp_live(dt: float) -> void:
+	if blimp.is_empty():
+		return
+	blimp.t += dt
+	blimp.a += dt * 0.012
+	var a: float = blimp.a
+	var rx: float = blimp.rx
+	var rz: float = blimp.rz
+	var c: Vector3 = blimp.c
+	var p = Vector3(c.x + cos(a) * rx, blimp.y + sin(blimp.t * 0.13) * 2.0, c.z + sin(a) * rz)
+	var tg = Vector3(-sin(a) * rx, 0.0, cos(a) * rz).normalized()
+	var n: Node3D = blimp.n
+	n.global_transform = Transform3D(Basis.looking_at(-tg, Vector3.UP).rotated(tg, sin(blimp.t * 0.21) * 0.03), p)
+	var t: float = blimp.t
+	var bl: Array = blimp.blinks
+	for i in range(bl.size()):
+		(bl[i] as Node3D).visible = fmod(t + i * 0.37, 1.6) < 0.12
+	for sg in blimp.signs:
+		var l: Label3D = sg[0]
+		var col: Color = sg[1]
+		var fk = 1.0 if fmod(t * 0.7 + float(l.text.length()), 9.0) > 0.25 else 0.3   # ab und zu kurz flackern
+		l.modulate = Color(col.r * 0.5 + 0.5, col.g * 0.5 + 0.5, col.b * 0.5 + 0.5) * 2.0 * fk
+	var bm: Array = blimp.beams
+	for i in range(bm.size()):
+		(bm[i] as Node3D).rotation = Vector3(sin(t * 0.31 + i * 2.0) * 0.45, 0.0, cos(t * 0.23 + i * 1.3) * 0.4)
 
 
 # ---------------------------------------------------------------- Gleiter
@@ -6636,6 +6773,11 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 		ships[0].en = minf(1.0, ships[0].en + (before - o.en))
 	var nm = NAMES[o.idx]
 	if o.en <= 0.0:
+		if OS.get_environment("KCDBG") != "":
+			print("KCDBG out idx=", o.idx, " src=", src, " kind=", kind, " state=", state, " kc=", kc.is_empty(), " kcp=", kc_pending.is_empty())
+		# Kill-Cam nur, wenn du einen Gegner ausgeschaltet hast (nicht beim Rempeln)
+		if o.idx != 0 and src == 0 and kind != "ram" and state == "race" and kc_pending.is_empty() and kc.is_empty() and not free_ride:
+			kc_pending = {"idx": o.idx, "t0": rec_clk, "kind": kind}
 		o.out = true
 		o.outT = race_t
 		_explode(o.z, o.lat, true)
@@ -7028,6 +7170,7 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 				if state == "race":
 					quake = _quake_make(g.z + 3.0, 1.0, quake)
 					quake.sup = true
+					quake.full = true
 					_snd("boom", 3.0, 0.55))
 		"auto":
 			# 8 s Autopilot, dabei geschützt
@@ -7110,10 +7253,12 @@ func _quake_step(q, dt: float) -> Variant:
 	var dir: float = q.get("dir", 1.0)
 	var qd = float(QX.dur)
 	var qmax = (60.0 if state == "lab" else 560.0) * qd * (0.35 if dir < 0.0 else 1.0)
+	if q.get("full", false):
+		qmax = T.LAP - 3.0   # Mega: einmal um die ganze Strecke, bis sie hinter dir ankommt
 	q.z += base_spd * 3.2 * float(QX.speed) * dt * dir
 	q.age += dt
 	for o in ships:
-		if o.idx != 0 and not o.out and not q.hit.has(o.idx) and absf(o.z - q.z) < 2.6:
+		if o.idx != 0 and not o.out and not q.hit.has(o.idx) and absf(wrapf(o.z - q.z, -T.LAP * 0.5, T.LAP * 0.5)) < 2.6:
 			q.hit.append(o.idx)
 			_dmg(o, 0.2, 0, "quake", q.get("sup", false))
 			if not o.out and not _prot(o):   # mit Schild: wird nicht hochgeworfen
@@ -7131,7 +7276,7 @@ func _quake_step(q, dt: float) -> Variant:
 	_rset("qz" + sfx, q.z)
 	_rset("qs" + sfx, qs)
 	shake = maxf(shake, 0.35 * clampf(1.0 - absf(q.z - g.z) / 40.0, 0.0, 1.0) * float(QX.shake))
-	if dist > qmax or q.age > 16.0 * qd:
+	if dist > qmax or q.age > (40.0 if q.get("full", false) else 16.0) * qd:
 		q.n.queue_free()
 		_rset("qs" + sfx, 0.0)
 		return null
@@ -8587,7 +8732,7 @@ func _weapons(dt: float, racing: bool) -> void:
 					_dmg(o, 0.12, m.get("own", 0), "mine", m.get("sup", false))
 				boom = true
 		# Quake-Welle räumt Minen ab (egal von wem), Minen verschwinden nach 25 s von selbst
-		if not boom and ((quake != null and absf(m.z - quake.z) < 2.6) or (quake2 != null and absf(m.z - quake2.z) < 2.6)):
+		if not boom and ((quake != null and absf(wrapf(m.z - quake.z, -T.LAP * 0.5, T.LAP * 0.5)) < 2.6) or (quake2 != null and absf(wrapf(m.z - quake2.z, -T.LAP * 0.5, T.LAP * 0.5)) < 2.6)):
 			boom = true
 		if state == "lab" and m.t > 1.8:
 			boom = true
@@ -9498,7 +9643,7 @@ func _kc_check() -> void:
 func _kc_start() -> void:
 	var t0: float = kc_pending.t0
 	var F = rec
-	var ts = t0 - 2.0
+	var ts = t0 - (1.3 if kc_pending.kind == "rocket" else 1.0)
 	var i = 0
 	while i < F.size() - 2 and F[i + 1].t <= ts:
 		i += 1
@@ -9514,7 +9659,7 @@ func _kc_start() -> void:
 		if (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D or n.has_meta("deb")) and not tun_l.has(n) and n.visible:
 			n.visible = false
 			hidden.append(n)
-	kc = {"t0": t0, "end": t0 + 0.95, "victim": kc_pending.idx, "kind": kc_pending.kind, "saved": saved, "hidden": hidden,
+	kc = {"t0": t0, "end": t0 + 1.5, "victim": kc_pending.idx, "kind": kc_pending.kind, "saved": saved, "hidden": hidden,
 		"before": get_children(), "fxs": fxs.duplicate(), "zaps": zaps.duplicate(), "top": hud.top.text, "side": 1.0 if randf() < 0.5 else -1.0,
 		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0}
 	kc_pending = {}
@@ -9529,7 +9674,7 @@ func _kc_start() -> void:
 func _kc_step(dt: float) -> void:
 	var rel = rp.t - kc.t0
 	# Zeitlupe: anfangs etwas schneller, um den Treffer herum ganz langsam
-	var rate = 0.6 if rel < -0.6 else (0.28 if rel < 0.4 else 0.5)
+	var rate = 0.5 if rel < -0.3 else (0.3 if rel < 0.25 else 0.75)   # Anflug zügig, Einschlag langsam, dann Rundflug
 	# echte Zeitlupe: auch Partikel und Funken laufen langsamer
 	Engine.time_scale = rate
 	_replay(dt)
@@ -9601,6 +9746,8 @@ func _kc_end() -> void:
 
 
 func _kc_cam() -> bool:
+	# Kill-Cam je nach Waffe: Rakete = Kamera fliegt auf der Rakete mit; Schockwelle = reitet auf der Welle;
+	# Mine = flach auf der Fahrbahn neben der Mine; Kraftfeld & Rest = von hinten. Nach dem Knall: kurzer Rundflug über den Trümmern.
 	var v: Dictionary = ships[kc.victim]
 	var alive = rp.t <= kc.t0
 	var z: float = v.z if alive else kc.dz
@@ -9611,25 +9758,70 @@ func _kc_cam() -> bool:
 	var ro: Vector3
 	var ta: Vector3
 	var sd: float = kc.side
-	match kc.kind:
-		"rocket":
-			# von vorn: man sieht die Rakete von hinten auf den Gegner zufliegen
-			ro = V + f.fw * 4.6 + up * 1.0 + f.rr * (1.3 * sd)
-			ta = V - f.fw * 1.5
-		"mine":
-			# von hinten: der Gegner fliegt in die Minen
-			ro = V - f.fw * 4.8 + up * 1.3 + f.rr * (0.8 * sd)
-			ta = V + f.fw * 2.5
-		_:
-			ro = V + f.rr * (3.4 * sd) + up * 1.1 - f.fw * 1.2
-			ta = V + f.fw * 0.6
-	if not alive:
-		# nach dem Knall langsam zurückziehen
-		var k = clampf((rp.t - kc.t0) / 0.9, 0.0, 1.0)
-		ro += (ro - V).normalized() * 3.0 * k + up * 0.8 * k
+	var fr: Dictionary = rec[mini(rp.i, rec.size() - 1)]
+	if alive:
+		match kc.kind:
+			"rocket":
+				# die Rakete, die dem Opfer am nächsten von hinten kommt
+				var best = 1e9
+				var sp = null
+				for w in fr.get("w", []):
+					var dz = z - float(w[0])
+					if dz > -0.5 and dz < best:
+						best = dz
+						sp = w
+				if sp != null:
+					var fs = T.frame(float(sp[0]))
+					var S: Vector3 = fs.c + fs.rr * float(sp[1]) + fs.uu * 0.3
+					ro = S - fs.fw * 0.9 + up * 0.22
+					ta = V
+				else:
+					ro = V - f.fw * 4.0 + up * 0.8
+					ta = V
+			"quake", "mega", "wave":
+				var qz = z - 3.0
+				if fr.get("q") != null:
+					qz = float(fr.q[0])
+				var fq = T.frame(qz)
+				ro = fq.c + fq.uu * 0.9 - fq.fw * 1.6 + fq.rr * (0.6 * sd)
+				ta = V
+			"mine":
+				# flach neben der Mine, die vor dem Opfer liegt; der Gegner rast drüber
+				var mz = z + 3.0
+				var ml = lat
+				var bm = 1e9
+				for m in fr.get("m", []):
+					var dz = float(m[0]) - z
+					if dz > -1.0 and dz < bm:
+						bm = dz
+						mz = float(m[0])
+						ml = float(m[1])
+				var fm = T.frame(mz)
+				ro = fm.c + fm.rr * (ml + 0.9 * sd) + fm.uu * 0.12 + fm.fw * 1.2
+				ta = V
+			_:
+				ro = V - f.fw * 4.2 + up * 1.0 + f.rr * (0.8 * sd)
+				ta = V + f.fw * 2.0
+	else:
+		# Rundflug von schräg oben um die Trümmer (Mitte = Schwerpunkt der Brocken dieses Knalls)
+		var C = V
+		var cn = 0
+		var acc = Vector3.ZERO
+		for d in debris:
+			if is_instance_valid(d.n) and (d.n as Node3D).visible:
+				var p: Vector3 = (d.n as Node3D).global_position
+				if p.distance_to(V) < 25.0:
+					acc += p
+					cn += 1
+		if cn > 0:
+			C = C.lerp(acc / cn, 0.6)
+		var k = clampf((rp.t - kc.t0) / 1.5, 0.0, 1.0)
+		var a = sd * (0.6 + k * 1.6)
+		ro = C + (f.fw * cos(a) + f.rr * sin(a)) * (2.4 + k * 1.0) + up * (1.5 + k * 0.6)
+		ta = C
 	cam.global_position = ro
 	cam.look_at(ta, up)
-	cam.fov = 48.0
+	cam.fov = 55.0
 	if flash_rect != null and flash_rect.color.a > 0.0:
 		flash_rect.color.a = maxf(0.0, flash_rect.color.a - 0.05)
 	return true
@@ -11386,6 +11578,22 @@ func _shot() -> void:
 				ships[1].z = ships[0].z + 7.0
 				ships[1].lat = ships[0].lat + 1.2
 				ships[1].spd = ships[0].spd
+			if shot_n == 41 and not blimp.is_empty() and OS.get_environment("BLIMPDBG") != "":
+				print("BLIMP pos=", (blimp.n as Node3D).global_position, " cam=", cam.global_position, " c=", blimp.c, " r=", blimp.rx, ",", blimp.rz)
+			if shot_s.contains("rkctest") and shot_n % 5 == 0:
+				print("RKC n=", shot_n, " state=", state, " kcp=", kc_pending, " out1=", ships[1].out, " en1=", ships[1].en, " shots=", shots.map(func(x): return [snappedf(x.z - ships[0].z, 0.1), x.lat]), " z1=", snappedf(ships[1].z - ships[0].z, 0.1), " prot=", _prot(ships[1]))
+			if shot_n == 41 and shot_s.contains("rkctest"):
+				ships[1].z = ships[0].z + 14.0
+				ships[1].lat = ships[0].lat
+				ships[1].en = 0.05
+				ships[1].shield = 0.0
+				ships[2].z = ships[0].z - 30.0
+				ships[3].z = ships[0].z - 35.0
+				ships[0].wpn = "lenk"
+				lk_tg = ships[1]
+				lk_k = 1.0
+				_fire()
+				print("RKC fired shots=", shots.size(), " wpn=", ships[0].wpn)
 			if shot_n == 41 and shot_s.contains("dmgtest"):
 				ships[0].en = 0.12
 				ships[1].en = 0.3
@@ -11422,7 +11630,7 @@ func _shot() -> void:
 					var c0: Node3D = debris[0].n
 					var m0: MeshInstance3D = c0.get_child(0)
 					print("DEB2 chunk=", c0.global_position, " piece=", m0.global_transform, " ship0=", (ships[0].node as Node3D).global_position, " cam=", cam.global_position, " vis=", m0.is_visible_in_tree(), " layers=", m0.layers)
-			if shot_s.contains("kofreeze") and shot_n == int(OS.get_environment("KOF") if OS.get_environment("KOF") != "" else "60"):
+			if shot_s.contains("frz") and shot_n == int(OS.get_environment("KOF") if OS.get_environment("KOF") != "" else "60"):
 				Engine.time_scale = 0.0001   # Test: Trümmer einfrieren, damit die Aufnahme sie zeigt
 			if shot_n == 60 and shot_s.contains("finwin"):
 				state = "done"
@@ -11636,6 +11844,7 @@ func _tunnel(dt: float) -> void:
 	_neon_lights()
 	_city_live()
 	_neon_live(get_process_delta_time())
+	_blimp_live(get_process_delta_time())
 	_starter_live()
 	# Explosions-Helligkeitsstoß abklingen lassen
 	expo_v = maxf(0.0, expo_v - dt * 2.2)
@@ -11807,13 +12016,21 @@ func _camera(dt: float) -> void:
 		cam.look_at(nd0.global_position + bz.y * 0.1, Vector3.UP)
 		cam.fov = 50.0
 		return
+	if OS.get_environment("BLIMPCAM") != "" and not blimp.is_empty():
+		var bn: Node3D = blimp.n
+		var dd = float(OS.get_environment("BLIMPCAM"))
+		cam.global_position = bn.global_position + bn.global_transform.basis.x * dd + Vector3.UP * (-dd * 0.35)
+		cam.look_at(bn.global_position, Vector3.UP)
+		cam.fov = 50.0
+		return
 	if OS.get_environment("VIEWCAM") != "":
 		# nur zum Testen: freie Kamera „z,seitlich,Höhe,Drehung(Grad)“ – schaut längs der Strecke, gedreht um die Hochachse
 		var vp = OS.get_environment("VIEWCAM").split(",")
 		var vf = T.frame(float(vp[0]))
 		var ya = deg_to_rad(float(vp[3]))
 		cam.global_position = vf.c + vf.rr * float(vp[1]) + vf.uu * float(vp[2])
-		cam.look_at(cam.global_position + vf.fw * cos(ya) + vf.rr * sin(ya) - vf.uu * 0.08, vf.uu)
+		var pt = float(vp[4]) if vp.size() > 4 else -0.08
+		cam.look_at(cam.global_position + vf.fw * cos(ya) + vf.rr * sin(ya) + vf.uu * pt, vf.uu)
 		cam.fov = 60.0
 		for o in ships:
 			(o.node as Node3D).visible = false
@@ -12906,6 +13123,8 @@ func _stt_draw_ind(c: Control) -> void:
 # Der Rahmen ist ein Bild (art/hud/frame.png, 941×1672): oberer Teil oben angeheftet, unterer Teil unten.
 # Alle Koordinaten unten sind Bildpunkte im Rahmenbild; gezeichnet wird mit dem Maßstab Bildschirmbreite/941.
 const GA_W = 941.0
+const GA_RC = Vector2(468.0, 1361.0)   # Mitte des orangen Rings im Rahmen (nachgemessen)
+const GA_RR = 143.0
 const GA_H = 1672.0
 var ga_tex: Texture2D = null
 var ga_font: FontVariation = null
@@ -13048,7 +13267,7 @@ func _ga_draw(c: Control) -> void:
 		_ga_txt(c, Vector2(471, 1322), "—", 30, Color(1, 1, 1, 0.25), 1)
 	# Autopilot-Restzeit als Bogen ums Rad
 	if g.auto > 0.0 and state == "race":
-		c.draw_arc(Vector2(470, 1368), 150.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(g.auto / 5.0, 0.0, 1.0), 64, Color(0.4, 0.95, 1.0, 0.9), 6.0, true)
+		c.draw_arc(Vector2(GA_RC.x, GA_RC.y), GA_RR, -PI * 0.5, -PI * 0.5 + TAU * clampf(g.auto / 5.0, 0.0, 1.0), 64, Color(0.4, 0.95, 1.0, 0.9), 6.0, true)
 	# FIRE-Knopf: Schwert und Schrift, glüht, wenn eine Waffe bereit ist
 	var armed = w != "" and not spin
 	var fp = Vector2(470, 1498)
