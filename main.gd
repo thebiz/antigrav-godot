@@ -440,7 +440,7 @@ func _sounds() -> void:
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
-			"cbeep.wav", "load_weapon.wav", "holozap.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav", "ignite.wav",
+			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
@@ -3371,7 +3371,7 @@ const COL_W = 0.6    # Schiffsbreite
 
 
 func _collide(dt: float) -> void:
-	if not (state == "race" or state == "done"):
+	if not (state == "race" or state == "done") or party_on:
 		return
 	for i in range(ships.size()):
 		var a: Dictionary = ships[i]
@@ -3771,6 +3771,7 @@ const TRIB_SD = 0.22    # Stufentiefe (≈ 90 cm)
 const TRIB_RISE = 0.11  # Stufenhöhe (≈ 45 cm)
 const TRIB_BASE = 0.32  # Sockel (≈ 1,3 m)
 var stadium_p: AudioStreamPlayer3D = null
+var deco: Node3D = null   # Zuschauer, Neon, Jubel, Sprecher: wird mit der aktuellen Runde mitverschoben
 var crowd_p: AudioStreamPlayer3D = null
 var neon_signs = []
 var neon_font: Font = null
@@ -3792,6 +3793,9 @@ func _tribunes() -> void:
 		mats["tseat"] = m2
 		mats["tneo"] = _neon(OR if _noir() else Color(1.0, 0.5, 0.1), 2.6)
 		mats["tnec"] = _neon(Color(0.9, 0.9, 0.95) if _noir() else Color(0.2, 0.85, 1.0), 2.2)
+	if deco == null:
+		deco = Node3D.new()
+		add_child(deco)
 	var L0 = T.TW + TRIB_L0
 	var depth = TRIB_ROWS * TRIB_SD
 	var top = TRIB_BASE + TRIB_ROWS * TRIB_RISE
@@ -3849,14 +3853,14 @@ func _tribunes() -> void:
 	crowd_p.unit_size = 9.0
 	crowd_p.max_distance = 140.0
 	crowd_p.volume_db = 2.0
-	add_child(crowd_p)
+	deco.add_child(crowd_p)
 	crowd_p.global_position = f0.c + f0.uu * 2.0
 	stadium_p = AudioStreamPlayer3D.new()
 	stadium_p.bus = "Stadium"
 	stadium_p.unit_size = 22.0
 	stadium_p.max_distance = 400.0
 	stadium_p.doppler_tracking = AudioStreamPlayer3D.DOPPLER_TRACKING_IDLE_STEP
-	add_child(stadium_p)
+	deco.add_child(stadium_p)
 	stadium_p.global_position = f0.c + f0.uu * 3.5 + f0.rr * (T.TW + 2.0)
 
 
@@ -3926,7 +3930,7 @@ func _crowd(z0: float, z1: float, sd: float, L0: float) -> void:
 	mi.multimesh = mm
 	mi.material_override = crowd_mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
+	deco.add_child(mi)
 
 
 # Neon-Schriftzug aus einzelnen Buchstaben (Röhren-Look: dünne Schrift, heller Kern, farbiger Schein);
@@ -3935,8 +3939,8 @@ func _neon_sign(pos: Vector3, b: Basis, txt: String, col: Color, hgt: float) -> 
 	if neon_font == null:
 		neon_font = load("res://art/Inter-Light.otf")
 	var root = Node3D.new()
-	add_child(root)
-	root.global_transform = Transform3D(b, pos)
+	deco.add_child(root)
+	root.transform = Transform3D(b, pos)
 	var fs = 128
 	var px = hgt / float(fs) * 1.25
 	var widths = []
@@ -4014,6 +4018,7 @@ func _neon_live(dt: float) -> void:
 # zieht langsam eine weite Ellipse über der Stadt; Leuchtschrift an beiden Seiten, Blinklichter, zwei Suchscheinwerfer nach unten
 const BLIMP_L = 22.0   # Länge in Einheiten (≈ 90 m)
 var blimp = {}
+var blimp_off = 0.0
 const BEAM_CODE = """
 shader_type spatial;
 render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
@@ -4112,7 +4117,7 @@ func _blimp_live(dt: float) -> void:
 	var rx: float = blimp.rx
 	var rz: float = blimp.rz
 	var c: Vector3 = blimp.c
-	var p = Vector3(c.x + cos(a) * rx, blimp.y + sin(blimp.t * 0.13) * 2.0, c.z + sin(a) * rz)
+	var p = Vector3(c.x + cos(a) * rx, blimp.y + sin(blimp.t * 0.13) * 2.0, c.z + sin(a) * rz + blimp_off)
 	var tg = Vector3(-sin(a) * rx, 0.0, cos(a) * rz).normalized()
 	var n: Node3D = blimp.n
 	n.global_transform = Transform3D(Basis.looking_at(-tg, Vector3.UP).rotated(tg, sin(blimp.t * 0.21) * 0.03), p)
@@ -4128,6 +4133,245 @@ func _blimp_live(dt: float) -> void:
 	var bm: Array = blimp.beams
 	for i in range(bm.size()):
 		(bm[i] as Node3D).rotation = Vector3(sin(t * 0.31 + i * 2.0) * 0.45, 0.0, cos(t * 0.23 + i * 1.3) * 0.4)
+
+
+
+# ---------------------------------------------------------------- Siegerfeier am Ziel
+# Dein Schiff steht an der Ziellinie, daneben zwei Rivalen-Schiffe quer, Ren mit Helm, Mechanikerinnen, Fans;
+# Konfettikanonen, Jubel, Kamera kreist langsam um Ren. Die Figuren sind Tripo-Modelle mit Mixamo-Bewegungen.
+const PARTY_T = 9.0
+const PARTY_Z = 34.0   # Lage hinter der Ziellinie (in der Runde)
+var party = {}
+var party_on = false
+var party_cache = {}
+
+
+func _party_fig(nm: String, anim: String, pos: Vector3, look: Vector3, tint: Color, sc: float, t0: float) -> Node3D:
+	if not party_cache.has(nm):
+		party_cache[nm] = load("res://win/%s.glb" % nm)
+	var n: Node3D = (party_cache[nm] as PackedScene).instantiate()
+	var root = Node3D.new()
+	root.add_child(n)
+	party.n.add_child(root)
+	# Füße auf den Boden (Knöchel), Größe ≈ 1,8 m (= 0,45 Einheiten bei 6-m-Schiff)
+	var sk: Skeleton3D = n.find_children("*", "Skeleton3D", true, false)[0]
+	var dx: Transform3D = _rel_xf(n, sk)
+	var lf = sk.find_bone("mixamorig_LeftFoot")
+	var hd = sk.find_bone("mixamorig_Head")
+	var hp = sk.find_bone("mixamorig_Hips")
+	var fy = (dx * sk.get_bone_global_rest(lf).origin).y
+	var hy = (dx * sk.get_bone_global_rest(hd).origin).y
+	var hpp: Vector3 = dx * sk.get_bone_global_rest(hp).origin
+	var hgt = maxf(0.05, (hy - fy) * 1.12)
+	n.position = -Vector3(hpp.x, fy - 0.05 * hgt, hpp.z)
+	var k = 0.45 * sc / hgt
+	var dir: Vector3 = (look - pos) * Vector3(1, 0, 1)
+	root.global_transform = Transform3D(Basis.looking_at(-dir.normalized() if dir.length() > 0.01 else Vector3.FORWARD, Vector3.UP).scaled(Vector3.ONE * k), pos)
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = mi
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if OS.get_environment("FIGNOCULL") != "":
+			var s0 = m.mesh.surface_get_material(0)
+			if s0 is StandardMaterial3D:
+				var m0 = (s0 as StandardMaterial3D).duplicate()
+				m0.cull_mode = BaseMaterial3D.CULL_DISABLED
+				m.material_override = m0
+				continue
+		if tint != Color(1, 1, 1):
+			var src = m.mesh.surface_get_material(0)
+			if src is StandardMaterial3D:
+				var mm = (src as StandardMaterial3D).duplicate()
+				mm.albedo_color = tint
+				m.material_override = mm
+	var pth = "res://win/%s_%s.res" % [nm, anim]
+	if ResourceLoader.exists(pth):
+		var ap = AnimationPlayer.new()
+		n.add_child(ap)
+		var lib = AnimationLibrary.new()
+		lib.add_animation("a", load(pth))
+		ap.add_animation_library("", lib)
+		ap.play("a")
+		ap.seek(t0, true)
+		ap.speed_scale = randf_range(0.9, 1.1)
+	return root
+
+
+func _party_start() -> void:
+	_party_end()
+	party_on = true
+	var g: Dictionary = ships[0]
+	var lap = int(floor((g.z - 20.0) / T.LAP))
+	var zl = T.ZST + PARTY_Z
+	var zs = lap * T.LAP + zl
+	if zs < g.z - 30.0:
+		zs += T.LAP
+	# Strecke und Deko an die Feier-Runde hängen, dein Schiff steht dort
+	if deco != null:
+		deco.position = Vector3(0, 0, zs - zl)
+	_lap_pos(zs)
+	g.z = zs
+	g.lat = 0.0
+	g.psi = 0.0
+	g.vpsi = 0.0
+	g.roll = 0.0
+	g.h = 0.0
+	g.boost = 0.0
+	g.spd = 0.0
+	var root = Node3D.new()
+	add_child(root)
+	party = {"n": root, "z": zs, "conf": [], "ct": 0.0, "a0": randf() * TAU}
+	var f = T.frame(zs)
+	var B = Basis(-f.rr, f.uu, f.fw)
+	var at = func(dz: float, lat: float) -> Vector3:
+		var ff = T.frame(zs + dz)
+		return ff.c + ff.rr * lat
+	# zwei Rivalen-Schiffe quer abgestellt
+	var parked = [[2.3, 1.45, 1.15], [-2.1, 1.55, -1.95]]
+	for k in range(parked.size()):
+		var pk: Array = parked[k]
+		var idx = (int(g.get("sm", 0)) + 1 + k) % SHIPS.size()
+		var sn = _ship_node(idx)
+		root.add_child(sn)
+		var pp: Vector3 = at.call(pk[0], pk[1])
+		sn.global_transform = Transform3D(B.rotated(f.uu, float(pk[2])), pp + f.uu * 0.04)
+		# abgestellt: nur der Rumpf – Düsen, Strahlen, Ringe und Lichter aus
+		for ci in range(1, sn.get_child_count()):
+			var cn = sn.get_child(ci)
+			if cn is Node3D:
+				(cn as Node3D).visible = false
+	# Ren mit Helm neben seinem Schiff, schaut zur Kamera-Seite
+	var rp: Vector3 = at.call(0.25, -0.6)
+	party.ren = _party_fig("ren", "victory_idle", rp, rp - f.rr * 2.0 + f.fw * 0.4, Color(1, 1, 1), 1.0, 0.0)
+	party.c = rp
+	# Mechanikerinnen am Schiff, Fans im Halbkreis
+	# Kamera steht links (−lat) und schaut nach rechts: Ren vorn, dahinter Schiff, Team und Fans
+	var people = [
+		["mech", "waving", 1.05, 0.55, Color(1, 1, 1)], ["mech", "clapping", -1.0, 0.65, Color(0.85, 0.9, 1.0)], ["mech", "cheering", -0.9, -0.85, Color(1.0, 0.92, 0.85)],
+		["fan1", "cheering", 0.2, 1.25, Color(1, 1, 1)], ["fan2", "rallying", 0.85, 1.9, Color(1, 1, 1)], ["fan1", "standing_cheering", -0.5, 1.95, Color(0.85, 0.8, 1.0)],
+		["fan2", "cheering", 1.6, 1.15, Color(1.0, 0.85, 0.85)], ["fan1", "clapping", -1.6, 1.3, Color(0.8, 1.0, 0.9)], ["fan2", "waving", 0.5, 2.25, Color(0.9, 0.9, 1.0)],
+		["fan1", "rallying", -1.3, 2.25, Color(1.0, 1.0, 0.8)], ["fan2", "standing_cheering", 2.0, 2.0, Color(0.85, 1.0, 1.0)], ["fan2", "clapping", 1.9, -1.0, Color(1, 1, 1)]]
+	for pe in people:
+		var pp2: Vector3 = at.call(float(pe[2]) + randf_range(-0.08, 0.08), float(pe[3]) + randf_range(-0.06, 0.06))
+		_party_fig(pe[0], pe[1], pp2, rp, pe[4], randf_range(0.93, 1.05), randf() * 3.0)
+	# Licht auf die Szene (es ist Nacht)
+	for lp in [[0.0, -1.6, Color(1.0, 0.85, 0.7), 3.0], [1.8, 1.4, Color(1.0, 0.6, 0.8), 3.5], [-1.8, 1.6, Color(0.5, 0.8, 1.0), 3.5]]:
+		var l = OmniLight3D.new()
+		l.light_color = lp[2]
+		l.light_energy = lp[3]
+		l.omni_range = 5.5
+		root.add_child(l)
+		l.global_position = at.call(float(lp[0]), float(lp[1])) + f.uu * 1.4
+	# Düsenstrahlen deines Schiffs aus (blenden sonst die Kamera)
+	var gn: Node3D = g.node
+	for pj in gn.get_meta("pj", []):
+		(pj[0] as Node3D).visible = false
+	# alle Renn-Schiffe der Gegner ausblenden (sie fahren sonst durch die Feier)
+	for i in range(1, ships.size()):
+		(ships[i].node as Node3D).visible = false
+	party.cannons = [at.call(-1.9, 2.1), at.call(2.4, 2.1), at.call(0.3, 2.3)]
+	_snd("crowd_roar", 0.0)
+	_stadium("an_wow", 0.0)
+	hud.layer.visible = false
+
+
+func _party_end() -> void:
+	if party.is_empty():
+		party_on = false
+		return
+	if is_instance_valid(party.n):
+		(party.n as Node).queue_free()
+	for c in party.conf:
+		if is_instance_valid(c):
+			(c as Node).queue_free()
+	party = {}
+	party_on = false
+	if not ships.is_empty():
+		for pj in (ships[0].node as Node3D).get_meta("pj", []):
+			(pj[0] as Node3D).visible = true
+
+
+# Konfetti: bunte Papierschnipsel, wirbeln und fallen langsam
+var conf_mesh: QuadMesh = null
+
+
+func _confetti(pos: Vector3) -> void:
+	if conf_mesh == null:
+		conf_mesh = QuadMesh.new()
+		conf_mesh.size = Vector2(0.03, 0.018)
+		var m = StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.vertex_color_use_as_albedo = true
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		conf_mesh.material = m
+	var p = GPUParticles3D.new()
+	var pm = ParticleProcessMaterial.new()
+	pm.direction = Vector3(0, 1, 0)
+	pm.spread = 22.0
+	pm.initial_velocity_min = 5.0
+	pm.initial_velocity_max = 9.0
+	pm.gravity = Vector3(0, -2.2, 0)
+	pm.damping_min = 2.2
+	pm.damping_max = 3.5
+	pm.angular_velocity_min = -720.0
+	pm.angular_velocity_max = 720.0
+	pm.particle_flag_rotate_y = true
+	pm.turbulence_enabled = true
+	pm.turbulence_noise_strength = 0.6
+	pm.turbulence_noise_scale = 1.5
+	var gr = Gradient.new()
+	gr.offsets = PackedFloat32Array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+	gr.colors = PackedColorArray([Color(1, 0.2, 0.3), Color(1, 0.85, 0.2), Color(0.2, 0.9, 1.0), Color(1, 0.3, 0.85), Color(0.4, 1, 0.5), Color(1, 1, 1)])
+	var gt = GradientTexture1D.new()
+	gt.gradient = gr
+	pm.color_initial_ramp = gt
+	p.process_material = pm
+	p.draw_pass_1 = conf_mesh
+	p.amount = 220
+	p.lifetime = 5.0
+	p.one_shot = true
+	p.explosiveness = 0.92
+	p.local_coords = false
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	p.visibility_aabb = AABB(Vector3(-12, -12, -12), Vector3(24, 24, 24))
+	add_child(p)
+	p.global_position = pos
+	p.emitting = true
+	party.conf.append(p)
+	get_tree().create_timer(5.6).timeout.connect(p.queue_free)
+	_snd("confetti", -2.0, randf_range(0.92, 1.08), pos)
+
+
+func _party_live(dt: float) -> bool:
+	if party.is_empty():
+		return false
+	var t: float = fin.get("pt", 0.0)
+	# Konfettikanonen: zuerst alle drei, dann immer wieder einzeln
+	party.ct = float(party.ct) - dt
+	if party.ct <= 0.0:
+		var cs: Array = party.cannons
+		if t < 0.3:
+			for c in cs:
+				_confetti(c)
+		else:
+			_confetti(cs[randi() % cs.size()])
+		party.ct = randf_range(1.4, 2.4)
+	# Kamera: kreist langsam um Ren, auf Brusthöhe, ein Stück weg, damit Leute und Schiffe im Bild sind
+	var c: Vector3 = party.c
+	var a: float = -0.55 + t * 0.12
+	var f = T.frame(float(party.z))
+	var R = 2.3 - 0.5 * clampf(t / PARTY_T, 0.0, 1.0)
+	cam.global_position = c + (-f.rr * cos(a) + f.fw * sin(a)) * R + f.uu * (0.8 + 0.12 * sin(t * 0.4))
+	cam.look_at(c + f.rr * 0.7 + f.uu * 0.25, Vector3.UP)
+	cam.fov = 55.0
+	if OS.get_environment("PARTYTOP") != "":
+		cam.global_position = c + f.uu * 7.0 + f.rr * 0.5
+		cam.look_at(c + f.rr * 0.5, f.fw)
+		cam.fov = 60.0
+	if OS.get_environment("PARTYCAM") != "":
+		cam.global_position = c + f.rr * 0.9 + f.fw * 0.35 + f.uu * 0.3
+		cam.look_at(c + f.uu * 0.25, Vector3.UP)
+		cam.fov = 40.0
+	return true
 
 
 # ---------------------------------------------------------------- Gleiter
@@ -10092,7 +10336,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		return
 	if s.slowT > 0.0:
 		s.slowT -= dt
-	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow * (0.75 if s.slowT > 0.0 else 1.0) if racing or state == "done" else 0.0
+	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow * (0.75 if s.slowT > 0.0 else 1.0) if (racing or state == "done") and not party_on else 0.0
 	if T.S and is_p:
 		s.spd *= stt_spd
 	if is_p and not fin.is_empty() and fin.get("fly", false):
@@ -10637,6 +10881,9 @@ func _victory() -> void:
 # Rundenkopien (hinter/unter/vor dir) zur Stelle z schieben – nur wenn sich die Runde ändert
 func _lap_pos(z: float) -> void:
 	var l0 = int(floor((z - 20.0) / T.LAP))
+	if deco != null and not party_on:
+		deco.position = Vector3(0, 0, l0 * T.LAP)
+	blimp_off = l0 * T.LAP
 	for i in range(laps.size()):
 		var p = Vector3(0, 0, (l0 - 1 + i) * T.LAP)
 		if laps[i].position != p:
@@ -12005,6 +12252,8 @@ func _camera(dt: float) -> void:
 		return
 	if state == "done" and _fly_cam(dt):
 		return
+	if state == "done" and _party_live(dt):
+		return
 	if OS.get_environment("CLOSECAM") != "" and not ships.is_empty():
 		# Test: Nahaufnahme des eigenen Schiffs schräg von hinten oben
 		var nd0: Node3D = ships[0].node
@@ -12495,10 +12744,21 @@ func _fin_update(dt: float) -> void:
 	if fin.phase == 0:
 		var wait = fly_t if fin.fly else 1.2
 		if fin.t >= wait:
-			fin.phase = 1
 			if fin.has("lbl") and is_instance_valid(fin.lbl):
 				(fin.lbl as Node).queue_free()
-			_comic_start("win" if fin.win else "lose", fin.who)
+			if fin.win and not ships[0].out and not free_ride and not _jungle():
+				fin.phase = 5   # Siegerfeier am Ziel, danach die Comic-Seite
+				fin.pt = 0.0
+				_party_start()
+			else:
+				fin.phase = 1
+				_comic_start("win" if fin.win else "lose", fin.who)
+	elif fin.phase == 5:
+		fin.pt = float(fin.pt) + dt
+		if fin.pt >= PARTY_T or fin.get("skip", false):
+			fin.phase = 1
+			_party_end()
+			_comic_start("win", fin.who)
 	elif fin.phase == 1 and cm.is_empty():
 		fin.phase = 2
 		hud.layer.visible = true
@@ -13457,6 +13717,9 @@ func _soft_reset() -> bool:
 		paused_ui.queue_free()
 	paused_ui = null
 	_hull_update(null, false, 0.0)
+	_party_end()
+	for o in ships:
+		(o.node as Node3D).visible = true
 	Engine.time_scale = 1.0
 	AudioServer.playback_speed_scale = 1.0
 	# Effekte des letzten Rennens wegräumen
