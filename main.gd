@@ -10459,6 +10459,11 @@ func _shot() -> void:
 					te.pressed = shot_n == 45
 					te.position = Vector2(W * 0.85, 700)
 					_input(te)
+				if shot_n == 56:
+					var nd0: Node3D = ships[0].node
+					var f0 = T.frame(ships[0].z)
+					print("HT axes rr=", f0.rr, " shipX=", nd0.global_transform.basis.x, " shipUp=", nd0.global_transform.basis.y, " roll=", ships[0].roll)
+					get_viewport().get_texture().get_image().save_png(p[0].replace(".png", "_56.png"))
 				if shot_n >= 44 and shot_n <= 80:
 					print("HT n=", shot_n, " t=", snappedf(race_t, 0.01), " steer=", snappedf(last_steer, 0.01), " u=", snappedf(ships[0].u, 0.01), " psi=", snappedf(ships[0].psi, 0.01), " lat=", snappedf(ships[0].lat, 0.01), " roll=", snappedf(float(ships[0].get("roll", 0.0)), 0.01))
 			if shot_s.contains("assisttest") and state == "race":
@@ -10676,7 +10681,8 @@ func _pose_all(dt: float) -> void:
 			# Kurvenneigung: halb nach dem Lenkeinschlag, halb nach der tatsächlichen Querbewegung –
 			# zieht das Schiff kräftig zur Seite, legt es sich deutlich hinein; fährt es gerade, richtet es sich auf
 			var vl = s.spd * sin(s.vpsi)
-			var tr = clampf(0.32 * float(fx.steer.bank) * (0.5 * s.u + 0.7 * clampf(vl / 5.0, -1.0, 1.0)), -0.6, 0.6)
+			# bei 100 %: voll eingelenkt rund 45°, wie ein Motorrad in der Kurve (Regler bis 300 % → bis ~70°)
+			var tr = clampf(0.8 * float(fx.steer.bank) * clampf(0.6 * s.u + 0.6 * clampf(vl / 4.0, -1.0, 1.0), -1.0, 1.0), -1.2, 1.2)
 			var tp = clampf((s.pacc * 0.006 + s.boost * 0.035) * float(SX.pitch), -0.35, 0.35)
 			var nsub = maxi(1, int(ceil(dt * om / 0.25)))
 			var sdt = dt / nsub
