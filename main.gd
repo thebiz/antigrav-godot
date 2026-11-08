@@ -51,7 +51,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -219,14 +219,14 @@ func _ready() -> void:
 # ---------------------------------------------------------------- Klänge aus dem alten Spiel (Dateien in sfx/)
 # Zwei Kanäle: „Game“ (Motor, Effekte) und „Voice“ (Ansagen). Spricht die Stimme, wird „Game“ kurz abgesenkt (Ducking).
 func _buses() -> void:
-	for nm in ["Game", "Voice"]:
+	for nm in ["Game", "Voice", "Music"]:
 		if AudioServer.get_bus_index(nm) == -1:
 			AudioServer.add_bus()
 			var i = AudioServer.bus_count - 1
 			AudioServer.set_bus_name(i, nm)
 			AudioServer.set_bus_send(i, "Master")
 	var vi = AudioServer.get_bus_index("Voice")
-	AudioServer.set_bus_volume_db(vi, 6.0)
+	_bus_levels()
 	# Begrenzer, damit die lautere Stimme nicht übersteuert
 	if AudioServer.get_bus_effect_count(vi) == 0:
 		var lim = AudioEffectHardLimiter.new()
@@ -353,9 +353,11 @@ func _start_snd(st: AudioStream, db: float, from := 0.0) -> AudioStreamPlayer:
 func _start_step(c: int, first: bool) -> void:
 	var S: Dictionary = fx.sound
 	_start_bus_apply()
+	# Piepser bei 3, 2, 1 und das Startsignal bei GO – dazu zählt die Ansagerin mit
+	if float(S.beeps) > 0.01:
+		_start_snd(snd.get("go" if c <= 0 else "cbeep"), linear_to_db(float(S.beeps)) - 2.0)
+	_snd("vo_go" if c <= 0 else "vo_%d" % clampi(c, 1, 3), 2.0)
 	if first:
-		if float(S.beeps) > 0.01:
-			_start_snd(snd.get("count"), linear_to_db(float(S.beeps)))
 		if float(S.rumble) > 0.01:
 			_start_snd(snd.get("start"), linear_to_db(float(S.rumble)))
 	if float(S.synth) > 0.01:
@@ -372,7 +374,15 @@ func _start_play(short: bool) -> void:
 	_start_bus_apply()
 	var t0 = 2.0 if short else 0.0
 	if float(S.beeps) > 0.01:
-		start_prev.append(_start_snd(snd.get("count"), linear_to_db(float(S.beeps)), t0))
+		var bsteps = [[0.0, 1], [1.0, 0]] if short else [[0.0, 3], [1.0, 2], [2.0, 1], [3.0, 0]]
+		for stp in bsteps:
+			var cc: int = stp[1]
+			if stp[0] <= 0.0:
+				start_prev.append(_start_snd(snd.get("go" if cc <= 0 else "cbeep"), linear_to_db(float(S.beeps)) - 2.0))
+			else:
+				get_tree().create_timer(stp[0]).timeout.connect(func():
+					if state == "lab":
+						start_prev.append(_start_snd(snd.get("go" if cc <= 0 else "cbeep"), linear_to_db(float(S.beeps)) - 2.0)))
 	if float(S.rumble) > 0.01:
 		start_prev.append(_start_snd(snd.get("start"), linear_to_db(float(S.rumble)), t0 * 0.5))
 	if float(S.synth) > 0.01:
@@ -399,6 +409,9 @@ func _duck(delta: float) -> void:
 	var gi = AudioServer.get_bus_index("Game")
 	if gi >= 0:
 		AudioServer.set_bus_volume_db(gi, duck_db)
+	var mi = AudioServer.get_bus_index("Music")
+	if mi >= 0:
+		AudioServer.set_bus_volume_db(mi, duck_db * 0.6 + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) - 4.0)
 
 
 func _sounds() -> void:
@@ -406,6 +419,9 @@ func _sounds() -> void:
 	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "vo_turret.wav", "gun.wav", "minedrop.wav",
+			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
+			"cbeep.wav", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "hover.wav",
+			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
@@ -414,7 +430,8 @@ func _sounds() -> void:
 			var pth = "res://sfx/cv_%s_%s.wav" % [c, k]
 			if ResourceLoader.exists(pth):
 				snd["cv_%s_%s" % [c, k]] = load(pth)
-	for k in ["engine", "idle", "field"]:
+	snd["amb"] = snd["amb_jungle"] if _jungle() else snd["amb_city"]   # Hintergrund passend zur Strecke
+	for k in ["engine", "idle", "field", "hover", "amb"]:
 		var p = AudioStreamPlayer.new()
 		p.stream = _looped(snd[k])
 		p.volume_db = -80.0
@@ -422,6 +439,11 @@ func _sounds() -> void:
 		add_child(p)
 		p.play()
 		loops[k] = p
+	# Musik: eigener Kanal (Regler „Music“ in den Einstellungen), wechselt weich zwischen Menü und Rennen
+	music_p = AudioStreamPlayer.new()
+	music_p.bus = "Music"
+	music_p.volume_db = -80.0
+	add_child(music_p)
 	_ship_sounds()
 
 
@@ -523,6 +545,12 @@ func _sound_update(dt: float) -> void:
 	var tv = 0.7 if scr else 0.0
 	scr_v += (tv - scr_v) * (1.0 - exp(-dt / (0.02 if scr else 0.08)))
 	loops.field.volume_db = linear_to_db(maxf(0.0005, scr_v))
+	# Schwebe-Summen unter dem Schiff (im Stand gut hörbar) und Hintergrund der Strecke
+	var hov = 0.0 if g.out or state == "lab" else (0.16 if state == "menu" else 0.22 + 0.12 * (1.0 - clampf(sp, 0.0, 1.0)))
+	loops.hover.volume_db = linear_to_db(maxf(0.0005, hov))
+	loops.hover.pitch_scale = clampf(1.0 + 0.08 * sp + 0.05 * g.boost, 0.5, 2.0)
+	loops.amb.volume_db = linear_to_db(0.5 if state == "menu" else 0.35)
+	_music_update(dt)
 	for i in range(1, ships.size()):
 		var o: Dictionary = ships[i]
 		var nd: Node3D = o.node
@@ -721,7 +749,8 @@ const FXS = {
 		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0]],
 	# Lenkung – nur diese vier Werte (eingestellt wird auf der Teststrecke am Handy)
 	"steer": [["ramp", "Reaction: time to full steering", 0.1, 1.5, 0.56], ["power", "Steering strength", 0.4, 2.0, 1.0],
-		["assist", "Steering assist to pads", 0.0, 1.0, 0.3], ["bank", "Lean in curves", 0.0, 3.0, 1.0]],
+		["assist", "Steering assist to pads", 0.0, 1.0, 0.3], ["bank", "Lean in curves", 0.0, 3.0, 1.0],
+		["recover", "Straighten up speed", 0.5, 4.0, 2.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -945,6 +974,7 @@ func _apply_cfg() -> void:
 		b.light_energy = 2.2 * float(cfg.neon) * float(fx.env.lamps)
 		b.visible = float(fx.env.lamps) > 0.01
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.001, float(cfg.vol))))
+	_bus_levels()
 
 
 var sky_m: ShaderMaterial
@@ -4199,6 +4229,7 @@ func _btn(txt: String, pri := false) -> Button:
 	b.add_theme_stylebox_override("hover", n)
 	b.add_theme_stylebox_override("focus", n)
 	b.add_theme_stylebox_override("pressed", _style(Color(0.8, 0.33, 0.12) if pri else Color(1, 1, 1, 0.18), Color(1, 1, 1, 0.4)))
+	b.button_down.connect(func(): _snd("click", -6.0))
 	return b
 
 
@@ -4403,7 +4434,7 @@ func _menu() -> void:
 	top.add_child(spc)
 	sp.add_child(top)
 	ui.sl = {}
-	for it in [["speed", 0.5, 4.0], ["ai", 0.7, 1.4], ["res", 0.5, 1.0], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0]]:
+	for it in [["speed", 0.5, 4.0], ["ai", 0.7, 1.4], ["res", 0.5, 1.0], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0], ["music", 0.0, 1.0], ["voice", 0.0, 2.0]]:
 		var k: String = it[0]
 		var lb = _lbl("", 30)
 		sp.add_child(lb)
@@ -4678,6 +4709,8 @@ func _refresh_ui() -> void:
 	ui.sl.glow.text = "Glow  %d %%" % int(round(float(cfg.glow) * 100.0))
 	ui.sl.neon.text = "Neon lights  %d %%" % int(round(float(cfg.neon) * 100.0))
 	ui.sl.vol.text = "Volume  %d %%" % int(round(float(cfg.vol) * 100.0))
+	ui.sl.music.text = "Music  %d %%" % int(round(float(cfg.music) * 100.0))
+	ui.sl.voice.text = "Voices  %d %%" % int(round(float(cfg.voice) * 100.0))
 	for q in range(3):
 		ui.gfx[q].button_pressed = int(cfg.gfx) == q
 		var on = int(cfg.gfx) == q
@@ -5662,7 +5695,7 @@ func _shield_break(o: Dictionary) -> void:
 	_fx_res()
 	_burst(pos, fxr.spark, 90, 0.8, 4.0, 10.0, 180.0, Vector3(0, -5, 0), 0.5, 0.6, 1.3,
 		_ramp([[0.0, Color(2, 5, 9, 1)], [1.0, Color(0.2, 0.5, 1, 0)]]), null, true, false, 0.4)
-	_snd("zap", 2.0, 0.7, null if o.idx == 0 else pos)
+	_snd("shieldbreak", 2.0, 1.0, null if o.idx == 0 else pos)
 	if o.idx == 0:
 		_msg("SHIELD BROKEN", Color(0.5, 0.75, 1.0))
 		shake = maxf(shake, 0.6)
@@ -5742,6 +5775,8 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 			if o.idx != from.idx and not o.out and (o.z - from.z) * dir > 0.0 and (o.z - from.z) * dir < bd:
 				bd = (o.z - from.z) * dir
 				tg = o
+	if tg != null and tg.idx == 0 and from.idx != 0 and state == "race":
+		_snd("incoming", -1.0)   # Warnung: Lenkrakete kommt auf dich zu
 	shots.append({"z": from.z + 1.0 * dir, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) * dir if not at_player else 0.0, "n": mi, "own": from.idx, "dir": dir, "cl": cl, "sup": sp or cl})
 	if cl or sp:
 		# Superwaffe: gold, größer, heller
@@ -6020,8 +6055,7 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			if sup:
 				quake2 = _quake_make(g.z - 3.0, -1.0, quake2)
 				quake2.sup = true
-			_snd("boom", 3.0, 0.6)
-			_snd("boom", 0.0, 0.8)
+			_snd("quake", 3.0)
 			shake = maxf(shake, 1.5 * float(fx.quake.shake))
 			_flash(_hs(Color(1.0, 0.5, 0.15), float(fx.quake.hue)), 0.45 * minf(1.0, float(fx.quake.glow)))
 		"wand":
@@ -7233,6 +7267,7 @@ var lk_tg = null
 var lk_k = 0.0
 var lk_bt = 0.0
 var lk_t = 0.0
+var lk_snd = false   # Erfassungsklang schon gespielt
 var lk_n: MeshInstance3D
 var lk_im: ImmediateMesh
 var lk_mat: ShaderMaterial
@@ -7270,6 +7305,7 @@ func _lock_update(dt: float, racing: bool) -> void:
 		lk_k = 0.0
 		lk_bt = 0.0
 		lk_t = 0.0
+		lk_snd = false
 	if tg == null:
 		if lk_n != null and lk_n.visible:
 			lk_n.visible = false
@@ -7279,6 +7315,7 @@ func _lock_update(dt: float, racing: bool) -> void:
 	lk_t += dt
 	if demo and lk_t > 1.3 * float(L.time) + 1.6:
 		lk_t = 0.0   # Vorschau: von vorn
+		lk_snd = false
 	lk_k = clampf(lk_t / maxf(0.05, LK_T * float(L.time)), 0.0, 1.0)
 	_lock_vis(tg, dt)
 	# Piepsen: immer schneller, eingerastet ein schnelles Dauersirren
@@ -7287,11 +7324,12 @@ func _lock_update(dt: float, racing: bool) -> void:
 	if lk_bt <= 0.0 and vol > 0.01:
 		var db = linear_to_db(vol)
 		if lk_k >= 1.0:
-			_snd("beep", db - 9.0, 1.55 * float(L.pitch))
-			lk_bt = 0.06
-		else:
-			_snd("beep", db - 12.0, (1.1 + lk_k * 0.25) * float(L.pitch))
-			lk_bt = lerpf(0.42, 0.1, lk_k)
+			_snd("beep", db - 14.0, 1.55 * float(L.pitch))
+			lk_bt = 0.12
+		elif not lk_snd:
+			lk_snd = true   # Zielerfassung: immer schneller piepsend bis zum Dauerton (ein Klang)
+			_snd("lock", db - 3.0, clampf(1.5 / maxf(0.3, LK_T * float(L.time)), 0.7, 1.6))
+			lk_bt = 0.05
 
 
 func _lock_vis(tg: Dictionary, dt: float) -> void:
@@ -9671,6 +9709,17 @@ func _process(delta: float) -> void:
 			g.lapT = race_t
 			if lt > 1.0 and (g.get("bestlap", 0.0) == 0.0 or lt < g.bestlap):
 				g.bestlap = lt
+			if lk < T.LAPS:
+				_snd("lap", -3.0)
+				if lk == T.LAPS - 1:
+					get_tree().create_timer(0.5).timeout.connect(func(): _snd("vo_final", 3.0))
+			# schneller als jede gespeicherte Runde (Bestenliste dieser Strecke)?
+			if lt > 1.0 and not free_ride and not T.S:
+				var rc = ConfigFile.new()
+				rc.load(REC_PATH)
+				var rl = _rec_list(rc, _rec_key(), "lap")
+				if rl.is_empty() or lt < float(rl[0][0]):
+					get_tree().create_timer(1.6 if lk == T.LAPS - 1 else 0.6).timeout.connect(func(): _snd("vo_lrec", 3.0))
 	# Ziel
 	var finish = T.ZST + T.LAPS * T.LAP
 	var place = 1
@@ -9690,6 +9739,7 @@ func _process(delta: float) -> void:
 		t_state = 0.0
 		g.fin = race_t
 		_snd("win")
+		get_tree().create_timer(0.9).timeout.connect(func(): _snd("vo_p1", 3.0))
 		hud.res.text = "1st  ·  LAST ONE STANDING\n%s" % _fmt(race_t)
 		_fin_flow(1)
 		_records_end(false)
@@ -9697,7 +9747,9 @@ func _process(delta: float) -> void:
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
-		_snd("win")
+		_snd("win" if place == 1 else "lap", 0.0 if place == 1 else -2.0)
+		var pv = "vo_p%d" % clampi(place, 1, 4)
+		get_tree().create_timer(0.9).timeout.connect(func(): _snd(pv, 3.0))
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
 		_fin_flow(place)
 		_records_end(true)
@@ -10682,12 +10734,15 @@ func _pose_all(dt: float) -> void:
 			# zieht das Schiff kräftig zur Seite, legt es sich deutlich hinein; fährt es gerade, richtet es sich auf
 			var vl = s.spd * sin(s.vpsi)
 			# bei 100 %: voll eingelenkt rund 45°, wie ein Motorrad in der Kurve (Regler bis 300 % → bis ~70°)
-			var tr = clampf(0.8 * float(fx.steer.bank) * clampf(0.6 * s.u + 0.6 * clampf(vl / 4.0, -1.0, 1.0), -1.0, 1.0), -1.2, 1.2)
+			var tr = clampf(0.8 * float(fx.steer.bank) * clampf(0.6 * s.u + 0.6 * clampf(absf(s.u) * 2.0, 0.2, 1.0) * clampf(vl / 4.0, -1.0, 1.0), -1.0, 1.0), -1.2, 1.2)
 			var tp = clampf((s.pacc * 0.006 + s.boost * 0.035) * float(SX.pitch), -0.35, 0.35)
-			var nsub = maxi(1, int(ceil(dt * om / 0.25)))
+			var nsub = maxi(1, int(ceil(dt * om * maxf(1.0, float(fx.steer.recover)) / 0.25)))
 			var sdt = dt / nsub
 			for _i in range(nsub):
-				s.rv = s.get("rv", 0.0) + (om * om * (tr - s.roll) - 2.0 * ze * om * s.get("rv", 0.0)) * sdt
+				# zurück in die Gerade: eigene, schnellere Feder („Aufrichten“), beim Hineinlegen die normale
+				var omr = om * (float(fx.steer.recover) if absf(tr) < absf(s.roll) else 1.0)
+				var zr = maxf(ze, 0.85) if absf(tr) < absf(s.roll) else ze
+				s.rv = s.get("rv", 0.0) + (omr * omr * (tr - s.roll) - 2.0 * zr * omr * s.get("rv", 0.0)) * sdt
 				s.roll += s.rv * sdt
 				s.pv = s.get("pv", 0.0) + (om * om * (tp - s.get("pit", 0.0)) - 2.0 * ze * om * s.get("pv", 0.0)) * sdt
 				s.pit = s.get("pit", 0.0) + s.pv * sdt
@@ -12117,7 +12172,8 @@ func _scr_fling(sc: ScrollContainer, v: float) -> void:
 
 # Einstellleiste der Teststrecke: die einzige Stelle, an der die Lenkung eingestellt wird
 const STT_ROWS = [["steer", "ramp", "Reaktion  (weniger = sofort volle Lenkkraft)", 0.05], ["steer", "power", "Lenkkraft  (mehr = engere Kurven)", 0.05],
-	["steer", "assist", "Lenkhilfe zu den Feldern  (0 = aus)", 0.1], ["steer", "bank", "Kurvenneigung  (Optik)", 0.1]]
+	["steer", "assist", "Lenkhilfe zu den Feldern  (0 = aus)", 0.1], ["steer", "bank", "Kurvenneigung  (Optik)", 0.1],
+	["steer", "recover", "Aufrichten  (mehr = richtet sich schneller auf)", 0.25]]
 
 
 func _stt_rows() -> void:
@@ -12600,3 +12656,36 @@ func _gun_tracer(o: Dictionary, tg: Dictionary, hit: bool) -> void:
 	_snd("gun", -12.0 if o.idx == 0 else -16.0, randf_range(0.92, 1.08), a)
 	if hit and tg.idx == 0:
 		shake = maxf(shake, 0.12)
+
+
+# Lautstärke der Kanäle: Stimmen deutlich lauter (Begrenzer verhindert Übersteuern), Musik nach Regler
+func _bus_levels() -> void:
+	var vi = AudioServer.get_bus_index("Voice")
+	if vi >= 0:
+		AudioServer.set_bus_volume_db(vi, 9.0 + linear_to_db(maxf(0.001, float(cfg.get("voice", 1.0)))))
+
+
+var music_p: AudioStreamPlayer
+var music_k = ""
+var music_f = 0.0
+
+
+func _music_update(dt: float) -> void:
+	if music_p == null:
+		return
+	var want = "music_menu" if state in ["menu", "lab", "bench"] else "music_race"
+	if float(cfg.get("music", 0.6)) < 0.01:
+		want = ""
+	if want != music_k:
+		# alte Musik ausblenden, dann die neue einblenden
+		music_f = maxf(0.0, music_f - dt / 0.6)
+		if music_f <= 0.0:
+			music_k = want
+			if want == "":
+				music_p.stop()
+			else:
+				music_p.stream = _looped(snd[want])
+				music_p.play()
+	else:
+		music_f = minf(1.0, music_f + dt / 1.2)
+	music_p.volume_db = linear_to_db(maxf(0.0005, music_f))
