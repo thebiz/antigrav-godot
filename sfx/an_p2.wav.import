@@ -2,13 +2,13 @@
 
 importer="wav"
 type="AudioStreamWAV"
-uid="uid://dgrh5jty3v75r"
-path="res://.godot/imported/wspin.wav-690b1e0f2a60b2a56cef38f922943c15.sample"
+uid="uid://l6cugqvm4332"
+path="res://.godot/imported/an_p2.wav-f456bfd9e7b67b05f7c77c0ce7a38af0.sample"
 
 [deps]
 
-source_file="res://sfx/wspin.wav"
-dest_files=["res://.godot/imported/wspin.wav-690b1e0f2a60b2a56cef38f922943c15.sample"]
+source_file="res://sfx/an_p2.wav"
+dest_files=["res://.godot/imported/an_p2.wav-f456bfd9e7b67b05f7c77c0ce7a38af0.sample"]
 
 [params]
 

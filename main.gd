@@ -203,6 +203,7 @@ func _ready() -> void:
 	_build_city()
 	_spawn_ships()
 	cam = Camera3D.new()
+	cam.doppler_tracking = Camera3D.DOPPLER_TRACKING_IDLE_STEP
 	cam.fov = 52.0
 	cam.near = 0.08
 	cam.far = 400.0
@@ -218,6 +219,29 @@ func _ready() -> void:
 # ---------------------------------------------------------------- Klänge aus dem alten Spiel (Dateien in sfx/)
 # Zwei Kanäle: „Game“ (Motor, Effekte) und „Voice“ (Ansagen). Spricht die Stimme, wird „Game“ kurz abgesenkt (Ducking).
 func _buses() -> void:
+	if AudioServer.get_bus_index("Stadium") == -1:
+		AudioServer.add_bus()
+		var si = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(si, "Stadium")
+		AudioServer.set_bus_send(si, "Master")
+		var hp = AudioEffectHighPassFilter.new()
+		hp.cutoff_hz = 320.0
+		AudioServer.add_bus_effect(si, hp)
+		var lp = AudioEffectLowPassFilter.new()
+		lp.cutoff_hz = 5200.0
+		AudioServer.add_bus_effect(si, lp)
+		var ds = AudioEffectDistortion.new()
+		ds.mode = AudioEffectDistortion.MODE_OVERDRIVE
+		ds.drive = 0.18
+		ds.post_gain = -3.0
+		AudioServer.add_bus_effect(si, ds)
+		var rv = AudioEffectReverb.new()
+		rv.room_size = 0.85
+		rv.damping = 0.35
+		rv.wet = 0.38
+		rv.dry = 0.9
+		rv.predelay_msec = 90.0
+		AudioServer.add_bus_effect(si, rv)
 	for nm in ["Game", "Voice", "Music"]:
 		if AudioServer.get_bus_index(nm) == -1:
 			AudioServer.add_bus()
@@ -416,7 +440,7 @@ func _sounds() -> void:
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
-			"cbeep.wav", "wspin.wav", "holozap.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav", "ignite.wav",
+			"cbeep.wav", "load_weapon.wav", "holozap.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
@@ -752,7 +776,7 @@ const FXS = {
 	"steer": [["ramp", "Reaction: time to full steering", 0.1, 1.5, 0.56], ["power", "Steering strength", 0.4, 2.0, 1.0],
 		["assist", "Steering assist to pads", 0.0, 1.0, 0.3], ["bank", "Lean in curves", 0.0, 3.0, 1.0],
 		["recover", "Straighten up speed", 0.5, 4.0, 2.0], ["leanin", "Lean-in speed (look)", 0.3, 3.0, 1.0],
-		["wob", "Lean wobble (look)", 0.0, 2.0, 0.0], ["nose", "Nose into curve (look)", -1.0, 2.0, 0.0]],
+		["wob", "Lean wobble (look)", 0.0, 2.0, 0.0], ["nosev", "Nose turn (look)", 0.0, 1.5, 1.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -1509,7 +1533,7 @@ func _build_track() -> void:
 		gk += 1
 	for k in range(1, 36):
 		var zc = k * 20.0 + 10.0
-		if zc > 715.0 or T.in_tun(zc, 2.0) or _jungle():
+		if zc > 715.0 or T.in_tun(zc, 2.0) or _jungle() or zc < 56.0 or zc > 684.0:
 			continue
 		var sd = 1.0 if k % 2 == 0 else -1.0
 		if _noir():
@@ -1518,6 +1542,8 @@ func _build_track() -> void:
 		else:
 			_box("metal", zc, sd * (TW + 0.44), 0.86, 0.03, 0.76, 0.78)
 			_board(zc, sd, k % 4)
+	if not _jungle():
+		_tribunes()
 	for k in range(2, 51):
 		var zc = k * 14.0 + 7.0
 		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle():
@@ -1814,8 +1840,8 @@ void vertex(){wp=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;wn=normalize((MODEL_MATRIX*v
 float h21(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
 void fragment(){
 	float side=1.-step(.9,abs(wn.y));float u=abs(wn.x)>.5?wp.z:wp.x;
-	float vi=floor(h21(vec2(cd.a*.731,cd.a*.177))*4.);vec2 ao=vec2(mod(vi,2.),floor(vi/2.))*.5;
-	vec2 t=vec2(u,-wp.y)/14.;vec3 tx=textureGrad(fa,ao+fract(t)*.5,dFdx(t)*.5,dFdy(t)*.5).rgb;
+	float vi=floor(h21(vec2(cd.a*.731,cd.a*.177))*7.);vec2 ao=vec2(mod(vi,4.)*.25,floor(vi/4.)*.5);
+	vec2 t=vec2(u,-wp.y)/14.;vec2 sc=vec2(.25,.5);vec3 tx=textureGrad(fa,ao+fract(t)*sc,dFdx(t)*sc,dFdy(t)*sc).rgb;
 	tx=tx;
 	ALBEDO=mix(vec3(.015,.017,.025),tx*.12,side);METALLIC=.6;ROUGHNESS=.25;
 	EMISSION=hr(tx*tx*1.9,wh*6.2832)*side*wl+cd.rgb*smoothstep(cd.a-.8,cd.a-.3,wp.y)*step(wp.y,cd.a)*side*5.*eg;
@@ -2487,7 +2513,7 @@ float h11(float x){return fract(sin(x*127.1)*43758.5453);}
 void vertex(){
 	vec3 w=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;
 	my=clamp((w.y-by)/hh,0.,1.);
-	float g=fl*.35+gx*4.;                                // Stärke: Regler + Wechsel-Störung
+	float g=fl*.1+gx*4.;                                 // Stärke: Regler + Wechsel-Störung (sonst nur selten ein Glitch)
 	float tk=floor(TIME*(10.+gx*20.)+sd*7.);
 	vec3 off=vec3(0.);gb=0.;
 	for(int b=0;b<4;b++){
@@ -2506,17 +2532,19 @@ void vertex(){
 }
 void fragment(){
 	float fr=clamp(1.-abs(dot(NORMAL,VIEW)),0.,1.);
-	float rim=fr*fr*1.7+.05;
-	float scan=.72+.28*sin(wp.y*10.-TIME*7.);
+	float rim=fr*fr*1.25+.02;
+	// feine Bildzeilen im Bildschirmraster (keine breiten Zebrastreifen auf der Figur)
+	float scan=.86+.14*sin(FRAGCOORD.y*1.9-TIME*9.);
 	float sweep=exp(-pow(abs(fract(my*.7-TIME*.16)-.5)*12.,2.));
 	float fk=1.-min(fl,1.)*.6*step(.93,h11(floor(TIME*15.)+sd*5.));
 	// Zeilen fallen aus (mehr bei starker Störung)
-	float drop=step(fract(wp.y*.35+h11(floor(TIME*12.))*3.),.04*fl+.35*gx);
+	float drop=step(fract(wp.y*.35+h11(floor(TIME*12.))*3.),.35*gx);   // Zeilen fallen nur beim Glitch aus
 	vec3 c=mix(c2,c1,my);
 	// in gestörten Streifen laufen die Farben auseinander
 	c=mix(c,vec3(c.b,c.r*.6+.4,c.g)*1.4,gb);
 	float fd=exp(-length(VERTEX)*.0012);
-	ALBEDO=c*((.2+rim*1.6)*scan+sweep*.7*(.3+rim))*fk*hk*fd*(1.-drop*.9)*(1.+gx*1.2+gb*.8);
+	// durchsichtig: Fläche kaum gefüllt, nur Kanten hell – die Stadt bleibt dahinter sichtbar
+	ALBEDO=c*((.07+rim*1.05)*scan+sweep*.3*(.2+rim))*fk*hk*fd*(1.-drop*.9)*(1.+gx*1.2+gb*.8)*.8;
 }"""
 
 const KOI_CODE = """
@@ -2936,7 +2964,7 @@ func _rel_path(top: Node, n: Node) -> String:
 
 
 func _holos_make() -> void:
-	for kind in ["dancer", "dancer"]:   # Koi-Fische entfernt
+	for kind in ["dancer"]:   # nur eine Figur – höchstens einmal im Bild
 		var h = _holo_node(kind)
 		_sp(h.mat, "sd", float(holos.size()) * 1.37)
 		if kind == "dancer":
@@ -3716,6 +3744,253 @@ func _rear_draw(c: Control) -> void:
 		c.draw_circle(Vector2(x, y), r * 1.9, Color(col.r, col.g, col.b, 0.18 * a))
 		c.draw_circle(Vector2(x, y), r, Color(col.r, col.g, col.b, 0.85 * a))
 		c.draw_arc(Vector2(x, y), r, 0.0, TAU, 24, Color(1, 1, 1, 0.7 * a), 2.0 * k * 1.6, true)
+
+
+
+# ---------------------------------------------------------------- Tribünen am Ziel (beide Seiten), Zuschauer, Jubel, Stadionsprecher
+const TRIB_Z = [[22.0, 54.0], [686.0, 718.0]]   # Abschnitte vor und hinter der Ziellinie
+const TRIB_L0 = 1.25    # Abstand hinter der Leitplanke
+const TRIB_ROWS = 8
+const TRIB_SD = 0.34    # Stufentiefe
+const TRIB_RISE = 0.17  # Stufenhöhe
+const TRIB_BASE = 0.55  # Sockel
+var stadium_p: AudioStreamPlayer3D = null
+var crowd_p: AudioStreamPlayer3D = null
+var neon_signs = []
+var neon_font: Font = null
+
+
+func _tribunes() -> void:
+	if not mats.has("tconc"):
+		var m = StandardMaterial3D.new()
+		m.albedo_color = Color(0.34, 0.34, 0.37)
+		m.roughness = 0.8
+		m.metallic = 0.1
+		m.emission_enabled = true
+		m.emission = Color(0.05, 0.055, 0.07)   # nachts leicht angestrahlt
+		mats["tconc"] = m
+		var m2 = StandardMaterial3D.new()
+		m2.albedo_color = Color(0.07, 0.07, 0.08)
+		m2.roughness = 0.6
+		m2.metallic = 0.4
+		mats["tseat"] = m2
+		mats["tneo"] = _neon(OR if _noir() else Color(1.0, 0.5, 0.1), 2.6)
+		mats["tnec"] = _neon(Color(0.9, 0.9, 0.95) if _noir() else Color(0.2, 0.85, 1.0), 2.2)
+	var L0 = T.TW + TRIB_L0
+	var depth = TRIB_ROWS * TRIB_SD
+	var top = TRIB_BASE + TRIB_ROWS * TRIB_RISE
+	var roof_h = top + 1.35
+	for seg in TRIB_Z:
+		for sd in [1.0, -1.0]:
+			var z = seg[0]
+			while z < seg[1] - 0.01:
+				var hz = minf(1.0, (seg[1] - z) * 0.5)
+				var zc = z + hz
+				# Sockel mit orangem Leuchtband vorn
+				_box("tconc", zc, sd * (L0 - 0.05), TRIB_BASE * 0.5, 0.06, TRIB_BASE * 0.5, hz)
+				_box("tneo", zc, sd * (L0 - 0.115), TRIB_BASE - 0.08, 0.008, 0.018, hz)
+				# Stufen (massiv) und dunkle Sitzbänke
+				for r in range(TRIB_ROWS):
+					var hh = TRIB_BASE + (r + 1) * TRIB_RISE
+					_box("tconc", zc, sd * (L0 + (r + 0.5) * TRIB_SD), hh * 0.5, TRIB_SD * 0.5, hh * 0.5, hz)
+					_box("tseat", zc, sd * (L0 + (r + 0.62) * TRIB_SD), hh + 0.05, 0.06, 0.05, hz * 0.96)
+				# Rückwand bis unters Dach
+				_box("tconc", zc, sd * (L0 + depth + 0.06), roof_h * 0.5, 0.06, roof_h * 0.5, hz)
+				# Geländer vorn mit Leuchtkante
+				_box("tseat", zc, sd * (L0 + 0.02), TRIB_BASE + 0.22, 0.012, 0.012, hz)
+				# Dach: leicht schräg zur Strecke, cyan Lichtleisten darunter, orange Kante vorn
+				_box("tseat", zc, sd * (L0 + depth * 0.5 - 0.15), roof_h, depth * 0.5 + 0.35, 0.05, hz)
+				_box("tnec", zc, sd * (L0 + depth * 0.35), roof_h - 0.06, 0.03, 0.01, hz * 0.8)
+				_box("tnec", zc, sd * (L0 + depth * 0.75), roof_h - 0.06, 0.03, 0.01, hz * 0.8)
+				_box("tneo", zc, sd * (L0 - 0.48), roof_h, 0.012, 0.05, hz)
+				z += 2.0 * hz
+			# Stützen hinten
+			var zp = seg[0] + 1.0
+			while zp < seg[1]:
+				_box("tseat", zp, sd * (L0 + depth + 0.2), roof_h * 0.5, 0.06, roof_h * 0.5, 0.06)
+				zp += 6.0
+			_crowd(seg[0], seg[1], sd, L0)
+			# Neon-Schriftzug auf dem Dach, zur Strecke gewandt
+			var fzm = T.frame((seg[0] + seg[1]) * 0.5)
+			var zax: Vector3 = (-fzm.rr * sd).normalized()
+			var up: Vector3 = fzm.uu
+			var sc = OR if _noir() else (Color(1.0, 0.25, 0.7) if sd > 0.0 else Color(0.25, 0.9, 1.0))
+			_neon_sign(fzm.c + fzm.rr * (sd * (L0 + depth * 0.5)) + up * (roof_h + 0.62), Basis(up.cross(zax).normalized(), up, zax), "ANTIGRAV", sc, 0.9)
+	# zwei große Schriftzüge an Häusern neben der Strecke, schräg zum Verkehr
+	for sp in [[150.0, 1.0], [430.0, -1.0], [610.0, 1.0]]:
+		if T.in_tun(sp[0], 8.0):
+			continue
+		var f = T.frame(sp[0])
+		var sd2: float = sp[1]
+		var zax2: Vector3 = (-f.fw * 0.75 - f.rr * sd2 * 0.65).normalized()
+		zax2 = (zax2 - f.uu * zax2.dot(f.uu)).normalized()
+		var c2 = OR if _noir() else [Color(1.0, 0.2, 0.55), Color(0.3, 0.95, 1.0), Color(0.75, 0.35, 1.0)][neon_signs.size() % 3]
+		_neon_sign(f.c + f.rr * (sd2 * (T.TW + 7.5)) + f.uu * 7.0, Basis(f.uu.cross(zax2).normalized(), f.uu, zax2), "ANTIGRAV", c2, 2.4)
+	# Jubel als Schleife an der Ziellinie, Sprecher-Lautsprecher daneben (beide mit Dopplereffekt)
+	var f0 = T.frame(20.0)
+	crowd_p = AudioStreamPlayer3D.new()
+	crowd_p.bus = "Game"
+	crowd_p.unit_size = 9.0
+	crowd_p.max_distance = 140.0
+	crowd_p.volume_db = 2.0
+	add_child(crowd_p)
+	crowd_p.global_position = f0.c + f0.uu * 2.0
+	stadium_p = AudioStreamPlayer3D.new()
+	stadium_p.bus = "Stadium"
+	stadium_p.unit_size = 22.0
+	stadium_p.max_distance = 400.0
+	stadium_p.doppler_tracking = AudioStreamPlayer3D.DOPPLER_TRACKING_IDLE_STEP
+	add_child(stadium_p)
+	stadium_p.global_position = f0.c + f0.uu * 3.5 + f0.rr * (T.TW + 2.0)
+
+
+# Stadionsprecher über die Lautsprecher an der Ziellinie
+func _stadium(k: String, db: float) -> void:
+	if stadium_p == null or not snd.has(k):
+		return
+	stadium_p.stream = snd[k]
+	stadium_p.volume_db = db + 4.0
+	stadium_p.play()
+
+
+# Zuschauer: flache Figuren aus dem Bild-Atlas (4×4), drehen sich zur Kamera, hüpfen leicht
+const CROWD_CODE = """
+shader_type spatial;
+render_mode unshaded,cull_disabled,depth_prepass_alpha,shadows_disabled;
+uniform sampler2D tx:source_color,filter_linear_mipmap;
+uniform float k=.85;
+varying vec2 cuv;varying float ph;
+void vertex(){
+	float idx=floor(INSTANCE_CUSTOM.x*16.+.5);ph=INSTANCE_CUSTOM.y;
+	cuv=(UV+vec2(mod(idx,4.),floor(idx/4.)))*.25;
+	float s=length(MODEL_MATRIX[0].xyz);
+	vec3 x=normalize(vec3(INV_VIEW_MATRIX[0].x,0.,INV_VIEW_MATRIX[0].z));
+	vec3 z=normalize(vec3(INV_VIEW_MATRIX[2].x,0.,INV_VIEW_MATRIX[2].z));
+	VERTEX.y+=abs(sin(TIME*(4.+ph*3.)+ph*6.28))*.05*step(.35,ph);
+	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(vec4(x*s,0.),vec4(0.,s,0.,0.),vec4(z*s,0.),MODEL_MATRIX[3]);
+}
+void fragment(){
+	vec4 c=texture(tx,cuv);
+	if(c.a<.45){discard;}
+	ALBEDO=c.rgb*k;
+}"""
+var crowd_mat: ShaderMaterial = null
+
+
+func _crowd(z0: float, z1: float, sd: float, L0: float) -> void:
+	if crowd_mat == null:
+		crowd_mat = _shader_mat(CROWD_CODE)
+		crowd_mat.set_shader_parameter("tx", load("res://art/crowd.png"))
+		crowd_mat.set_shader_parameter("k", 0.8 if _noir() else 1.15)
+	var q = QuadMesh.new()
+	q.size = Vector2(0.36, 0.54)
+	q.center_offset = Vector3(0, 0.27, 0)
+	var rng = RandomNumberGenerator.new()
+	rng.seed = int(z0 * 7.0 + sd * 3.0)
+	var pts = []
+	for r in range(TRIB_ROWS):
+		var z = z0 + 0.3
+		while z < z1 - 0.3:
+			z += rng.randf_range(0.3, 0.55)
+			if rng.randf() < 0.18:
+				continue
+			pts.append([z, sd * (L0 + (r + 0.55) * TRIB_SD + rng.randf_range(-0.04, 0.04)), TRIB_BASE + (r + 1) * TRIB_RISE])
+	var mm = MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = true
+	mm.mesh = q
+	mm.instance_count = pts.size()
+	for i in range(pts.size()):
+		var pz = pts[i]
+		var f = T.frame(pz[0])
+		var sc = rng.randf_range(0.9, 1.1)
+		mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3.ONE * sc), f.c + f.rr * pz[1] + f.uu * pz[2]))
+		mm.set_instance_custom_data(i, Color((rng.randi() % 16) / 16.0 + 0.01, rng.randf(), 0, 0))
+	var mi = MultiMeshInstance3D.new()
+	mi.multimesh = mm
+	mi.material_override = crowd_mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+
+
+# Neon-Schriftzug aus einzelnen Buchstaben (Röhren-Look: dünne Schrift, heller Kern, farbiger Schein);
+# ein Buchstabe ist „kaputt“: flackert, setzt aus, brummt
+func _neon_sign(pos: Vector3, b: Basis, txt: String, col: Color, hgt: float) -> void:
+	if neon_font == null:
+		neon_font = load("res://art/Inter-Light.otf")
+	var root = Node3D.new()
+	add_child(root)
+	root.global_transform = Transform3D(b, pos)
+	var fs = 128
+	var px = hgt / float(fs) * 1.25
+	var widths = []
+	var tot = 0.0
+	for ch in txt:
+		var w = neon_font.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * px + hgt * 0.06
+		widths.append(w)
+		tot += w
+	var x = -tot * 0.5
+	var letters = []
+	for i in range(txt.length()):
+		var l = Label3D.new()
+		l.text = txt[i]
+		l.font = neon_font
+		l.font_size = fs
+		l.pixel_size = px
+		l.outline_size = 22
+		l.modulate = Color(col.r * 0.5 + 0.5, col.g * 0.5 + 0.5, col.b * 0.5 + 0.5) * 2.2
+		l.outline_modulate = Color(col.r, col.g, col.b, 0.55)
+		l.shaded = false
+		l.double_sided = false
+		l.no_depth_test = false
+		l.position = Vector3(x + widths[i] * 0.5, 0, 0)
+		root.add_child(l)
+		letters.append(l)
+		x += widths[i]
+	var bad = randi() % txt.length()
+	var hum = AudioStreamPlayer3D.new()
+	hum.bus = "Game"
+	hum.unit_size = 2.0 + hgt
+	hum.max_distance = 25.0 + hgt * 8.0
+	hum.volume_db = -12.0
+	letters[bad].add_child(hum)
+	neon_signs.append({"l": letters, "bad": bad, "t": randf() * 10.0, "on": true, "nx": randf_range(0.5, 3.0), "col": col, "hum": hum})
+
+
+func _neon_live(dt: float) -> void:
+	if neon_signs.is_empty() or not snd.has("neon_buzz"):
+		return
+	var live = state in ["race", "count", "intro", "done", "menu", "replay"]
+	# Jubel an der Ziellinie (Ton wird erst nach dem Streckenbau geladen)
+	if crowd_p != null:
+		if crowd_p.stream == null:
+			crowd_p.stream = _looped(snd["crowd"])
+		if live and not crowd_p.playing:
+			crowd_p.play()
+		elif not live and crowd_p.playing:
+			crowd_p.stop()
+	for sg in neon_signs:
+		var hum: AudioStreamPlayer3D = sg.hum
+		if hum.stream == null:
+			hum.stream = _looped(snd["neon_buzz"])
+		if live and not hum.playing:
+			hum.play()
+		elif not live and hum.playing:
+			hum.stop()
+		sg.nx -= dt
+		if sg.nx <= 0.0:
+			# Aussetzer: meist kurz flackern, manchmal länger aus
+			sg.on = not sg.on
+			if sg.on:
+				sg.nx = randf_range(0.4, 4.0) if randf() < 0.75 else randf_range(0.04, 0.15)
+			else:
+				sg.nx = randf_range(0.03, 0.12) if randf() < 0.8 else randf_range(0.4, 1.6)
+		var l: Label3D = sg.l[sg.bad]
+		var col: Color = sg.col
+		var k = 1.0 if sg.on else 0.12
+		l.modulate = Color(col.r * 0.5 + 0.5, col.g * 0.5 + 0.5, col.b * 0.5 + 0.5) * 2.2 * k
+		l.outline_modulate = Color(col.r, col.g, col.b, 0.55 * k)
+		hum.volume_db = -12.0 if sg.on else -30.0
 
 
 # ---------------------------------------------------------------- Gleiter
@@ -7879,6 +8154,57 @@ const LK_T = 1.3     # Sekunden bis zum Einrasten (× Regler)
 const LK_R = 90.0    # Reichweite
 
 
+# Zielhülle: eng anliegende, leuchtende Hülle in Schiffsform – orange = anvisiert, rot (mit Aufblitzen) = eingerastet
+const HULL_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_back,depth_draw_never,shadows_disabled,fog_disabled;
+uniform vec3 c=vec3(1.,.55,.1);uniform float k=1.;uniform float fl=0.;uniform float gr=.035;
+void vertex(){float s=length(MODEL_MATRIX[0].xyz);VERTEX+=NORMAL*gr/max(s,1e-4);}
+void fragment(){
+	float fr=clamp(1.-abs(dot(NORMAL,VIEW)),0.,1.);
+	float p=.78+.22*sin(TIME*8.);
+	ALBEDO=c*(pow(fr,1.5)*2.+.1)*k*p+c*fl*2.5;
+}"""
+var hull_mat: ShaderMaterial
+var hull_on = null      # Schiff, das gerade die Hülle trägt
+var hull_fl = 0.0       # Aufblitzen beim Einrasten
+var hull_lk = false
+
+
+func _hull_meshes(nd: Node3D) -> Array:
+	if not nd.has_meta("hullm"):
+		var lst = []
+		if nd.get_child_count() > 0:
+			for mi in nd.get_child(0).find_children("*", "MeshInstance3D", true, false):
+				lst.append(mi)
+		nd.set_meta("hullm", lst)
+	return nd.get_meta("hullm")
+
+
+func _hull_update(tg, locked: bool, dt: float) -> void:
+	if hull_mat == null:
+		hull_mat = _shader_mat(HULL_CODE)
+	if hull_on != null and (tg == null or hull_on != tg):
+		for mi in _hull_meshes(hull_on.node):
+			if is_instance_valid(mi):
+				(mi as MeshInstance3D).material_overlay = null
+		hull_on = null
+	if tg == null or tg.out:
+		hull_lk = false
+		return
+	if hull_on == null:
+		hull_on = tg
+		for mi in _hull_meshes(tg.node):
+			(mi as MeshInstance3D).material_overlay = hull_mat
+	if locked and not hull_lk:
+		hull_fl = 1.0
+	hull_lk = locked
+	hull_fl = maxf(0.0, hull_fl - dt / 0.3)
+	hull_mat.set_shader_parameter("c", _v3(Color(1.0, 0.08, 0.06) if locked else Color(1.0, 0.5, 0.08)))
+	hull_mat.set_shader_parameter("k", 0.95 if locked else 0.6)
+	hull_mat.set_shader_parameter("fl", hull_fl)
+
+
 func _lock_update(dt: float, racing: bool) -> void:
 	var g: Dictionary = ships[0]
 	var demo = state == "lab" and lab.get("tab", "") == "lock"
@@ -7910,6 +8236,7 @@ func _lock_update(dt: float, racing: bool) -> void:
 		lk_t = 0.0
 		lk_snd = false
 	if tg == null:
+		_hull_update(null, false, dt)
 		if lk_n != null and lk_n.visible:
 			lk_n.visible = false
 			lk_txt.visible = false
@@ -7920,6 +8247,7 @@ func _lock_update(dt: float, racing: bool) -> void:
 		lk_t = 0.0   # Vorschau: von vorn
 		lk_snd = false
 	lk_k = clampf(lk_t / maxf(0.05, LK_T * float(L.time)), 0.0, 1.0)
+	_hull_update(tg, lk_k >= 1.0, dt)
 	_lock_vis(tg, dt)
 	# Piepsen: immer schneller, eingerastet ein schnelles Dauersirren
 	lk_bt -= dt
@@ -8060,12 +8388,12 @@ func _weapons(dt: float, racing: bool) -> void:
 		if g.wpn == "":
 			g.wpn = _pick_w()
 			g.wpc = 1
-			_snd("wspin", 0.0)   # Waffenrad dreht sich (Johns Sound); die Ansage kommt erst, wenn es steht
+			_snd("load_weapon", 0.0)   # durchs Energiefeld, Waffe rastet ein – gleich danach die Ansage
 			var wv = "vo_" + g.wpn
-			get_tree().create_timer(1.2).timeout.connect(func(): _snd(wv, 3.0))
+			get_tree().create_timer(0.3).timeout.connect(func(): _snd(wv, 3.0))
 			if g.wpn == "orbs" and g.orbs > 0.0:
 				g.sup = true
-				get_tree().create_timer(1.95).timeout.connect(func(): _snd("vo_super", 3.0))
+				get_tree().create_timer(1.05).timeout.connect(func(): _snd("vo_super", 3.0))
 		else:
 			# Waffe behalten und noch zwei Waffenfelder überfahren → deine Waffe wird zur Superwaffe
 			g.wpc = int(g.get("wpc", 1)) + 1
@@ -10308,7 +10636,8 @@ func _process(delta: float) -> void:
 			if lk < T.LAPS:
 				_snd("lap", -3.0)
 				if lk == T.LAPS - 1:
-					get_tree().create_timer(0.5).timeout.connect(func(): _snd("vo_final", 3.0))
+					_stadium("an_final", 0.0)
+					get_tree().create_timer(2.0).timeout.connect(func(): _snd("vo_final", 3.0))
 			# schneller als jede gespeicherte Runde (Bestenliste dieser Strecke)?
 			if lt > 1.0 and not free_ride and not T.S:
 				var rc = ConfigFile.new()
@@ -10347,7 +10676,11 @@ func _process(delta: float) -> void:
 		g.fin = race_t
 		_snd("win" if place == 1 else "lap", 0.0 if place == 1 else -2.0)
 		var pv = "vo_p%d" % clampi(place, 1, 4)
-		get_tree().create_timer(0.9).timeout.connect(func(): _snd(pv, 3.0))
+		_stadium("an_p%d" % clampi(place, 1, 4), 0.0)
+		_snd("crowd_roar", -2.0 if place == 1 else -6.0)
+		if place == 1:
+			get_tree().create_timer(3.0).timeout.connect(func(): _stadium("an_wow", 0.0))
+		get_tree().create_timer(3.4 if place == 1 else 1.6).timeout.connect(func(): _snd(pv, 3.0))
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
 		_fin_flow(place)
 		_records_end(true)
@@ -11048,6 +11381,11 @@ func _shot() -> void:
 				state = "done"
 				t_state = 0.0
 				_show_resb()
+			if shot_s.contains("locktest") and shot_n >= 41:
+				ships[0].wpn = "lenk"
+				ships[1].z = ships[0].z + 7.0
+				ships[1].lat = ships[0].lat + 1.2
+				ships[1].spd = ships[0].spd
 			if shot_n == 41 and shot_s.contains("dmgtest"):
 				ships[0].en = 0.12
 				ships[1].en = 0.3
@@ -11129,7 +11467,7 @@ func _shot() -> void:
 				if shot_n == 64:
 					print("AGAIN after kids=", get_child_count(), " fx=", fxs.size(), " mines=", mines.size(), " out2=", ships[2].out, " vis2=", (ships[2].node as Node3D).visible, " z=", ships[0].z, " en2=", ships[2].en, " state=", state, " race_t=", race_t)
 			if OS.get_environment("NOSE") != "" and shot_n == 41:
-				fx.steer.nose = float(OS.get_environment("NOSE"))
+				fx.steer.nosev = float(OS.get_environment("NOSE"))
 			if OS.get_environment("NOSE") != "" and shot_n == 53:
 				var g0: Dictionary = ships[0]
 				var fz = T.frame(g0.z)
@@ -11297,6 +11635,7 @@ func _tunnel(dt: float) -> void:
 	_lamps_cull()
 	_neon_lights()
 	_city_live()
+	_neon_live(get_process_delta_time())
 	_starter_live()
 	# Explosions-Helligkeitsstoß abklingen lassen
 	expo_v = maxf(0.0, expo_v - dt * 2.2)
@@ -11375,9 +11714,10 @@ func _pose_all(dt: float) -> void:
 				s.pv = s.get("pv", 0.0) + (om * om * (tp - s.get("pit", 0.0)) - 2.0 * ze * om * s.get("pv", 0.0)) * sdt
 				s.pit = s.get("pit", 0.0) + s.pv * sdt
 		# Optik: Nase dreht mit der Neigung in die Kurve (bzw. Heck schwingt raus) – ändert die Fahrlinie nicht
-		var nz = float(fx.steer.get("nose", 0.0))
-		if absf(nz) > 0.001 and state != "replay":
-			dir = dir.rotated(f.uu, -s.roll * 0.22 * nz).normalized()
+		var nz = float(fx.steer.get("nosev", 1.0))
+		if absf(nz - 1.0) > 0.001 and state != "replay":
+			# sichtbare Nasendrehung: 100 % = wie gefahren, 0 % = Nase zeigt längs der Strecke (nur Optik)
+			dir = (f.fw * cos(s.psi * nz) + f.rr * sin(s.psi * nz)).normalized()
 		var up: Vector3 = f.uu.rotated(dir, s.roll)
 		var x = up.cross(dir).normalized()
 		up = dir.cross(x).normalized()
@@ -12589,26 +12929,15 @@ func _ga_frame(g: Dictionary, dt: float) -> void:
 	f.offset_right = 150.0 * k
 	f.offset_top = -(GA_H - 1200.0) * k
 	f.offset_bottom = -(GA_H - 1560.0) * k
-	# Roulette starten, wenn eine neue Waffe eingesammelt wurde
+	# neue Waffe: sofort da (kein Roulette mehr), springt nur kurz ins Rad
 	var w: String = g.wpn
 	if w != ga_last:
 		if w != "" and state == "race":
-			var seq = []
-			for i in range(13):
-				seq.append(WP[randi() % WP.size()][0])
-			seq.append(w)
-			ga_rl = {"t": 0.0, "seq": seq, "i": -1}
+			ga_rl = {"t": 0.0, "seq": [w], "i": 0}
 		ga_last = w
 	if not ga_rl.is_empty():
 		ga_rl.t += dt
-		var n: int = ga_rl.seq.size()
-		var u = clampf(ga_rl.t / 1.15, 0.0, 1.0)
-		var idx = mini(n - 1, int(floor((1.0 - pow(1.0 - u, 2.6)) * (n - 1) + 0.0001)))
-		if idx != ga_rl.i:
-			ga_rl.i = idx
-			if idx == n - 1:
-				_snd("beep", -16.0, 1.4)   # nur noch das Einrasten – das Drehen macht jetzt der Rad-Sound
-		if ga_rl.t > 1.6:
+		if ga_rl.t > 0.6:
 			ga_rl = {}
 	hud.gs = lerpf(float(hud.gs), g.spd, 1.0 - exp(-dt / 0.15))
 	(hud.ga as Control).queue_redraw()
@@ -12691,23 +13020,16 @@ func _ga_draw(c: Control) -> void:
 	# Waffenrad: Mitte = deine Waffe, links/rechts die Nachbarn; beim Einsammeln rattert es durch (Roulette)
 	var w: String = g.wpn
 	var cw = w
-	var spin = not ga_rl.is_empty() and int(ga_rl.i) < int(ga_rl.seq.size()) - 1
-	if not ga_rl.is_empty():
-		cw = ga_rl.seq[maxi(0, int(ga_rl.i))]
+	var spin = false
 	var ci = _ga_widx(cw)
 	var mega = g.get("mega", false)
 	var sup = g.get("sup", false)
 	var gc = Color(1.0, 0.15, 0.2) if mega else (Color(1.0, 0.8, 0.25) if sup else WC.get(cw, OR2))
 	if cw != "":
-		var lw = _ga_wsel(ci - 1)
-		var rw = _ga_wsel(ci + 1)
-		_wicon(c, Vector2(366, 1302), 26.0, lw, Color(1, 1, 1, 0.3 if not spin else 0.55))
-		_wicon(c, Vector2(574, 1302), 26.0, rw, Color(1, 1, 1, 0.3 if not spin else 0.55))
 		var bounce = 0.0
 		if not ga_rl.is_empty():
-			var since = float(ga_rl.t) - 1.15
-			if since > 0.0:
-				bounce = sin(since * 22.0) * exp(-since * 7.0) * 6.0
+			var since = float(ga_rl.t)
+			bounce = sin(since * 22.0) * exp(-since * 7.0) * 6.0
 		var pu = 0.5 + 0.5 * sin(t * 5.0)
 		if not spin:
 			# Glühen hinter dem mittleren Feld
@@ -12829,7 +13151,7 @@ const STT_ROWS = [["steer", "ramp", "Reaktion  (weniger = sofort volle Lenkkraft
 	["steer", "recover", "Aufrichten  (mehr = richtet sich schneller auf)", 0.25],
 	["steer", "leanin", "Hineinlegen  (mehr = legt sich schneller rein)", 0.1],
 	["steer", "wob", "Nachwippen  (0 = keins, mehr = schwingt nach)", 0.1],
-	["steer", "nose", "Nase in die Kurve  (minus = Heck schwingt raus)", 0.1]]
+	["steer", "nosev", "Nase drehen  (0 = Nase geradeaus, Schiff kippt nur)", 0.1]]
 
 
 func _stt_rows() -> void:
@@ -12915,6 +13237,7 @@ func _soft_reset() -> bool:
 	if paused_ui != null and is_instance_valid(paused_ui):
 		paused_ui.queue_free()
 	paused_ui = null
+	_hull_update(null, false, 0.0)
 	Engine.time_scale = 1.0
 	AudioServer.playback_speed_scale = 1.0
 	# Effekte des letzten Rennens wegräumen
