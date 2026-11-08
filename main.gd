@@ -357,6 +357,8 @@ func _start_step(c: int, first: bool) -> void:
 	if float(S.beeps) > 0.01:
 		_start_snd(snd.get("go" if c <= 0 else "cbeep"), linear_to_db(float(S.beeps)) - 2.0)
 	_snd("vo_go" if c <= 0 else "vo_%d" % clampi(c, 1, 3), 2.0)
+	if c <= 0:
+		_snd("ignite", -1.0)   # bei GO zünden die Triebwerke
 	if first:
 		if float(S.rumble) > 0.01:
 			_start_snd(snd.get("start"), linear_to_db(float(S.rumble)))
@@ -420,7 +422,7 @@ func _sounds() -> void:
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "vo_turret.wav", "gun.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
-			"cbeep.wav", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav",
+			"cbeep.wav", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
