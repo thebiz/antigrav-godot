@@ -3108,8 +3108,8 @@ func _starter_pose() -> Array:
 	var sw = 0.4       # Schwung fürs Tuch
 	var vis = true
 	if state == "intro":
-		ang = -62.0 + sin(t_state * 2.0) * 4.0
-		al = -70.0 + sin(t_state * 1.6) * 3.0
+		ang = -64.0 + sin(t_state * 2.0) * 3.0
+		al = -64.0 + sin(t_state * 2.0 + 0.4) * 3.0
 	elif state == "count":
 		var c = 3 - int(floor(t_state))
 		var u = t_state - floor(t_state)
@@ -3117,17 +3117,16 @@ func _starter_pose() -> Array:
 		var tg = [-62.0, 62.0, 42.0, 20.0][clampi(c, 0, 3)]       # 3: schräg hoch · 2: höher · 1: Flagge hoch
 		var pv = [-62.0, 62.0, 42.0, 20.0][clampi(c + 1, 0, 3)] if c < 3 else -62.0
 		ang = lerpf(pv, tg, e)
-		var tl = [-70.0, 20.0, 8.0, -5.0][clampi(c, 0, 3)]       # anderer Arm geht zur Seite raus
-		var pl = [-70.0, 20.0, 8.0, -5.0][clampi(c + 1, 0, 3)] if c < 3 else -70.0
-		al = lerpf(pl, tl, e)
+		al = ang                                  # beide Arme gleich hoch (keine Flagge mehr)
 		if c == 1:
 			ang += sin(u * 40.0) * 2.0 * u        # zittert vor Spannung
+			al += sin(u * 40.0 + 1.0) * 2.0 * u
 		sw = 0.6 + 1.2 * (1.0 - e)
 	elif state == "race" and t_state < 1.4:
 		# GO: Flagge runterreißen, das Tuch schlägt nach
 		var a = clampf(t_state / 0.14, 0.0, 1.0)
 		ang = lerpf(62.0, -50.0, a * a)
-		al = lerpf(20.0, -45.0, a)
+		al = ang
 		sw = 2.0 - t_state
 	else:
 		vis = false
@@ -3152,7 +3151,13 @@ func _starter_live() -> void:
 	var sc = ST_H / float(starter.mh)
 	var base: Vector3 = f.c + Vector3.UP * -0.2
 	n.global_transform = Transform3D(Basis.looking_at(fw, Vector3.UP).scaled(Vector3.ONE * sc), base)
-	_st_arms(starter, float(ps[2]), float(ps[1]), 8.0, 10.0)
+	_st_arms(starter, float(ps[2]), float(ps[1]), 10.0, 10.0)
+	if OS.get_environment("STDBG") != "" and Engine.get_process_frames() % 6 == 0:
+		var skd: Skeleton3D = starter.sk
+		var hy = []
+		for a in starter.arms:
+			hy.append(snappedf((skd.global_transform * skd.get_bone_global_pose(a.ih)).origin.y - base.y, 0.01))
+		print("STDBG ", state, " t=", snappedf(t_state, 0.01), " L/R hand y=", hy, " ang=", ps[1], " al=", ps[2])
 	var mat: ShaderMaterial = starter.mat
 	_sp(mat, "by", base.y)
 	_sp(mat, "hh", ST_H)
@@ -4105,7 +4110,7 @@ func _blimp_live(dt: float) -> void:
 # ---------------------------------------------------------------- Siegerfeier am Ziel
 # Dein Schiff steht an der Ziellinie, daneben zwei Rivalen-Schiffe quer, Ren mit Helm, Mechanikerinnen, Fans;
 # Konfettikanonen, Jubel, Kamera kreist langsam um Ren. Die Figuren sind Tripo-Modelle mit Mixamo-Bewegungen.
-const PARTY_T = 9.0
+const PARTY_T = 10.0
 const PARTY_Z = 34.0   # Lage hinter der Ziellinie (in der Runde)
 var party = {}
 var party_on = false
@@ -4229,6 +4234,22 @@ func _party_start() -> void:
 	# Ren mit Helm neben seinem Schiff, schaut zur Kamera-Seite
 	var rp: Vector3 = at.call(0.25, -0.6)
 	party.ren = _party_fig("ren", "victory_idle", rp, rp - f.rr * 2.0 + f.fw * 0.4, Color(1, 1, 1), 1.0, 0.0)
+	# Ren jubelt einmal (Sprung), dann winkt er
+	var rap: Array = (party.ren as Node3D).find_children("*", "AnimationPlayer", true, false)
+	if not rap.is_empty() and ResourceLoader.exists("res://win/ren_waving.res"):
+		var ap: AnimationPlayer = rap[0]
+		var lib: AnimationLibrary = ap.get_animation_library("")
+		var a1: Animation = (lib.get_animation("a") as Animation).duplicate()
+		a1.loop_mode = Animation.LOOP_NONE
+		lib.remove_animation("a")
+		lib.add_animation("a", a1)
+		var a2: Animation = (load("res://win/ren_waving.res") as Animation).duplicate()
+		a2.loop_mode = Animation.LOOP_LINEAR
+		lib.add_animation("w", a2)
+		ap.speed_scale = 1.0
+		ap.playback_default_blend_time = 0.35
+		ap.play("a")
+		ap.queue("w")
 	_party_helmet(party.ren)
 	party.c = rp
 	# Mechanikerinnen am Schiff, Fans im Halbkreis
@@ -4242,7 +4263,8 @@ func _party_start() -> void:
 		var pp2: Vector3 = at.call(float(pe[2]) + randf_range(-0.08, 0.08), float(pe[3]) + randf_range(-0.06, 0.06))
 		_party_fig(pe[0], pe[1], pp2, rp, pe[4], randf_range(0.93, 1.05), randf() * 3.0)
 	# Licht auf die Szene (es ist Nacht)
-	for lp in [[0.0, -1.6, Color(1.0, 0.85, 0.7), 3.0], [1.8, 1.4, Color(1.0, 0.6, 0.8), 3.5], [-1.8, 1.6, Color(0.5, 0.8, 1.0), 3.5]]:
+	# (nicht direkt über den abgestellten Schiffen, sonst strahlen deren Rümpfe weiß aus)
+	for lp in [[0.0, -1.6, Color(1.0, 0.85, 0.7), 3.0], [0.9, 1.9, Color(1.0, 0.6, 0.8), 2.6], [-0.9, 1.9, Color(0.5, 0.8, 1.0), 2.6]]:
 		var l = OmniLight3D.new()
 		l.light_color = lp[2]
 		l.light_energy = lp[3]
@@ -4344,14 +4366,32 @@ func _party_live(dt: float) -> bool:
 		else:
 			_confetti(cs[randi() % cs.size()])
 		party.ct = randf_range(1.4, 2.4)
-	# Kamera: kreist langsam um Ren, auf Brusthöhe, ein Stück weg, damit Leute und Schiffe im Bild sind
+	# Kamera in drei Einstellungen: Nahaufnahme von Ren beim Jubelsprung, schnelle Fahrt an den Fans vorbei,
+	# dann langsamer Kreis um Ren mit Leuten und Schiffen im Bild
 	var c: Vector3 = party.c
-	var a: float = -0.55 + t * 0.12
 	var f = T.frame(float(party.z))
-	var R = 2.3 - 0.5 * clampf(t / PARTY_T, 0.0, 1.0)
-	cam.global_position = c + (-f.rr * cos(a) + f.fw * sin(a)) * R + f.uu * (0.8 + 0.12 * sin(t * 0.4))
-	cam.look_at(c + f.rr * 0.7 + f.uu * 0.25, Vector3.UP)
-	cam.fov = 55.0
+	var zs = float(party.z)
+	if t < 2.1:
+		var u = t / 2.1
+		var d = lerpf(0.95, 0.62, u * (2.0 - u))
+		cam.global_position = c - f.rr * d + f.fw * (0.2 - 0.1 * u) + f.uu * (0.36 - 0.04 * u)
+		cam.look_at(c + f.uu * (0.34 - 0.02 * u) + f.fw * 0.03, Vector3.UP)
+		cam.fov = 42.0
+	elif t < 4.7:
+		var u = (t - 2.1) / 2.6
+		var e = u * u * (3.0 - 2.0 * u) * 0.6 + u * 0.4
+		var dz = lerpf(-1.7, 1.5, e)
+		var ff = T.frame(zs + dz)
+		cam.global_position = ff.c + ff.rr * 0.5 + ff.uu * (0.5 + 0.05 * sin(u * PI))
+		cam.look_at(cam.global_position + ff.fw * 1.0 + ff.rr * 0.75 - ff.uu * 0.2, Vector3.UP)
+		cam.fov = 52.0
+	else:
+		var t2 = t - 4.7
+		var a: float = -0.75 + t2 * 0.14
+		var R = 2.3 - 0.5 * clampf(t2 / (PARTY_T - 4.7), 0.0, 1.0)
+		cam.global_position = c + (-f.rr * cos(a) + f.fw * sin(a)) * R + f.uu * (0.8 + 0.12 * sin(t2 * 0.4))
+		cam.look_at(c + f.rr * 0.7 + f.uu * 0.25, Vector3.UP)
+		cam.fov = 55.0
 	if OS.get_environment("PARTYTOP") != "":
 		cam.global_position = c + f.uu * 7.0 + f.rr * 0.5
 		cam.look_at(c + f.rr * 0.5, f.fw)
@@ -4369,7 +4409,10 @@ func _party_live(dt: float) -> bool:
 # unsichtbaren Schutzschild (Röhre) umgeben: Teile prallen davon ab – an der Stelle blitzt der Schild kurz auf.
 const PROP_SPOTS = [[130.0, 0.9, "b"], [132.0, 1.4, "b"], [131.0, 0.3, "c"], [275.0, -1.2, "c"], [277.0, -0.7, "c"], [279.0, -1.5, "b"],
 	[360.0, 1.3, "b"], [361.5, 1.7, "b"], [362.0, 0.9, "c"], [420.0, -0.4, "c"], [421.0, 0.1, "c"], [422.0, 0.6, "c"],
-	[485.0, 1.6, "b"], [486.0, 1.1, "c"], [620.0, -1.4, "b"], [621.5, -1.0, "b"], [622.0, -1.8, "c"], [668.0, 0.6, "c"], [669.5, 1.1, "b"]]
+	[485.0, 1.6, "b"], [486.0, 1.1, "c"], [620.0, -1.4, "b"], [621.5, -1.0, "b"], [622.0, -1.8, "c"], [668.0, 0.6, "c"], [669.5, 1.1, "b"],
+	[95.0, -1.0, "c"], [96.5, -0.5, "c"], [98.0, 0.0, "c"], [150.0, 1.5, "b"], [151.5, 0.9, "b"], [255.0, -1.6, "b"], [256.0, -1.0, "c"],
+	[290.0, 0.2, "b"], [312.0, -0.6, "c"], [313.5, 0.0, "c"], [315.0, 0.6, "c"], [338.0, 1.7, "b"], [398.0, -1.4, "b"], [399.5, -0.8, "c"],
+	[452.0, 0.4, "c"], [453.0, 0.9, "b"], [470.0, -1.2, "c"], [471.5, -0.6, "b"], [500.0, 1.3, "b"], [600.0, -0.2, "c"], [601.0, 0.4, "c"], [646.0, -1.5, "b"]]
 const SHIELD_H = 2.6   # Höhe der Schutzröhre über der Fahrbahn
 var props = []
 var props0 = []
@@ -4392,9 +4435,9 @@ func _props_make() -> void:
 			continue
 		var k: String = sp[2]
 		var n: Node3D = (prop_res[k] as PackedScene).instantiate()
-		# Fass: Ø ≈ 1/3 Schiffsbreite (0,27), entsprechend hoch (0,42); Kegel: gleiche Grundfläche, 75 % der Fasshöhe
-		var hgt = 0.42 if k == "b" else 0.315
-		var wid = 0.27 / (0.65 if k == "b" else 0.69)   # Modelle: Fass Ø 0,65, Kegel Ø 0,69, beide 1,0 hoch
+		# Fass: Ø ≈ halbe Schiffsbreite (0,4), entsprechend hoch (0,6); Kegel: gleiche Grundfläche, 75 % der Fasshöhe
+		var hgt = 0.6 if k == "b" else 0.45
+		var wid = 0.4 / (0.65 if k == "b" else 0.69)   # Modelle: Fass Ø 0,65, Kegel Ø 0,69, beide 1,0 hoch
 		n.scale = Vector3(wid, hgt, wid)
 		var root = Node3D.new()
 		root.add_child(n)
@@ -4404,8 +4447,8 @@ func _props_make() -> void:
 			# Leuchtstreifen am Kegel: oranges Glimmen
 			var gl = OmniLight3D.new()
 			gl.light_color = Color(1.0, 0.5, 0.1)
-			gl.light_energy = 1.0
-			gl.omni_range = 0.9
+			gl.light_energy = 1.2
+			gl.omni_range = 1.2
 			gl.position = Vector3(0, hgt * 0.7, 0)
 			root.add_child(gl)
 			for mi in n.find_children("*", "MeshInstance3D", true, false):
@@ -4419,7 +4462,7 @@ func _props_make() -> void:
 					mm.emission_energy_multiplier = 0.9
 					(mi as MeshInstance3D).material_override = mm
 		var d = {"n": root, "k": k, "z": float(sp[0]), "lat": float(sp[1]), "h": 0.0, "vz": 0.0, "vl": 0.0, "vh": 0.0,
-			"rb": Basis(Vector3.UP, randf() * TAU), "av": Vector3.ZERO, "r": 0.135, "hg": hgt, "kt": 0.0, "rest": true}
+			"rb": Basis(Vector3.UP, randf() * TAU), "av": Vector3.ZERO, "r": 0.2, "hg": hgt, "kt": 0.0, "rest": true}
 		props.append(d)
 		props0.append(d.duplicate())
 
@@ -4453,10 +4496,19 @@ func _props_update(dt: float) -> void:
 					d.av = (d.av as Vector3) * 0.6
 				else:
 					d.vh = 0.0
-				d.vz *= exp(-2.4 * dt)
-				d.vl *= exp(-3.0 * dt)
+				d.vz *= exp(-1.1 * dt)
+				d.vl *= exp(-2.2 * dt)
 				var av: Vector3 = d.av
 				d.av = Vector3(av.x * exp(-4.0 * dt), av.y * exp(-2.0 * dt), av.z * exp(-4.0 * dt))
+				# auf dem Boden: kommt stehend oder liegend zur Ruhe (nicht schräg in der Luft hängend)
+				if (d.av as Vector3).length() < 2.5:
+					var rb: Basis = d.rb
+					var upv: Vector3 = rb.y.normalized()
+					var tgt: Vector3 = Vector3(0, signf(upv.y), 0) if absf(upv.y) > 0.6 else Vector3(upv.x, 0.0, upv.z).normalized()
+					if tgt.length() > 0.5 and upv.dot(tgt) < 0.9999:
+						var ax: Vector3 = upv.cross(tgt)
+						if ax.length() > 1e-4:
+							d.rb = (Basis(ax.normalized(), upv.angle_to(tgt) * minf(1.0, dt * 6.0)) * rb).orthonormalized()
 				if absf(d.vz) < 0.15 and absf(d.vl) < 0.15 and absf(d.vh) < 0.1 and (d.av as Vector3).length() < 0.4:
 					d.rest = true
 			# Schutzschild: seitlich und oben – abprallen, Schild blitzt auf
@@ -4482,7 +4534,10 @@ func _props_update(dt: float) -> void:
 			zw -= T.LAP
 		var f = T.frame(zw)
 		var B = Basis(-f.rr, f.uu, f.fw)
-		nd.global_transform = Transform3D(B * (d.rb as Basis), f.c + f.rr * d.lat + f.uu * (d.h + 0.005))
+		# umgekippt: um den halben Durchmesser anheben, sonst steckt es halb im Boden
+		var tilt_up: float = absf((d.rb as Basis).y.normalized().y)
+		var lift: float = float(d.r) * sqrt(maxf(0.0, 1.0 - tilt_up * tilt_up))
+		nd.global_transform = Transform3D(B * (d.rb as Basis), f.c + f.rr * d.lat + f.uu * (d.h + 0.005 + lift))
 		# Zusammenstoß mit Schiffen
 		d.kt = maxf(0.0, float(d.kt) - dt)
 		if d.kt > 0.0 or not (state == "race" or state == "done") or party_on:
@@ -4496,18 +4551,20 @@ func _props_update(dt: float) -> void:
 				d.rest = false
 				var sp = maxf(o.spd, 1.0)
 				var away = signf(d.lat - o.lat) if absf(d.lat - o.lat) > 0.02 else (1.0 if randf() < 0.5 else -1.0)
-				var light = 1.0 if d.k == "c" else 0.75
-				d.vz = sp * randf_range(0.7, 1.05) * light
-				d.vl = away * sp * randf_range(0.15, 0.4) * light + o.spd * sin(o.vpsi)
-				d.vh = sp * randf_range(0.12, 0.28) * light
-				d.av = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)).normalized() * randf_range(6.0, 16.0)
+				# wird zur Seite geschoben, kippt um und schlittert – bleibt im Bild statt davonzufliegen
+				var light = 1.0 if d.k == "c" else 0.8
+				# fast mit deinem Tempo mitgeschoben (sonst ist es sofort hinter der Kamera), dann bremst es langsam ab
+				d.vz = sp * randf_range(0.82, 0.98)
+				d.vl = away * randf_range(2.0, 3.6) * light + o.spd * sin(o.vpsi) * 0.6
+				d.vh = randf_range(0.6, 1.4) * light
+				d.av = Vector3(randf_range(-0.4, 0.4), randf_range(-1.0, 1.0), -away * randf_range(0.8, 1.2)).normalized() * randf_range(4.0, 8.0)
 				o.spd *= 0.98
 				if not _prot(o):
 					_dmg(o, 0.02, -1, "ram")
 				var pos: Vector3 = nd.global_position
 				_snd("crash_bump", -10.0 if o.idx == 0 else -8.0, randf_range(1.2, 1.5) if d.k == "c" else randf_range(0.85, 1.05), null if o.idx == 0 else pos)
 				if o.idx == 0:
-					shake = maxf(shake, 0.12)
+					shake = maxf(shake, 0.25)
 				break
 	_shield_hits_update(dt)
 	if OS.get_environment("PROPDBG") != "" and Engine.get_process_frames() % 10 == 0:
@@ -5140,12 +5197,22 @@ func _kc_overlay() -> void:
 	sl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	sl.material = _shader_mat("""
 shader_type canvas_item;
+uniform sampler2D sc : hint_screen_texture, filter_linear_mipmap;
 void fragment(){
 	vec2 uv=SCREEN_UV;
-	float line=step(.5,fract(FRAGCOORD.y*.25))*.10;
+	// Aufnahme-Look: Farben fast raus, leicht kalt-blau, Bildzeilen, rollender Streifen, dunkle Ecken, roter Rahmen
+	vec3 c=texture(sc,uv).rgb;
+	float l=dot(c,vec3(.3,.59,.11));
+	c=mix(c,vec3(l)*vec3(.85,.97,1.1),.7)*1.08;
+	float line=step(.5,fract(FRAGCOORD.y*.25))*.12;
 	float vig=smoothstep(.45,.95,length((uv-.5)*vec2(.8,1.)));
-	float roll=smoothstep(.0,.02,abs(fract(uv.y-TIME*.12)-.5))*.0+exp(-pow(abs((fract(uv.y-TIME*.12)-.5)*40.),2.))*.05;
-	COLOR=vec4(vec3(roll),line+vig*.55);
+	float roll=exp(-pow(abs((fract(uv.y-TIME*.12)-.5)*40.),2.))*.07;
+	c=c*(1.-line)*(1.-vig*.6)+roll;
+	vec2 px=uv/SCREEN_PIXEL_SIZE;vec2 rs=1./SCREEN_PIXEL_SIZE;
+	float e=min(min(px.x,rs.x-px.x),min(px.y,rs.y-px.y));
+	float br=step(e,10.)*(.6+.4*step(.5,fract(TIME*.8)));
+	c=mix(c,vec3(1.,.1,.08),br);
+	COLOR=vec4(c,1.);
 }""")
 	cl.add_child(sl)
 	var c = Color(1, 1, 1, 0.85)
@@ -5197,13 +5264,27 @@ void fragment(){
 	t3.modulate = Color(1, 1, 1, 0.85)
 	cl.add_child(t3)
 	kco.ts = t3
-	var t4 = _lbl("tap to skip", 22)
-	t4.anchor_right = 1.0
-	t4.anchor_top = 1.0
-	t4.anchor_bottom = 1.0
-	t4.offset_top = -120
-	t4.modulate = Color(1, 1, 1, 0.45)
-	cl.add_child(t4)
+	# großes „REPLAY“ unten, damit man nie denkt, es sei das laufende Rennen
+	var t5 = _lbl("◀◀  REPLAY", 44)
+	t5.anchor_right = 1.0
+	t5.anchor_top = 1.0
+	t5.anchor_bottom = 1.0
+	t5.offset_top = -300
+	t5.modulate = Color(1.0, 0.3, 0.25, 0.95)
+	cl.add_child(t5)
+	kco.rp = t5
+	# Überspringen nur über diesen Knopf (sonst würde jedes Lenken die Kill-Cam wegdrücken)
+	var sk = _lbl("SKIP  ▶▶", 26)
+	sk.anchor_left = 1.0
+	sk.anchor_right = 1.0
+	sk.offset_left = -260
+	sk.offset_right = -56
+	sk.offset_top = 236
+	sk.offset_bottom = 290
+	sk.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	sk.modulate = Color(1, 1, 1, 0.7)
+	cl.add_child(sk)
+	kco.skip = sk
 
 
 var kco = {}
@@ -6438,7 +6519,8 @@ func _input(ev: InputEvent) -> void:
 			board_man = 0 if cur_dmg else 1
 		if ev.pressed:
 			if state == "kill":
-				_kc_end()
+				if kco.has("skip") and (kco.skip as Control).get_global_rect().grow(40).has_point(ev.position):
+					_kc_end()
 				return
 			if hud.has("pausebtn") and (hud.pausebtn as Control).visible and (hud.pausebtn as Control).get_global_rect().grow(24).has_point(ev.position):
 				_pause(true)
@@ -7424,6 +7506,8 @@ func _orbs_update(dt: float, live: bool) -> void:
 	if live:
 		g.orbs = maxf(0.0, g.orbs - dt)
 	var on = g.orbs > 0.0 and not g.out and (g.orbs > 1.2 or fmod(g.orbs, 0.25) < 0.15)
+	if not orb_n.is_empty() and not is_instance_valid(orb_n[0]):
+		orb_n.clear()   # weggeräumt (Neustart/Kill-Cam): neu bauen
 	if orb_n.is_empty():
 		if not on:
 			return
@@ -10113,7 +10197,7 @@ func _kc_check() -> void:
 func _kc_start() -> void:
 	var t0: float = kc_pending.t0
 	var F = rec
-	var ts = t0 - (1.3 if kc_pending.kind == "rocket" else 1.0)
+	var ts = t0 - 5.0   # gut 5 s vorher einsteigen: man sieht, wie es dazu kam
 	var i = 0
 	while i < F.size() - 2 and F[i + 1].t <= ts:
 		i += 1
@@ -10144,7 +10228,7 @@ func _kc_start() -> void:
 func _kc_step(dt: float) -> void:
 	var rel = rp.t - kc.t0
 	# Zeitlupe: anfangs etwas schneller, um den Treffer herum ganz langsam
-	var rate = 0.5 if rel < -0.3 else (0.3 if rel < 0.25 else 0.75)   # Anflug zügig, Einschlag langsam, dann Rundflug
+	var rate = 1.0 if rel < -1.6 else (0.5 if rel < -0.3 else (0.3 if rel < 0.25 else 0.75))   # Vorlauf normal, Anflug langsamer, Einschlag ganz langsam, dann Rundflug
 	# echte Zeitlupe: auch Partikel und Funken laufen langsamer
 	Engine.time_scale = rate
 	_replay(dt)
@@ -10156,6 +10240,7 @@ func _kc_step(dt: float) -> void:
 		kc.dlat = v.lat
 	var tt = Time.get_ticks_msec() / 1000.0
 	kco.dot.visible = fmod(tt, 1.0) < 0.6
+	kco.rp.visible = fmod(tt, 1.4) < 1.0
 	kco.ts.text = "%s   ×%.2f" % [_fmt(maxf(0.0, rp.t)), rate]
 	hud.top.text = kc.top
 	if rp.t >= kc.end:
@@ -10192,7 +10277,7 @@ func _kc_end() -> void:
 			e.l.queue_free()
 	zaps = keep_z
 	for n in get_children():
-		if not kc.before.has(n) and not tun_l.has(n) and (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D or n.has_meta("deb")):
+		if not kc.before.has(n) and not tun_l.has(n) and not n.has_meta("keep") and (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D or n.has_meta("deb")):
 			n.queue_free()
 	for n in kc.hidden:
 		if is_instance_valid(n):
@@ -10229,7 +10314,14 @@ func _kc_cam() -> bool:
 	var ta: Vector3
 	var sd: float = kc.side
 	var fr: Dictionary = rec[mini(rp.i, rec.size() - 1)]
-	if alive:
+	var g0: Dictionary = ships[0]
+	if alive and rp.t < kc.t0 - 1.6 and not g0.out:
+		# Vorlauf: über deine Schulter, Blick auf den Gegner – so sieht man, wie es dazu kam
+		var fg = T.frame(g0.z)
+		var G: Vector3 = fg.c + fg.rr * g0.lat + fg.uu * (0.3 + g0.h)
+		ro = G - fg.fw * 2.6 + up * 1.1 + fg.rr * (0.5 * sd)
+		ta = G.lerp(V, 0.7)
+	elif alive:
 		match kc.kind:
 			"rocket":
 				# die Rakete, die dem Opfer am nächsten von hinten kommt
@@ -12059,6 +12151,15 @@ func _shot() -> void:
 				state = "race"
 			if shot_s.contains("srtest") and shot_n == 50:
 				print("SR valid=", props.map(func(d): return is_instance_valid(d.n)))
+			if shot_s.contains("prtest") and shot_n > 41 and shot_n % 4 == 0:
+				print("PRT n=", shot_n, " z=", snappedf(ships[0].z, 0.1), " lat=", snappedf(ships[0].lat, 0.01))
+			if shot_s.contains("prtest") and shot_n == 41:
+				ships[0].z = 268.0
+				ships[0].lat = -1.0
+				ships[0].vpsi = 0.0
+				ships[0].psi = 0.0
+				for i in range(1, ships.size()):
+					ships[i].z = ships[0].z - 40.0 - i * 3.0
 			if shot_s.contains("shtest"):
 				if shot_n == 41:
 					ships[0].air = true
@@ -12295,7 +12396,7 @@ func _shot() -> void:
 							te = fr.t
 				_rp_seek(te + 0.35)
 				rp.paused = true
-			if shot_n == ({"repb": 84, "repf": 85, "armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44, "mega1": 46, "mega2": 52, "rs1": 43, "rs2": 50, "rs3": 58, "armed2": 130}.get(p[3], 90) if p.size() > 3 else 90):
+			if shot_n == ({"repb": 84, "repf": 85, "armed": 50, "kill1": 75, "kill4": 160, "kill2": 90, "kill3": 110, "long": 700, "xlong": 4000, "pr1": 58, "pr2": 64, "pr3": 72, "pr4": 95, "i1": 22, "i2": 38, "i3": 52, "orbs": 47, "rep0": 85, "rep1": 85, "rep2": 85, "rep4": 85, "rep5": 85, "wand": 56, "boom": 42, "boom2": 70, "beben": 47, "gb1": 47, "gb2": 53, "schild": 44, "mega1": 46, "mega2": 52, "rs1": 43, "rs2": 50, "rs3": 58, "armed2": 130}.get(p[3], 90) if p.size() > 3 else 90):
 				get_viewport().get_texture().get_image().save_png(p[0])
 				if p.size() > 3 and p[3] == "long":
 					print(_perf_text())
@@ -12999,6 +13100,15 @@ func _fin_update(dt: float) -> void:
 				_comic_start("win" if fin.win else "lose", fin.who)
 	elif fin.phase == 5:
 		fin.pt = float(fin.pt) + dt
+		if OS.get_environment("PARTYT") != "":
+			# nur zum Testen: mehrere Bilder der Feier (Zeiten mit Komma), Pfad SHOTPATH + _n.png
+			var ts = OS.get_environment("PARTYT").split(",")
+			var k = int(fin.get("pk", 0))
+			if k < ts.size() and fin.pt >= float(ts[k]):
+				get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH").replace(".png", "_%d.png" % k))
+				fin.pk = k + 1
+				if k + 1 >= ts.size():
+					get_tree().quit()
 		if fin.pt >= PARTY_T or fin.get("skip", false):
 			fin.phase = 1
 			_party_end()
