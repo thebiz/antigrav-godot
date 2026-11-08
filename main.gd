@@ -86,10 +86,7 @@ var t_state = 0.0
 var race_t = 0.0
 var steer_btn = 0
 var btn_t = 0.0
-var rel_t = 9.0      # Zeit seit dem Loslassen
-var rel_v = 0.0      # Lenkung beim Loslassen (klingt über die Loslass-Kurve ab)
 var last_steer = 0.0
-var st_hist = []     # gedrückte Seite mit Zeit, für die Eingabe-Verzögerung
 var touches = {}
 var hud = {}
 var cam_psi = 0.0
@@ -111,7 +108,6 @@ func _ready() -> void:
 	AudioServer.playback_speed_scale = 1.0
 	_load_cfg()
 	_fx_load()
-	_curves_load()
 	if OS.get_cmdline_user_args().has("--noir"):
 		cfg.look = 1
 	if OS.get_cmdline_user_args().has("--jungle"):
@@ -718,18 +714,14 @@ const FXS = {
 		["len", "Length", 0.2, 6.0, 1.0], ["boost", "Extra with boost", 0.0, 8.0, 1.0]],
 	"pillar": [["speed", "Ring speed", 0.0, 6.0, 1.0], ["size", "Ring size", 0.3, 5.0, 1.0], ["glow", "Ring glow", 0.0, 10.0, 1.0], ["squash", "Rubber squash", 0.0, 6.0, 1.0],
 		["soft", "Soft bounce", 0.0, 2.0, 1.0], ["beam", "Pillar light", 0.0, 10.0, 1.0], ["hitw", "Hit width", 0.2, 1.0, 0.5]],
-	"ship": [["height", "Hover height", 0.2, 8.0, 1.0], ["bob", "Hover bob", 0.0, 10.0, 1.0], ["bank", "Lean in curves", 0.0, 6.0, 1.0], ["pitch", "Nose pitch", 0.0, 8.0, 1.0],
-		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0], ["steer", "Steering lag", 0.2, 8.0, 1.0],
-		["steerk", "Steering strength", 0.3, 3.0, 1.0], ["grip", "Grip", 0.2, 4.0, 1.0], ["drift", "Drift", 0.0, 4.0, 0.0],
+	"ship": [["height", "Hover height", 0.2, 8.0, 1.0], ["bob", "Hover bob", 0.0, 10.0, 1.0], ["pitch", "Nose pitch", 0.0, 8.0, 1.0],
+		["wobble", "Spring wobble", 0.0, 8.0, 0.0], ["stiff", "Spring stiffness", 0.2, 5.0, 1.0],
 		["nav", "Nav lights", 0.0, 4.0, 1.0], ["navb", "Nav blink speed", 0.2, 4.0, 1.0], ["trim", "Nose trim (down +)", -1.0, 1.0, 0.0],
 		["weight", "Tassel weight", 0.1, 3.0, 1.0], ["swing", "Tassel swing", 0.1, 3.0, 1.0], ["wind", "Tassel wind (driving)", 0.0, 3.0, 1.0],
-		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0],
-		["center", "Auto-center nose", 0.0, 3.0, 1.0], ["spdst", "Softer steering at speed", 0.0, 2.0, 0.25]],
-	"steer": [["ptime", "Press: ramp time", 0.05, 2.0, 0.56], ["rtime", "Release: fade time", 0.0, 1.5, 0.12], ["delay", "Input delay", 0.0, 0.3, 0.0],
-		["swrange", "Swipe: full-lock distance", 0.05, 0.4, 0.16], ["velk", "Swipe: speed boost", 0.0, 1.0, 0.3], ["hold", "Swipe: lift hold", 0.0, 0.4, 0.15], ["dtap", "Double-tap window", 0.2, 0.6, 0.35],
-		["revmode", "Swipe: reverse = counter-steer (0 off / 1 on)", 0.0, 1.0, 1.0], ["revbuf", "Swipe: reverse buffer", 0.0, 0.04, 0.008], ["velmin", "Swipe: speed boost threshold", 0.0, 0.9, 0.35],
-		["psens", "Pointer: sensitivity", 0.5, 8.0, 3.0], ["paccel", "Pointer: acceleration", 0.0, 4.0, 1.0], ["vib", "Lanes: vibration (0 off / 1 on)", 0.0, 1.0, 1.0], ["ltime", "Lane tap: full change time (outer to outer)", 0.1, 1.2, 0.35], ["lhold", "Lane tap: hold time for the next lane", 0.1, 1.0, 0.25], ["lbeep", "Lanes: change beep volume (0 = off)", 0.0, 2.0, 1.0],
-		["glide", "Glide: follow time", 0.05, 1.0, 0.25], ["gwidth", "Glide: reach to edge", 0.3, 1.0, 0.85], ["gpull", "Glide: curve pull", 0.0, 2.0, 0.5]],
+		["breeze", "Breeze (also standing)", 0.0, 3.0, 1.0]],
+	# Lenkung – nur diese vier Werte (eingestellt wird auf der Teststrecke am Handy)
+	"steer": [["ramp", "Reaction: time to full steering", 0.1, 1.5, 0.56], ["power", "Steering strength", 0.4, 2.0, 1.0],
+		["assist", "Steering assist to pads", 0.0, 1.0, 0.3], ["bank", "Lean in curves", 0.0, 3.0, 1.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
 		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["skyl", "Skyline", 0.0, 5.0, 1.0],
@@ -744,7 +736,7 @@ const FXS = {
 		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
 		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
 }
-const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["lock", "Lock"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["steer", "Steering"], ["env", "World"], ["city", "City"], ["jungle", "Jungle"], ["sound", "Sound"]]
+const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["lock", "Lock"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["jungle", "Jungle"], ["sound", "Sound"]]
 var fx = {}
 
 
@@ -3853,13 +3845,6 @@ func _hud() -> void:
 	cl.add_child(gac)
 	gac.draw.connect(func(): _ga_draw(gac))
 	hud.ga = gac
-	# Spur-Anzeige: drei Rauten über dem Waffenrad, die aktuelle leuchtet, blitzt beim Einrasten
-	var lni = Control.new()
-	lni.set_anchors_preset(Control.PRESET_FULL_RECT)
-	lni.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	cl.add_child(lni)
-	lni.draw.connect(func(): _lane_draw(lni))
-	hud.lanei = lni
 	# Waffenknopf: runder Knopf, geladen = orange mit drehendem, pulsierendem Ring
 	var ring = Control.new()
 	ring.anchor_left = 0.5
@@ -4566,20 +4551,6 @@ func _menu() -> void:
 		_save_cfg()
 		bhd.text = "HUD style: " + HN[int(cfg.hud)])
 	sp.add_child(bhd)
-	# Knopf mit kurzem Namen, Erklärung darunter (bricht um, kann nie breiter als der Bildschirm werden)
-	var CH = ["Tap left or right to steer", "Swipe to steer, double-tap to fire", "Swipe to shift, returns to the middle", "Move your thumb like a mouse", "Swipe to pick left, middle or right lane", "Tap left / right: one lane over · tap middle: fire"]
-	var bct = _btn("Steering: " + CTRL_N[clampi(int(cfg.get("ctrl", 1)), 0, 5)])
-	bct.add_theme_font_size_override("font_size", 30)
-	var cth = _lbl(CH[clampi(int(cfg.get("ctrl", 1)), 0, 5)], 22)
-	cth.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	cth.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	cth.modulate = Color(1, 1, 1, 0.65)
-	bct.pressed.connect(func():
-		_set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 6)
-		bct.text = "Steering: " + CTRL_N[int(cfg.ctrl)]
-		cth.text = CH[int(cfg.ctrl)])
-	sp.add_child(bct)
-	sp.add_child(cth)
 	var blv = _btn("Live tuning from PC: " + ("On" if int(cfg.live) == 1 else "Off"))
 	blv.add_theme_font_size_override("font_size", 30)
 	blv.pressed.connect(func():
@@ -4763,8 +4734,6 @@ func _start() -> void:
 		ships[i].sk0 = ships[i].sk
 	state = "intro"
 	t_state = 0.0
-	ptr_lat = 0.0
-	lane_cur = 0
 	ui.root.visible = false
 	hud.layer.visible = true
 	if int(cfg.get("comic", 1)) == 1 and not free_ride and rpf.is_empty() and (shot_s in ["", "?"] or shot_s.contains("comic")):
@@ -4938,15 +4907,11 @@ func _input(ev: InputEvent) -> void:
 			if not stt.is_empty() and _stt_hit(ev.position):
 				return
 			touches[ev.index] = ev.position.x
-			_sw_down(ev.index, ev.position)
 		else:
-			if touches.has(ev.index):
-				_sw_up(ev.index, ev.position)
 			touches.erase(ev.index)
 	elif ev is InputEventScreenDrag:
 		if touches.has(ev.index):
 			touches[ev.index] = ev.position.x
-			_sw_drag(ev.index, ev.position, ev.velocity)
 	elif ev is InputEventKey and ev.pressed and ev.keycode == KEY_SPACE:
 		fire_req = true
 
@@ -6643,16 +6608,6 @@ func _show_help(on: bool) -> void:
 	vb.add_child(bb)
 
 
-# Welche Regler in welchem Lenkmodus gebraucht werden (0 Tippen, 1 Wischen, 2 Gleiten, 3 Touchpad, 4 Spuren);
-# nicht genannte gelten immer. Die Live-Seite und die Einstellleiste zeigen nur die passenden.
-const CTRL_N = ["Tap", "Swipe", "Glide", "Touchpad", "Lanes", "Lane tap"]
-const FX_MODES = {
-	"steer.ptime": [0], "steer.delay": [0], "steer.rtime": [0, 1],
-	"steer.swrange": [1, 2], "steer.velk": [1], "steer.velmin": [1], "steer.revmode": [1], "steer.revbuf": [1], "steer.hold": [1, 2],
-	"steer.glide": [2, 3, 4], "steer.gwidth": [2, 3], "steer.gpull": [2, 3],
-	"steer.psens": [3, 4], "steer.paccel": [3, 4], "steer.vib": [4, 5], "steer.ltime": [5], "steer.lhold": [5], "steer.lbeep": [4, 5], "steer.dtap": [1, 2, 3, 4],
-	"ship.steer": [0, 1], "ship.steerk": [0, 1], "ship.grip": [0, 1], "ship.drift": [0, 1], "ship.center": [0, 1], "ship.spdst": [0, 1]}
-const CTRL_CURVES = [["press", "release"], ["swipe", "swvel", "release"], ["swipe"], [], [], []]
 # Fahrbahn in drei gleich breite Drittel geteilt (bis knapp an die Leuchtkante); jede Spur liegt mittig in ihrem Drittel
 const LANE_W = (2.4 - 0.1) * 2.0 / 3.0   # ≈ 1,53: Abstand der drei Spuren (links −1, Mitte 0, rechts 1)
 const PAD_HW = LANE_W * 0.5 - 0.03       # Boost- und Waffenfelder füllen ihr Drittel ganz aus
@@ -6843,83 +6798,6 @@ const FX_INFO = {
 	"sound.sshape": "Klangfarbe der Synthesizer-Töne (weich bis kantig).",
 	"sound.sweep": "Aufsteigender Ton beim GO."
 }
-# Lenk-Voreinstellungen zum Vergleichen: [Name, Anlaufzeit, Ausklingzeit, Steering lag, Steering strength, Grip, Drück-Kurve]
-const STEER_PRE = [
-	["Ruhig", 0.9, 0.2, 1.8, 0.85, 0.9, [[0.0, 0.3, 0.0, 0.0, 0.35, 0.0], [1.0, 1.0, -0.35, -0.2, 0.0, 0.0]]],
-	["Mittel", 0.56, 0.12, 1.0, 1.0, 1.0, [[0.0, 0.55, 0.0, 0.0, 0.4, 0.0], [1.0, 1.0, -0.3, -0.25, 0.0, 0.0]]],
-	["Scharf", 0.25, 0.05, 0.45, 1.3, 1.3, [[0.0, 0.8, 0.0, 0.0, 0.3, 0.12], [1.0, 1.0, -0.3, 0.0, 0.0, 0.0]]]]
-
-
-# ================================================================ Lenkkurven (Bézier, am PC einstellbar)
-# Jede Kurve: Ankerpunkte [x, y, Griff-ein dx, dy, Griff-aus dx, dy] von x = 0 bis 1.
-# press: x = Haltedauer / Anlaufzeit → Lenkkraft · release: x = Zeit seit Loslassen / Ausklingzeit → Rest der Lenkung
-const CURVE_PATH = "user://curves.json"
-const CURVE_DEF = {
-	"press": [[0.0, 0.55, 0.0, 0.0, 0.4, 0.0], [1.0, 1.0, -0.3, -0.25, 0.0, 0.0]],
-	"release": [[0.0, 1.0, 0.0, 0.0, 0.35, 0.0], [1.0, 0.0, -0.35, 0.0, 0.0, 0.0]],
-	"swipe": [[0.0, 0.0, 0.0, 0.0, 0.35, 0.12], [1.0, 1.0, -0.35, -0.05, 0.0, 0.0]],
-	"swvel": [[0.0, 0.0, 0.0, 0.0, 0.4, 0.0], [1.0, 1.0, -0.3, -0.3, 0.0, 0.0]]}
-var curves = {}
-var curve_lut = {}
-
-
-func _curves_load() -> void:
-	curves = CURVE_DEF.duplicate(true)
-	if FileAccess.file_exists(CURVE_PATH):
-		var d = JSON.parse_string(FileAccess.get_file_as_string(CURVE_PATH))
-		if d is Dictionary:
-			for k in ["press", "release", "swipe", "swvel"]:
-				if d.get(k) is Array and (d[k] as Array).size() >= 2:
-					curves[k] = d[k]
-	for k in curves:
-		curve_lut[k] = _curve_bake(curves[k])
-
-
-func _curves_save() -> void:
-	var f = FileAccess.open(CURVE_PATH, FileAccess.WRITE)
-	if f != null:
-		f.store_string(JSON.stringify(curves))
-
-
-# Bézier-Pfad in eine Tabelle mit 129 Werten umrechnen (x muss nach rechts laufen)
-func _curve_bake(pts: Array) -> PackedFloat32Array:
-	var xs = PackedFloat32Array()
-	var ys = PackedFloat32Array()
-	for i in range(pts.size() - 1):
-		var a: Array = pts[i]
-		var b: Array = pts[i + 1]
-		var p0 = Vector2(a[0], a[1])
-		var p1 = p0 + Vector2(a[4], a[5])
-		var p3 = Vector2(b[0], b[1])
-		var p2 = p3 + Vector2(b[2], b[3])
-		for j in range(33):
-			var t = j / 32.0
-			var u = 1.0 - t
-			var q = p0 * u * u * u + p1 * 3.0 * u * u * t + p2 * 3.0 * u * t * t + p3 * t * t * t
-			xs.append(maxf(q.x, xs[xs.size() - 1] if xs.size() > 0 else 0.0))
-			ys.append(clampf(q.y, 0.0, 1.0))
-	var lut = PackedFloat32Array()
-	lut.resize(129)
-	var k = 0
-	for i in range(129):
-		var x = i / 128.0
-		while k < xs.size() - 2 and xs[k + 1] < x:
-			k += 1
-		var dx = xs[k + 1] - xs[k]
-		var f = clampf((x - xs[k]) / dx, 0.0, 1.0) if dx > 1e-6 else 1.0
-		lut[i] = lerpf(ys[k], ys[k + 1], f)
-	return lut
-
-
-func _curve_at(k: String, x: float) -> float:
-	var lut: PackedFloat32Array = curve_lut.get(k, PackedFloat32Array())
-	if lut.is_empty():
-		return 1.0
-	var f = clampf(x, 0.0, 1.0) * 128.0
-	var i = mini(int(f), 127)
-	return lerpf(lut[i], lut[i + 1], f - i)
-
-
 # ================================================================ Live-Regler vom PC (gleiches WLAN)
 # Das Spiel öffnet einen kleinen Webserver (Port 8080). Im PC-Browser erscheinen alle FX-Lab-Regler;
 # jede Änderung wirkt sofort im laufenden Rennen und wird auf dem Handy gespeichert.
@@ -7035,11 +6913,7 @@ func _live_ws_poll() -> void:
 	if live_ws.is_empty():
 		return
 	var g: Dictionary = ships[0] if not ships.is_empty() else {}
-	var SD: Dictionary = fx.steer
-	var swc = int(cfg.get("ctrl", 1)) >= 1
-	var msg = JSON.stringify({"ver": fx_ver, "b": steer_btn, "c": 1 if swc else 0, "sx": float(sw.m) if swc and sw.idx >= 0 else -1.0, "vx": float(sw.vm) if swc and sw.idx >= 0 else -1.0,
-		"px": clampf(btn_t / maxf(0.05, float(SD.ptime)), 0.0, 1.0) if steer_btn != 0 else -1.0,
-		"rx": clampf(rel_t / maxf(0.001, float(SD.rtime)), 0.0, 1.0) if steer_btn == 0 and rel_t < float(SD.rtime) else -1.0,
+	var msg = JSON.stringify({"ver": fx_ver, "b": steer_btn, "c": 0, "sx": -1.0, "vx": -1.0, "px": -1.0, "rx": -1.0,
 		"s": last_steer, "u": float(g.get("u", 0.0)), "psi": float(g.get("psi", 0.0)), "t": Time.get_ticks_msec()})
 	for i in range(live_ws.size() - 1, -1, -1):
 		var ws: WebSocketPeer = live_ws[i]
@@ -7068,9 +6942,9 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 		for t in FXT:
 			var its = []
 			for it in FXS[t[0]]:
-				its.append({"k": it[0], "n": it[1], "lo": it[2], "hi": it[3], "d": it[4], "v": float(fx[t[0]][it[0]]), "i": FX_INFO.get(t[0] + "." + it[0], ""), "m": FX_MODES.get(t[0] + "." + it[0], [])})
+				its.append({"k": it[0], "n": it[1], "lo": it[2], "hi": it[3], "d": it[4], "v": float(fx[t[0]][it[0]]), "i": FX_INFO.get(t[0] + "." + it[0], ""), "m": []})
 			tabs.append({"g": t[0], "n": t[1], "it": its})
-		_live_send(c, "application/json", JSON.stringify({"ver": fx_ver, "tabs": tabs, "ctrl": int(cfg.get("ctrl", 1)), "cn": CTRL_N, "cc": CTRL_CURVES}))
+		_live_send(c, "application/json", JSON.stringify({"ver": fx_ver, "tabs": tabs, "ctrl": 0, "cn": [], "cc": []}))
 	elif path.begins_with("/tab?") or path.begins_with("/fire?") or path.begins_with("/drive"):
 		var q2 = {}
 		var qi = path.find("?")
@@ -7090,33 +6964,8 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 				free_ride = true
 				_start()
 		_live_send(c, "text/plain", "ok")
-	elif path.begins_with("/mode?"):
-		_set_ctrl(clampi(int(path.get_slice("=", 1)), 0, 5))
-		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/ping"):
 		_live_send(c, "text/plain", "ok")
-	elif path.begins_with("/sst"):
-		# wo du gerade auf den Lenkkurven bist (für die Live-Linie im Editor)
-		var SD: Dictionary = fx.steer
-		_live_send(c, "application/json", JSON.stringify({"b": steer_btn, "px": clampf(btn_t / maxf(0.05, float(SD.ptime)), 0.0, 1.0) if steer_btn != 0 else -1.0,
-			"rx": clampf(rel_t / maxf(0.001, float(SD.rtime)), 0.0, 1.0) if steer_btn == 0 and rel_t < float(SD.rtime) else -1.0, "s": last_steer}))
-	elif path.begins_with("/preset?"):
-		_steer_preset(int(path.get_slice("=", 1)))
-		for k in ["steer", "steerk", "grip"]:
-			_live_sync_lab("ship", k)
-		_live_send(c, "text/plain", "ok")
-	elif path.begins_with("/curve"):
-		var qi2 = path.find("?d=")
-		if qi2 >= 0:
-			var d = JSON.parse_string(path.substr(qi2 + 3).uri_decode())
-			if d is Dictionary:
-				for k in ["press", "release", "swipe", "swvel"]:
-					if d.get(k) is Array and (d[k] as Array).size() >= 2:
-						curves[k] = d[k]
-						curve_lut[k] = _curve_bake(curves[k])
-				_curves_save()
-				fx_ver += 1
-		_live_send(c, "application/json", JSON.stringify({"cur": curves, "def": CURVE_DEF, "ctrl": int(cfg.get("ctrl", 1))}))
 	elif path.begins_with("/set?"):
 		var q = {}
 		for kv in path.substr(5).split("&"):
@@ -7342,7 +7191,7 @@ function wsConnect(){try{const ws=new WebSocket('ws://'+location.hostname+':8081
  ws.onclose=()=>setTimeout(wsConnect,1000);ws.onerror=()=>{};}catch(e){setTimeout(wsConnect,2000);}}
 wsConnect();
 let CTRL=1,CN=[],CC=[];
-function modeBar(){let mb=document.getElementById('mb');if(!mb){mb=document.createElement('div');mb.id='mb';mb.style.cssText='display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0';document.querySelector('header').insertBefore(mb,document.getElementById('st'));}
+function modeBar(){let mb=document.getElementById('mb');if(!CN.length){if(mb)mb.remove();return;}if(!mb){mb=document.createElement('div');mb.id='mb';mb.style.cssText='display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0';document.querySelector('header').insertBefore(mb,document.getElementById('st'));}
  mb.innerHTML='<span style="color:#9fb0cc">Lenkmodus:</span>';CN.forEach((n,i)=>{const b=document.createElement('button');b.textContent=n;b.style.cssText='background:'+(i==CTRL?'#ef6a2e':'#151a2a')+';color:#fff;border:1px solid #2a3350;border-radius:8px;padding:5px 10px;cursor:pointer';b.onclick=()=>fetch('/mode?n='+i).then(()=>reloadAll(n));mb.append(b);});}
 fetch('/fx').then(r=>r.json()).then(dd=>{const d=dd.tabs;VER=dd.ver;D=d;CTRL=dd.ctrl;CN=dd.cn;CC=dd.cc;modeBar();const t=document.getElementById('tabs');
  d.forEach((T,i)=>{const b=document.createElement('button');b.textContent=T.n;b.onclick=()=>show(i);t.append(b);});
@@ -9028,25 +8877,23 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.roll = 0.0
 		return
 	var z: float = s.z
-	s.u += (inp - s.u) * (1.0 - exp(-dt / (0.03 * float(fx.ship.steer) if is_p else 0.08)))
+	# Fahrphysik wie im HTML-Spiel: die Nase lenkt, die Flugrichtung folgt mit begrenzter Haftung
+	s.u += (inp - s.u) * (1.0 - exp(-dt / (0.03 if is_p else 0.08)))
 	var turn: float = T.kap(z) * s.spd
-	var SH: Dictionary = fx.ship
-	var yk = YAW_P * float(SH.steerk) if is_p else YAW_AI
+	var yk = YAW_P * float(fx.steer.power) if is_p else YAW_AI
 	if is_p:
-		# bei hohem Tempo sanfter lenken, sonst schießt das Schiff zur Seite
-		# geglättetes Tempo: beim Boost-Feld wird die Lenkung fließend weicher, nie schlagartig
+		# bei hohem Tempo etwas sanfter (fest eingebaut, war dein Wunsch)
 		s.sps = lerpf(float(s.get("sps", s.spd)), s.spd, 1.0 - exp(-dt / 0.5))
-		yk /= 1.0 + float(SH.get("spdst", 0.25)) * maxf(0.0, float(s.sps) / maxf(1.0, base_spd) - 0.8)
+		yk /= 1.0 + 0.25 * maxf(0.0, float(s.sps) / maxf(1.0, base_spd) - 0.8)
 	s.psi = clampf(s.psi + (s.u * yk + turn) * dt, -0.9, 0.9)
 	if is_p and not s.air:
-		# Auto-center: ohne Lenken dreht sich die Nase wieder in Fahrtrichtung
-		var ce = float(SH.get("center", 1.0)) * 4.0 * (1.0 - clampf(absf(s.u) * 1.6, 0.0, 1.0))
+		# loslassen: die Nase stellt sich wieder gerade (fest eingebaut, war dein Wunsch)
+		var ce = 4.0 * (1.0 - clampf(absf(s.u) * 1.6, 0.0, 1.0))
 		s.psi -= s.psi * (1.0 - exp(-dt * ce))
 	var grip = 0.8 if s.air else (9.5 if is_p else 7.0)
-	if is_p and not s.air:
-		# Grip: wie fest das Schiff in der Spur bleibt; Drift: beim Einlenken rutscht es seitlich weiter (Nase zeigt in die Kurve)
-		grip *= float(SH.grip) / (1.0 + float(SH.drift) * absf(s.u) * 1.5)
 	s.vpsi = clampf(s.vpsi + ((s.psi - s.vpsi) * grip + turn) * dt, -0.9, 0.9)
+	if is_p and not s.air and racing and not s.out:
+		_assist(s, dt)
 	var ap = is_p and (s.auto > 0.0 or state == "done" or state == "replay") and not s.out
 	if ap:
 		# Autopilot wie im alten Spiel: ruhig auf die Mittellinie gleiten, dann schnurgerade, nichts bremst ihn
@@ -9056,44 +8903,6 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.15))
 		s.slow = 1.0
 		s.slowT = 0.0
-	if is_p and not ap and not s.out and int(cfg.get("ctrl", 1)) >= 2 and (racing or state == "count"):
-		# Gleit-Modus: das Schiff fährt die Kurven selbst und gleitet zur Spur, die der Daumen vorgibt;
-		# loslassen = zurück zur Mitte. Kurven und Boost ziehen etwas nach außen, die Ränder federn ab.
-		var SG: Dictionary = fx.steer
-		var lim = T.TW - 0.35
-		var pull = clampf(T.kap(z) * maxf(1.0, s.spd) * 6.0, -1.0, 1.0) * float(SG.gpull) * lim * 0.25   # nur Kurven, Boost zieht nicht extra
-		var tgt = clampf(glide_in * float(SG.gwidth) * lim + pull, -lim, lim)
-		if int(cfg.get("ctrl", 1)) == 4:
-			tgt = lane_cur * LANE_W
-		if int(cfg.get("ctrl", 1)) == 5:
-			# Spur antippen: fester Zeitplan – ganz außen nach ganz außen dauert „ltime“ Sekunden, egal wie schnell du fährst.
-			# Kurz anfahren, gleichmäßig rüber, weich einrasten; die Nase zeigt nur leicht in die Richtung.
-			tgt = lane_cur * LANE_W
-			var lt = maxf(0.08, float(SG.get("ltime", 0.35)))
-			# schneller als Reisetempo (Boost-Feld): Wechsel entsprechend flotter, damit er auf der Strecke gleich kurz wirkt
-			# (sonst braucht er bei 1,6-fachem Tempo 60 % mehr Strecke – das fühlt sich verzögert an)
-			lt /= 1.0 + 0.6 * clampf(float(s.boost), 0.0, 1.5)
-			var vmax = 2.0 * LANE_W / lt * 1.25
-			var amax = vmax / (0.18 * lt)
-			var d = tgt - s.lat
-			var des = clampf(d * vmax / (LANE_W * 0.35), -vmax, vmax)
-			var lv = float(s.get("lv", 0.0))
-			lv += clampf(des - lv, -amax * dt, amax * dt)
-			if absf(d) < 0.004 and absf(lv) < 0.05:
-				lv = 0.0
-			s.lv = lv
-			var spd0 = maxf(0.01, s.spd)
-			s.vpsi = asin(clampf(lv / spd0, -0.3, 0.3))   # Nase: höchstens ~17° in die Wechselrichtung
-			s.lat += (lv - s.spd * sin(s.vpsi)) * dt      # den Rest schiebt das Schwebefeld direkt seitlich
-			s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.08))
-			s.u = clampf(lv / vmax * 1.6, -1.0, 1.0)
-		else:
-			var tau = maxf(0.05, float(SG.glide))   # beim Boost genauso flink wie sonst
-			var dl = (tgt - s.lat) * (1.0 - exp(-dt / tau))
-			var want = atan2(dl / maxf(dt, 1e-4), maxf(1.0, s.spd))
-			s.vpsi = clampf(want, -0.6, 0.6)
-			s.psi += (s.vpsi - s.psi) * (1.0 - exp(-dt / 0.12))
-			s.u = clampf((tgt - s.lat) * 1.2, -1.0, 1.0)
 	s.slow += (1.0 - s.slow) * (1.0 - exp(-dt / 1.4))
 	s.boost *= exp(-dt / 1.4)
 	if s.out:
@@ -9749,72 +9558,18 @@ func _process(delta: float) -> void:
 		hud.mid.text = ""
 	if racing or state == "done":
 		race_t += dt
-	# Lenkung mit Anlaufkurve
-	var swm = int(cfg.get("ctrl", 1)) >= 1 and (state == "race" or state == "count")
+	# Lenkung wie im HTML-Spiel: linke oder rechte Bildschirmhälfte halten. Erst gleich gut die Hälfte Kraft,
+	# dann steigt sie in „Reaktion“ Sekunden auf voll (Kurve wie damals: 0,55 + 0,45 · x^2,3)
 	var b = _steer_input()
-	if swm and not (Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_RIGHT)):
-		b = 0
-	# Eingabe-Verzögerung (FX Lab „Steering“): es zählt, was vor „delay“ Sekunden gedrückt war
-	var now = Time.get_ticks_msec() / 1000.0
-	var SD: Dictionary = fx.steer
-	var dly = float(SD.delay)
-	st_hist.append([now, b])
-	while st_hist.size() > 2 and float(st_hist[1][0]) <= now - dly:
-		st_hist.pop_front()
-	if dly > 0.001:
-		b = int(st_hist[0][1]) if float(st_hist[0][0]) <= now - dly else 0
 	if b != steer_btn:
-		if steer_btn != 0 and b == 0:
-			rel_v = last_steer
-			rel_t = 0.0
 		steer_btn = b
 		btn_t = 0.0
 	btn_t += dt
 	var steer = 0.0
-	# Lenkkurven (am PC auf der Live-Seite einstellbar): Drücken = Kraft über die Haltedauer, Loslassen = Nachwirken
 	if b != 0:
-		steer = b * _curve_at("press", btn_t / maxf(0.05, float(SD.ptime)))
-	else:
-		rel_t += dt
-		var rt = float(SD.rtime)
-		if rt > 0.001 and rel_t < rt:
-			steer = rel_v * _curve_at("release", rel_t / rt)
-	if swm and b == 0:
-		var sws = _sw_steer(dt)
-		if sws != null:
-			steer = sws
-			steer_btn = int(signf(steer)) if absf(steer) > 0.01 else 0
-	if int(cfg.get("ctrl", 1)) >= 3 and state != "done":
-		steer = ptr_lat
-		steer_btn = 0
-		if int(cfg.get("ctrl", 1)) == 5:
-			if not lt_hold.is_empty():
-				if not touches.has(int(lt_hold.i)):
-					lt_hold = {}
-				else:
-					lt_hold.t = float(lt_hold.t) + dt
-					if float(lt_hold.t) >= maxf(0.05, float(fx.steer.get("lhold", 0.25))):
-						lt_hold.t = 0.0
-						_lane_step(int(lt_hold.dir))
-			steer = float(lane_cur)
-			lane_fl = maxf(0.0, lane_fl - dt * 3.0)
-			if hud.has("lanei"):
-				(hud.lanei as Control).queue_redraw()
-		if int(cfg.get("ctrl", 1)) == 4:
-			# Spur-Modus: der unsichtbare Zeiger wählt die nächste der drei Spuren (mit etwas Spiel gegen Hin- und Herspringen)
-			var want = clampi(int(roundf(ptr_lat)), -1, 1)
-			if want != lane_cur and absf(ptr_lat - lane_cur) > 0.62:
-				lane_cur = want
-				lane_fl = 1.0
-				if float(fx.steer.vib) > 0.5:
-					Input.vibrate_handheld(22)
-				_lane_beep()
-			steer = float(lane_cur)
-			lane_fl = maxf(0.0, lane_fl - dt * 3.0)
-			if hud.has("lanei"):
-				(hud.lanei as Control).queue_redraw()
+		var x = minf(1.0, btn_t / maxf(0.05, float(fx.steer.ramp)))
+		steer = b * (0.55 + 0.45 * pow(x, 2.3))
 	last_steer = steer
-	glide_in = clampf(steer, -1.0, 1.0)
 	if T.S:
 		_stt_update(dt)
 	_steer_glow(dt, steer)
@@ -10639,29 +10394,6 @@ func _shot() -> void:
 				t_state = 0.0
 				ships[2].fin = 1.0
 				_fin_flow(3)
-			if shot_s.contains("swtest") and state == "race":
-				var evs = {45: ["t", 0, 270.0, true], 47: ["d", 0, 300.0], 49: ["d", 0, 330.0], 52: ["d", 0, 322.0], 53: ["d", 0, 316.0], 60: ["dt"]}
-				if shot_n == 60:
-					for q in [[true, 100.0], [false, 100.0], [true, 102.0], [false, 102.0]]:
-						var te = InputEventScreenTouch.new()
-						te.index = 1
-						te.pressed = q[0]
-						te.position = Vector2(q[1], 900)
-						_input(te)
-				elif evs.has(shot_n):
-					var e: Array = evs[shot_n]
-					var ie
-					if e[0] == "t":
-						ie = InputEventScreenTouch.new()
-						ie.pressed = e[3]
-					else:
-						ie = InputEventScreenDrag.new()
-						ie.velocity = Vector2(900, 0)
-					ie.index = e[1]
-					ie.position = Vector2(e[2], 900)
-					Input.parse_input_event(ie)
-				if shot_n in [44, 46, 50, 55, 62, 66, 90, 120]:
-					print("SWT n=", shot_n, " ptr=", ptr_lat, " lat=", ships[0].lat, " z=", ships[0].z, " steer=", last_steer, " m=", sw.m, " idx=", sw.idx, " wpn=", ships[0].wpn, " fire=", fire_req)
 			if shot_s.contains("again"):
 				# Test: Rennen mit Effekten „beenden“, dann ohne Neuladen neu starten
 				if shot_n == 45:
@@ -10695,48 +10427,33 @@ func _shot() -> void:
 						_start()
 				if shot_n == 64:
 					print("AGAIN after kids=", get_child_count(), " fx=", fxs.size(), " mines=", mines.size(), " out2=", ships[2].out, " vis2=", (ships[2].node as Node3D).visible, " z=", ships[0].z, " en2=", ships[2].en, " state=", state, " race_t=", race_t)
-			if shot_s.contains("lanetap") and state == "race":
-				# Test: Spur antippen – rechts außen, dann ganz nach links; Zeit messen
-				if shot_n == 40:
-					cfg.ctrl = 5
+			if shot_s.contains("holdtest") and state == "race":
+				# Test: rechte Hälfte 0,6 s halten, dann loslassen; Lenkung, Querlage und Neigung mitschreiben
 				var W = get_viewport().get_visible_rect().size.x
-				var tap = func(x: float):
-					for pr in [true, false]:
-						var te = InputEventScreenTouch.new()
-						te.index = 0
-						te.pressed = pr
-						te.position = Vector2(x, 500)
-						_input(te)
-				if shot_n == 45:
-					tap.call(W * 0.9)
-					set_meta("lt0", race_t)
-				if shot_s.contains("lanehold"):
-					if shot_n == 60:
-						var te = InputEventScreenTouch.new()
-						te.index = 0
-						te.pressed = true
-						te.position = Vector2(W * 0.1, 500)
-						_input(te)
-						set_meta("lt0", race_t)
-					if shot_n == 80:
-						var te2 = InputEventScreenTouch.new()
-						te2.index = 0
-						te2.pressed = false
-						te2.position = Vector2(W * 0.1, 500)
-						_input(te2)
-						print("LT released")
-				elif shot_n == 75 or shot_n == 77:
-					if shot_s.contains("laneboost"):
-						ships[0].boost = 1.0
-					tap.call(W * 0.1)
-					if shot_n == 75:
-						set_meta("lt0", race_t)
-				if shot_n == 86:
-					tap.call(W * 0.5)
-					print("LT fire_req=", fire_req, " lane=", lane_cur)
-				if shot_n >= 45:
-					var tg = lane_cur * LANE_W
-					print("LT n=", shot_n, " t=", snappedf(race_t - float(get_meta("lt0")), 0.001), " lane=", lane_cur, " lat=", snappedf(ships[0].lat, 0.001), " psi=", snappedf(ships[0].psi, 0.01), " spd=", snappedf(ships[0].spd, 0.1))
+				if shot_n == 45 or shot_n == 57:
+					var te = InputEventScreenTouch.new()
+					te.index = 0
+					te.pressed = shot_n == 45
+					te.position = Vector2(W * 0.85, 700)
+					_input(te)
+				if shot_n >= 44 and shot_n <= 80:
+					print("HT n=", shot_n, " t=", snappedf(race_t, 0.01), " steer=", snappedf(last_steer, 0.01), " u=", snappedf(ships[0].u, 0.01), " psi=", snappedf(ships[0].psi, 0.01), " lat=", snappedf(ships[0].lat, 0.01), " roll=", snappedf(float(ships[0].get("roll", 0.0)), 0.01))
+			if shot_s.contains("assisttest") and state == "race":
+				# Test: knapp neben einem Boost-Feld anfliegen – trifft die Lenkhilfe es?
+				var g = ships[0]
+				if shot_n == 40:
+					fx.steer.assist = float(OS.get_environment("ASSIST"))
+					var k = int(ceil((g.z + 25.0) / 35.0))
+					while not _pad_ok(_bzp(k)):
+						k += 1
+					g.z = _bzp(k) - 22.0
+					g.lat = _bpx(k) + float(OS.get_environment("OFF"))
+					g.psi = 0.0
+					g.vpsi = 0.0
+					set_meta("ak", k)
+				if shot_n > 40 and shot_n < 75:
+					var k2 = int(get_meta("ak"))
+					print("AS n=", shot_n, " dz=", snappedf(_bzp(k2) - g.z, 0.1), " lat=", snappedf(g.lat, 0.01), " pad=", snappedf(_bpx(k2), 0.01), " boost=", snappedf(g.boost, 0.01), " padK=", g.padK, " k=", k2)
 			if shot_n == 50 and shot_s.contains("backtest"):
 				# Test: Android meldet Zurück doppelt (Taste + Systemmeldung) – Pause muss offen bleiben
 				var ke = InputEventKey.new()
@@ -10925,7 +10642,10 @@ func _pose_all(dt: float) -> void:
 			var acc = (s.spd - s.get("lspd", s.spd)) / maxf(dt, 1e-4)
 			s.lspd = s.spd
 			s.pacc = lerpf(s.get("pacc", 0.0), acc, 1.0 - exp(-dt / 0.2))
-			var tr = s.u * 0.32 * float(SX.bank)
+			# Kurvenneigung: halb nach dem Lenkeinschlag, halb nach der tatsächlichen Querbewegung –
+			# zieht das Schiff kräftig zur Seite, legt es sich deutlich hinein; fährt es gerade, richtet es sich auf
+			var vl = s.spd * sin(s.vpsi)
+			var tr = clampf(0.32 * float(fx.steer.bank) * (0.5 * s.u + 0.7 * clampf(vl / 5.0, -1.0, 1.0)), -0.6, 0.6)
 			var tp = clampf((s.pacc * 0.006 + s.boost * 0.035) * float(SX.pitch), -0.35, 0.35)
 			var nsub = maxi(1, int(ceil(dt * om / 0.25)))
 			var sdt = dt / nsub
@@ -11943,21 +11663,12 @@ func _stt_build() -> void:
 	vb.add_theme_constant_override("separation", 12)
 	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	psc.add_child(vb)
-	var bcm2 = _btn("")
-	bcm2.add_theme_font_size_override("font_size", 24)
-	stt.mbtn = bcm2
-	bcm2.add_theme_font_size_override("font_size", 30)
-	bcm2.clip_text = true
-	bcm2.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	bcm2.pressed.connect(func(): _set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 6))
-	vb.add_child(bcm2)
-	# kurze Erklärung zum Modus unter dem Knopf – bricht um, wird nie breiter als die Leiste
-	var mh = _lbl("", 22)
+	# nur noch eine Lenkung: linke / rechte Bildschirmhälfte halten
+	var mh = _lbl("Lenken: linke oder rechte Bildschirmhälfte halten", 24)
 	mh.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	mh.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	mh.modulate = Color(1, 1, 1, 0.65)
+	mh.modulate = Color(1, 1, 1, 0.8)
 	vb.add_child(mh)
-	stt.mhint = mh
 	var sr = HBoxContainer.new()
 	sr.add_theme_constant_override("separation", 10)
 	vb.add_child(sr)
@@ -12015,26 +11726,7 @@ func _stt_vals() -> void:
 	for e in stt.get("rows", []):
 		var r: Array = e[0]
 		var v = float(fx[r[0]][r[1]])
-		(e[1] as Label).text = ("%.2f s" % v) if r[1] in ["ptime", "glide"] else (("An" if v > 0.5 else "Aus") if r[1] == "vib" else (("Aus" if v < 0.01 else "%d %%" % int(round(v * 100.0))) if r[1] == "lbeep" else ("%.2f" % v)))
-
-
-func _steer_preset(i: int) -> void:
-	fx_ver += 1
-	var pr: Array = STEER_PRE[clampi(i, 0, STEER_PRE.size() - 1)]
-	fx.steer.ptime = pr[1]
-	fx.steer.rtime = pr[2]
-	fx.steer.delay = 0.0
-	fx.ship.steer = pr[3]
-	fx.ship.steerk = pr[4]
-	fx.ship.grip = pr[5]
-	curves.press = (pr[6] as Array).duplicate(true)
-	curves.release = (CURVE_DEF.release as Array).duplicate(true)
-	for k in curves:
-		curve_lut[k] = _curve_bake(curves[k])
-	_curves_save()
-	live_sv = 0.5
-	_stt_vals()
-	_toast("Steering: " + str(pr[0]))
+		(e[1] as Label).text = ("%.2f s" % v) if r[1] == "ramp" else ("Aus" if v < 0.01 else "%d %%" % int(round(v * 100.0)))
 
 
 func _stt_hit(p: Vector2) -> bool:
@@ -12142,17 +11834,10 @@ func _ga_frame(g: Dictionary, dt: float) -> void:
 	var k = get_viewport().get_visible_rect().size.x / GA_W
 	var f: Label = hud.fire
 	f.modulate.a = 0.0
-	if int(cfg.get("ctrl", 1)) >= 1:
-		# Wisch-Lenkung: nur der kleine FIRE-Kreis feuert, der Rest ist Lenkfläche
-		f.offset_left = -62.0 * k
-		f.offset_right = 62.0 * k
-		f.offset_top = -(GA_H - 1478.0) * k
-		f.offset_bottom = -(GA_H - 1590.0) * k
-	else:
-		f.offset_left = -150.0 * k
-		f.offset_right = 150.0 * k
-		f.offset_top = -(GA_H - 1250.0) * k
-		f.offset_bottom = -(GA_H - 1585.0) * k
+	f.offset_left = -150.0 * k
+	f.offset_right = 150.0 * k
+	f.offset_top = -(GA_H - 1250.0) * k
+	f.offset_bottom = -(GA_H - 1585.0) * k
 	# Roulette starten, wenn eine neue Waffe eingesammelt wurde
 	var w: String = g.wpn
 	if w != ga_last:
@@ -12305,152 +11990,6 @@ func _ga_draw(c: Control) -> void:
 	c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-# ---------------------------------------------------------------- Wisch-Lenkung (unsichtbarer Joystick) und Doppeltipp zum Feuern
-# Der erste Daumen auf dem Bildschirm lenkt: wo er aufsetzt, ist die Mitte; nach links/rechts schieben lenkt
-# (Stärke über die Kurve „Wischweg“, schnelles Wischen gibt Extra über „Wischtempo“). Schiebt man weiter als
-# den vollen Ausschlag, wandert die Mitte mit, damit der Rückweg sofort wirkt. Kurz abheben hält die Lenkung fest.
-# Zwei schnelle Tipper (ohne Wischen) – mit welchem Finger auch immer – feuern die Waffe.
-var lane_cur = 0      # Spur-Modus: aktuelle Spur −2 … 2
-var lane_fl = 0.0     # Aufleuchten beim Einrasten
-var ptr_lat = 0.0    # Touchpad-Modus: Spur −1 … 1, bleibt stehen, wenn man loslässt
-var glide_in = 0.0   # Gleit-Modus: gewünschte Spur −1 … 1 (aus Wisch-Lenkung)
-var sw = {"idx": -1, "ax": 0.0, "x": 0.0, "v": 0.0, "hold": 0.0, "keep": 0.0, "last": 0.0, "m": 0.0, "vm": 0.0}
-var tinfo = {}
-var tap_last = {"t": -9.0, "p": Vector2.ZERO}
-
-
-func _sw_w() -> float:
-	return maxf(1.0, get_viewport().get_visible_rect().size.x)
-
-
-func _sw_down(i: int, p: Vector2) -> void:
-	tinfo[i] = {"t": Time.get_ticks_msec() / 1000.0, "p": p, "mv": false}
-	if int(cfg.get("ctrl", 1)) < 1:
-		return
-	if int(cfg.get("ctrl", 1)) == 5:
-		# Spur antippen: linkes Drittel = eine Spur nach links, rechtes = eine nach rechts, Mitte = Feuer.
-		# Das Schiff bleibt auf seiner Spur, bis wieder getippt wird.
-		var W = _sw_w()
-		if p.x >= W / 3.0 and p.x <= W * 2.0 / 3.0:
-			if state == "race":
-				fire_req = true
-			return
-		var dir = -1 if p.x < W / 3.0 else 1
-		_lane_step(dir)
-		lt_hold = {"i": i, "dir": dir, "t": 0.0}   # drauf bleiben = nach der Haltezeit noch eine Spur weiter
-		return
-	if sw.idx < 0:
-		sw.idx = i
-		sw.x = p.x
-		sw.v = 0.0
-		# kurz abgehoben und wieder aufgesetzt: dort weiterlenken, wo man war
-		sw.ax = p.x - (sw.keep if sw.hold > 0.0 else 0.0)
-		sw.hold = 0.0
-		sw.ext = p.x
-		sw.dir = 0
-
-
-func _sw_drag(i: int, p: Vector2, vel: Vector2) -> void:
-	if tinfo.has(i) and p.distance_to(tinfo[i].p) > _sw_w() * 0.03:
-		tinfo[i].mv = true
-	if i != sw.idx or int(cfg.get("ctrl", 1)) == 5:
-		return
-	if int(cfg.get("ctrl", 1)) >= 3:
-		# wie ein Mauszeiger: nur die Bewegung zählt, Beschleunigung nur im Moment (keine Nachwirkung)
-		var W = _sw_w()
-		var vn = clampf(absf(vel.x) / (W * 2.0), 0.0, 1.0)
-		var gain = float(fx.steer.psens) * (1.0 + float(fx.steer.paccel) * vn * vn)
-		if int(cfg.get("ctrl", 1)) == 4:
-			gain *= 2.0   # Spuren: ein kurzer Wisch (ca. 1/6 Bildschirmbreite) reicht für eine Spur
-		ptr_lat = clampf(ptr_lat + (p.x - sw.x) / W * gain, -1.0, 1.0)
-		sw.x = p.x
-		return
-	sw.x = p.x
-	# Richtungswechsel erkennen: weiteste Stelle in Wischrichtung merken; zurück um mehr als den Puffer = Umkehr
-	var buf = float(fx.steer.revbuf) * _sw_w()
-	var dr = int(sw.get("dir", 0))
-	var ext = float(sw.get("ext", p.x))
-	if dr == 0:
-		if absf(p.x - ext) > buf:
-			sw.dir = int(signf(p.x - ext))
-			sw.ext = p.x
-	elif signf(p.x - ext) == dr:
-		sw.ext = p.x
-	elif absf(p.x - ext) > buf:
-		sw.dir = -dr
-		sw.ext = p.x
-		sw.v = 0.0
-		vel = Vector2.ZERO
-		if float(fx.steer.revmode) > 0.5 and int(cfg.get("ctrl", 1)) == 1:
-			# Mitte unter den Daumen (plus den Puffer, den er schon zurückgelegt hat): sanftes Gegenlenken ab sofort
-			sw.ax = p.x + dr * buf
-	sw.v = lerpf(float(sw.v), vel.x, 0.5)
-	var rng = float(fx.steer.swrange) * _sw_w()
-	var d = sw.x - sw.ax
-	if absf(d) > rng:
-		sw.ax = sw.x - signf(d) * rng
-
-
-func _sw_up(i: int, p: Vector2) -> void:
-	if int(lt_hold.get("i", -1)) == i:
-		lt_hold = {}
-	var now = Time.get_ticks_msec() / 1000.0
-	if tinfo.has(i):
-		var ti: Dictionary = tinfo[i]
-		if not ti.mv and now - float(ti.t) < 0.25 and state == "race" and int(cfg.get("ctrl", 1)) != 5:
-			if now - float(tap_last.t) < float(fx.steer.dtap) and p.distance_to(tap_last.p) < _sw_w() * 0.18:
-				fire_req = true
-				tap_last.t = -9.0
-			else:
-				tap_last.t = now
-				tap_last.p = p
-		tinfo.erase(i)
-	if i == sw.idx:
-		sw.idx = -1
-		sw.keep = sw.x - sw.ax
-		sw.hold = float(fx.steer.hold)
-		sw.v = 0.0
-		# liegt noch ein anderer Finger auf, übernimmt er das Lenken (ab seiner Position, ohne Sprung)
-		for k in touches:
-			if k != i:
-				sw.idx = k
-				sw.x = float(touches[k])
-				sw.ax = sw.x - sw.keep
-				sw.hold = 0.0
-				break
-
-
-# liefert die Lenkung (−1 … 1) oder null, wenn gerade nichts zu tun ist (dann greift die Loslass-Kurve)
-func _sw_steer(dt: float):
-	var SD: Dictionary = fx.steer
-	if sw.idx >= 0:
-		var rng = float(SD.swrange) * _sw_w()
-		var d = (sw.x - sw.ax) / maxf(1.0, rng)
-		var m = clampf(absf(d), 0.0, 1.0)
-		var base = _curve_at("swipe", m)
-		# Wischtempo: nur in Richtung des Ausschlags, klingt schnell ab
-		var vn = clampf(absf(float(sw.v)) / (_sw_w() * 2.5), 0.0, 1.0)
-		var extra = 0.0
-		var thr = float(SD.velmin)
-		if signf(float(sw.v)) == signf(d) and m > 0.02 and vn > thr:
-			extra = _curve_at("swvel", (vn - thr) / maxf(0.05, 1.0 - thr)) * float(SD.velk)
-		sw.v = float(sw.v) * exp(-dt / 0.08)
-		sw.m = m
-		sw.vm = vn
-		var st = signf(d) * clampf(base + extra, 0.0, 1.0)
-		sw.last = st
-		rel_t = 9.0
-		return st
-	sw.m = 0.0
-	if sw.hold > 0.0:
-		sw.hold -= dt
-		if sw.hold <= 0.0:
-			rel_v = float(sw.last)
-			rel_t = 0.0
-		return float(sw.last)
-	return null
-
-
 # ---------------------------------------------------------------- Fingerscrollen in Listen mit Knöpfen und Reglern
 # Senkrecht wischen = scrollen (auch wenn der Finger auf einem Knopf oder Regler startet; der Knopf löst dann nicht aus).
 # Regler bewegen sich nur bei einem klar waagrechten Zug. Kurzes Tippen = Knopf wie gewohnt.
@@ -12532,55 +12071,17 @@ func _scr_fling(sc: ScrollContainer, v: float) -> void:
 
 
 
-func _set_ctrl(m: int) -> void:
-	cfg.ctrl = m
-	_save_cfg()
-	fx_ver += 1
-	ptr_lat = float(lane_cur) if m >= 4 else 0.0
-	if not stt.is_empty() and stt.has("rowbox") and is_instance_valid(stt.rowbox):
-		_stt_rows()
-
-
-
-# Einstellleiste: nur die Regler, die der gewählte Lenkmodus braucht
-const STT_ROWS = {
-	0: [["ship", "steer", "Trägheit  (weniger = reagiert schneller)", 0.1], ["ship", "steerk", "Lenkkraft  (mehr = engere Kurven)", 0.05],
-		["steer", "ptime", "Anlaufzeit  (kürzer = sofort volle Kraft)", 0.05], ["ship", "center", "Auto-Gerade  (mehr = Nase schneller gerade)", 0.25], ["ship", "spdst", "Tempo-Dämpfung  (mehr = ruhiger bei Speed)", 0.1]],
-	1: [["ship", "steer", "Trägheit  (weniger = reagiert schneller)", 0.1], ["ship", "steerk", "Lenkkraft  (mehr = engere Kurven)", 0.05],
-		["steer", "swrange", "Wischweg bis voll  (mehr = feiner)", 0.02], ["ship", "center", "Auto-Gerade  (mehr = Nase schneller gerade)", 0.25], ["ship", "spdst", "Tempo-Dämpfung  (mehr = ruhiger bei Speed)", 0.1]],
-	2: [["steer", "swrange", "Wischweg bis zum Rand  (mehr = feiner)", 0.02], ["steer", "glide", "Folgezeit  (weniger = flinker)", 0.05], ["steer", "gwidth", "Reichweite zum Rand", 0.05]],
-	3: [["steer", "psens", "Empfindlichkeit  (mehr = weniger Daumenweg)", 0.25], ["steer", "paccel", "Beschleunigung  (mehr = schnelle Züge weiter)", 0.25], ["steer", "glide", "Folgezeit  (weniger = flinker)", 0.05]],
-	4: [["steer", "psens", "Empfindlichkeit  (mehr = kürzerer Wisch pro Spur)", 0.25], ["steer", "paccel", "Beschleunigung  (schneller Ruck = ganz rüber)", 0.25],
-		["steer", "glide", "Einrasten  (weniger = springt flinker in die Spur)", 0.05], ["steer", "vib", "Vibration  (0 aus, 1 an)", 1.0],
-		["steer", "lbeep", "Piep beim Spurwechsel  (0 = aus)", 0.25]],
-	5: [["steer", "ltime", "Spurwechsel ganz außen → ganz außen  (Sekunden)", 0.05], ["steer", "lhold", "Gedrückt halten → nächste Spur nach  (Sekunden)", 0.05], ["steer", "vib", "Vibration  (0 aus / 1 an)", 1.0], ["steer", "lbeep", "Piep beim Spurwechsel  (0 = aus)", 0.25]]}
-
-const STT_MN = ["Tippen", "Wischen", "Gleiten", "Touchpad", "Spuren", "Spur antippen"]
-const STT_MH = ["Linke oder rechte Bildschirmhälfte halten", "Wischen lenkt, Doppeltipp feuert", "Wischen schiebt rüber, loslassen = zurück zur Mitte", "Daumen bewegen wie einen Mauszeiger", "Wischen wählt links, Mitte oder rechts",
-	"Links / rechts tippen = eine Spur weiter · Mitte tippen = Feuer"]
+# Einstellleiste der Teststrecke: die einzige Stelle, an der die Lenkung eingestellt wird
+const STT_ROWS = [["steer", "ramp", "Reaktion  (weniger = sofort volle Lenkkraft)", 0.05], ["steer", "power", "Lenkkraft  (mehr = engere Kurven)", 0.05],
+	["steer", "assist", "Lenkhilfe zu den Feldern  (0 = aus)", 0.1], ["steer", "bank", "Kurvenneigung  (Optik)", 0.1]]
 
 
 func _stt_rows() -> void:
-	var m = clampi(int(cfg.get("ctrl", 1)), 0, 5)
-	(stt.mbtn as Button).text = "Lenken: " + STT_MN[m]
-	if stt.has("mhint"):
-		(stt.mhint as Label).text = STT_MH[m]
 	var vb: VBoxContainer = stt.rowbox
 	for c in vb.get_children():
 		c.queue_free()
 	stt.rows = []
-	if m <= 1:
-		var pr = HBoxContainer.new()
-		pr.add_theme_constant_override("separation", 10)
-		vb.add_child(pr)
-		for k in range(STEER_PRE.size()):
-			var b = _btn(str(STEER_PRE[k][0]))
-			b.add_theme_font_size_override("font_size", 26)
-			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			var kk = k
-			b.pressed.connect(func(): _steer_preset(kk))
-			pr.add_child(b)
-	for r in STT_ROWS[m]:
+	for r in STT_ROWS:
 		var row = HBoxContainer.new()
 		row.add_theme_constant_override("separation", 10)
 		vb.add_child(row)
@@ -12609,36 +12110,16 @@ func _stt_rows() -> void:
 
 
 
-func _lane_draw(c: Control) -> void:
-	if int(cfg.get("ctrl", 1)) < 4 or not (state == "race" or state == "count"):
-		return
-	var vp = c.size
-	var k = vp.x / 941.0
-	var cy = vp.y - (1672.0 - 1118.0) * k - 22.0
-	var gap = 58.0
-	c.draw_rect(Rect2(vp.x * 0.5 - gap * 1.6, cy - 20, gap * 3.2, 40), Color(0, 0, 0, 0.45))
-	for i in range(-1, 2):
-		var p = Vector2(vp.x * 0.5 + i * gap, cy)
-		var on = i == lane_cur
-		var r = 12.0 + (6.0 * lane_fl if on else 0.0)
-		var col = Color(1.0, 0.6, 0.2, 0.95) if on else Color(1, 1, 1, 0.28)
-		var pts = PackedVector2Array([p + Vector2(0, -r), p + Vector2(r * 0.75, 0), p + Vector2(0, r), p + Vector2(-r * 0.75, 0)])
-		if on and lane_fl > 0.0:
-			c.draw_circle(p, r * 2.2, Color(1.0, 0.55, 0.15, 0.35 * lane_fl))
-		c.draw_colored_polygon(pts, col)
-		pts.append(pts[0])
-		c.draw_polyline(pts, Color(0, 0, 0, 0.7), 1.5, true)
-
 
 # ---------------------------------------------------------------- Neustart ohne Neuladen und Pause
 # „Race again“ und „Menu“ bauen die Strecke nicht neu auf: Schiffe und Rennzustand gehen auf den Stand
 # direkt nach dem Vorwärmen zurück, Effekte des letzten Rennens werden weggeräumt – das geht sofort.
 const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves", "fire_req", "t_state", "race_t", "steer_btn", "btn_t",
-	"rel_t", "rel_v", "last_steer", "st_hist", "touches", "cam_psi", "cam_d", "post_spd", "scr_v", "gl_v", "expo_v", "kmax", "sg_a",
+	"last_steer", "touches", "cam_psi", "cam_d", "post_spd", "scr_v", "gl_v", "expo_v", "kmax", "sg_a",
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp", "megaw",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
-	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last", "lane_cur", "lane_fl", "ptr_lat", "glide_in", "sw", "tinfo",
-	"tap_last", "last_c", "tun_k", "cm", "lt_hold"]
+	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
+	"last_c", "tun_k", "cm"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
@@ -12815,14 +12296,6 @@ func _pause(on: bool) -> void:
 	var b1 = _btn("RESUME", true)
 	b1.pressed.connect(func(): _pause(false))
 	bx.add_child(b1)
-	var bc = _btn("")
-	bc.add_theme_font_size_override("font_size", 30)
-	var cset = func(): bc.text = "Steering: " + CTRL_N[clampi(int(cfg.get("ctrl", 1)), 0, 5)]
-	cset.call()
-	bc.pressed.connect(func():
-		_set_ctrl((int(cfg.get("ctrl", 1)) + 1) % 6)
-		cset.call())
-	bx.add_child(bc)
 	var vl = _lbl("", 30)
 	vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	bx.add_child(vl)
@@ -12870,26 +12343,42 @@ func _fit(root: Node) -> void:
 
 # Lenk-Erklärung passend zum gewählten Modus (Anleitung und Hinweis im Rennen)
 func _steer_help() -> String:
-	return ["Hold the left or right half of the screen.", "Swipe left or right to steer. Double-tap to fire.",
-		"Swipe to slide over – let go to return to the middle.", "Move your thumb like a mouse to steer.",
-		"Swipe to pick the left, middle or right lane.", "Tap left or right to move one lane. Tap the middle to fire."][clampi(int(cfg.get("ctrl", 1)), 0, 5)]
+	return "Hold the left or right half of the screen."
 
 
-# Spur antippen: eine Spur weiter (mit Piep und kurzem Vibrieren)
-var lt_hold = {}
-func _lane_step(dir: int) -> void:
-	var want = clampi(lane_cur + dir, -1, 1)
-	if want != lane_cur and (state == "race" or state == "count"):
-		lane_cur = want
-		ptr_lat = float(want)
-		lane_fl = 1.0
-		if float(fx.steer.vib) > 0.5:
-			Input.vibrate_handheld(22)
-		_lane_beep()
-
-
-# Piep beim Spurwechsel – Lautstärke (oder aus) über „Lanes: change beep volume“
-func _lane_beep() -> void:
-	var v = float(fx.steer.get("lbeep", 1.0))
-	if v > 0.01:
-		_snd("beep", -18.0 + linear_to_db(v), 2.6 + 0.15 * lane_cur)
+# Lenkhilfe: zielst du schon fast auf ein Boost- oder Waffenfeld, zieht sie dich sanft das letzte Stück hin.
+# Lenkst du davon weg, hilft sie nicht – du behältst immer die Kontrolle.
+func _assist(s: Dictionary, dt: float) -> void:
+	var a = float(fx.steer.assist)
+	if a <= 0.001:
+		return
+	var z: float = s.z
+	var tv = tan(s.vpsi)
+	var best_dz = 1e9
+	var best_l = 0.0
+	var k0 = int(floor(z / 35.0))
+	for k in [k0, k0 + 1]:
+		for kind in [0, 1]:
+			if kind == 1 and posmod(k, 2) != 0:
+				continue
+			var zt = (_bzp(k) + 1.2) if kind == 0 else _wzp(k)
+			if not _pad_ok(zt):
+				continue
+			var dz = zt - z
+			if dz < 2.5 or dz > 30.0 or dz >= best_dz:
+				continue
+			var tl = _bpx(k) if kind == 0 else _wpx(k)
+			var miss = tl - (s.lat + dz * tv)
+			if absf(miss) > LANE_W * 0.7:
+				continue
+			if steer_btn != 0 and absf(miss) > 0.05 and int(signf(miss)) != steer_btn:
+				continue
+			best_dz = dz
+			best_l = tl
+	if best_dz > 1e8:
+		return
+	var want = atan2(best_l - s.lat, best_dz)
+	var k = a * 4.0 * (1.0 - 0.6 * clampf(absf(s.u), 0.0, 1.0))
+	var f = 1.0 - exp(-dt * k)
+	s.vpsi += (want - s.vpsi) * f
+	s.psi += (want - s.psi) * f * 0.6
