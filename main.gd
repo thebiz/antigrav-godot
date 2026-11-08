@@ -10939,7 +10939,10 @@ func _camera(dt: float) -> void:
 		var nd0: Node3D = ships[0].node
 		var bz = nd0.global_transform.basis
 		cam.global_position = nd0.global_position - bz.z * 1.1 + bz.y * 0.75 + bz.x * 0.55
-		cam.look_at(nd0.global_position + bz.y * 0.2, Vector3.UP)
+		var cc = OS.get_environment("CLOSECAM").split(",")
+		if cc.size() == 3:   # Versatz in Schiffsachsen: seitlich, hoch, längs
+			cam.global_position = nd0.global_position + bz.x * float(cc[0]) + bz.y * float(cc[1]) + bz.z * float(cc[2])
+		cam.look_at(nd0.global_position + bz.y * 0.1, Vector3.UP)
 		cam.fov = 50.0
 		return
 	if OS.get_environment("VIEWCAM") != "":
