@@ -268,7 +268,6 @@ func _buses() -> void:
 # Countdown-Piepser und Startgrollen laufen über diesen Kanal; die Regler im Reiter „Sound“ wirken sofort.
 # Dazu auf Wunsch eigene Synth-Piepser (Tonhöhe, Klangfarbe, GO-Anstieg), im Spiel erzeugt.
 var start_prev = []   # gerade laufende Vorhör-Klänge
-var synth_c = {}      # erzeugte Synth-Piepser (nach Einstellungen)
 
 
 func _start_bus() -> int:
@@ -328,41 +327,6 @@ func _start_bus_apply() -> void:
 	rv.wet = clampf(float(S.reverb) * 0.4, 0.0, 1.0)
 	rv.dry = 1.0
 	AudioServer.set_bus_effect_enabled(bi, 4, float(S.reverb) > 0.01)
-
-
-# Synth-Piepser: kurzer Ton (3, 2, 1) oder langer GO-Ton mit Anstieg; Sinus bis rechteckig
-func _synth(go: bool) -> AudioStreamWAV:
-	var S: Dictionary = fx.sound
-	var key = "%s|%.3f|%.3f|%.3f" % [go, float(S.spitch), float(S.sshape), float(S.sweep)]
-	if synth_c.has(key):
-		return synth_c[key]
-	var sr = 22050
-	var dur = 1.15 if go else 0.24
-	var n = int(dur * sr)
-	var f0 = (1320.0 if go else 880.0) * float(S.spitch)
-	var sh = float(S.sshape)
-	var sw = float(S.sweep) if go else 0.0
-	var data = PackedByteArray()
-	data.resize(n * 2)
-	var ph = 0.0
-	for i in range(n):
-		var t = float(i) / sr
-		var fq = f0 * (1.0 + sw * 0.35 * minf(t / 0.25, 1.0))
-		ph += TAU * fq / sr
-		var sn = sin(ph)
-		var sq = clampf(sn * 6.0, -1.0, 1.0)
-		var v = lerpf(sn, sq, sh) * 0.85 + sin(ph * 2.0) * 0.08
-		var env = minf(t / 0.006, 1.0) * clampf((dur - t) / (0.25 if go else 0.05), 0.0, 1.0)
-		data.encode_s16(i * 2, int(clampf(v * env, -1.0, 1.0) * 26000.0))
-	var w = AudioStreamWAV.new()
-	w.format = AudioStreamWAV.FORMAT_16_BITS
-	w.mix_rate = sr
-	w.stereo = false
-	w.data = data
-	if synth_c.size() > 16:
-		synth_c.clear()
-	synth_c[key] = w
-	return w
 
 
 func _start_snd(st: AudioStream, db: float, from := 0.0) -> AudioStreamPlayer:
@@ -436,7 +400,7 @@ func _duck(delta: float) -> void:
 
 func _sounds() -> void:
 	_buses()
-	for n in ["boom.ogg", "count.ogg", "engine.wav", "idle.wav", "mine.ogg", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
+	for n in ["boom.ogg", "engine.wav", "idle.wav", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
@@ -788,8 +752,7 @@ const FXS = {
 		["mega", "Mega towers", 0.0, 3.0, 1.0]],
 	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
 		["grit", "Grit", 0.0, 2.0, 0.0], ["echo", "Echo", 0.0, 2.0, 0.0], ["etime", "Echo time", 0.2, 3.0, 1.0], ["reverb", "Reverb", 0.0, 2.0, 0.0], ["room", "Room size", 0.0, 1.0, 0.6],
-		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Original beeps", 0.0, 3.0, 1.0], ["synth", "Synth beeps", 0.0, 3.0, 0.0], ["spitch", "Synth pitch", 0.25, 4.0, 1.0],
-		["sshape", "Synth shape", 0.0, 1.0, 0.3], ["sweep", "GO sweep", 0.0, 2.0, 0.5]],
+		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Countdown beeps", 0.0, 3.0, 1.0]],
 }
 const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hole"], ["rak", "Rocket"], ["lock", "Lock"], ["wall", "Field"], ["shield", "Shield"], ["orbs", "Orbs"], ["haze", "Jet"], ["pillar", "Pillar"], ["ship", "Ship"], ["env", "World"], ["city", "City"], ["jungle", "Jungle"], ["sound", "Sound"]]
 var fx = {}
@@ -3975,7 +3938,7 @@ func _neon_sign(pos: Vector3, b: Basis, txt: String, col: Color, hgt: float) -> 
 	hum.bus = "Game"
 	hum.unit_size = 2.0 + hgt
 	hum.max_distance = 25.0 + hgt * 8.0
-	hum.volume_db = -12.0
+	hum.volume_db = -9.0
 	letters[bad].add_child(hum)
 	neon_signs.append({"l": letters, "bad": bad, "t": randf() * 10.0, "on": true, "nx": randf_range(0.5, 3.0), "col": col, "hum": hum})
 
@@ -4013,7 +3976,7 @@ func _neon_live(dt: float) -> void:
 		var k = 1.0 if sg.on else 0.12
 		l.modulate = Color(col.r * 0.5 + 0.5, col.g * 0.5 + 0.5, col.b * 0.5 + 0.5) * 2.2 * k
 		l.outline_modulate = Color(col.r, col.g, col.b, 0.55 * k)
-		hum.volume_db = -12.0 if sg.on else -30.0
+		hum.volume_db = -9.0 if sg.on else -27.0
 
 
 
@@ -4429,18 +4392,20 @@ func _props_make() -> void:
 			continue
 		var k: String = sp[2]
 		var n: Node3D = (prop_res[k] as PackedScene).instantiate()
-		var hgt = 0.27 if k == "b" else 0.2   # Fass ≈ 1,1 m, Kegel ≈ 0,8 m
-		n.scale = Vector3.ONE * hgt
+		# Fass: Ø ≈ 1/3 Schiffsbreite (0,27), entsprechend hoch (0,42); Kegel: gleiche Grundfläche, 75 % der Fasshöhe
+		var hgt = 0.42 if k == "b" else 0.315
+		var wid = 0.27 / (0.65 if k == "b" else 0.69)   # Modelle: Fass Ø 0,65, Kegel Ø 0,69, beide 1,0 hoch
+		n.scale = Vector3(wid, hgt, wid)
 		var root = Node3D.new()
 		root.add_child(n)
 		add_child(root)
-		root.set_meta("rfx", false)
+		root.set_meta("keep", true)   # NICHT „rfx“: das räumt der Neustart weg (gelöschte Knoten → Absturz)
 		if k == "c":
 			# Leuchtstreifen am Kegel: oranges Glimmen
 			var gl = OmniLight3D.new()
 			gl.light_color = Color(1.0, 0.5, 0.1)
-			gl.light_energy = 0.8
-			gl.omni_range = 0.6
+			gl.light_energy = 1.0
+			gl.omni_range = 0.9
 			gl.position = Vector3(0, hgt * 0.7, 0)
 			root.add_child(gl)
 			for mi in n.find_children("*", "MeshInstance3D", true, false):
@@ -4454,7 +4419,7 @@ func _props_make() -> void:
 					mm.emission_energy_multiplier = 0.9
 					(mi as MeshInstance3D).material_override = mm
 		var d = {"n": root, "k": k, "z": float(sp[0]), "lat": float(sp[1]), "h": 0.0, "vz": 0.0, "vl": 0.0, "vh": 0.0,
-			"rb": Basis(Vector3.UP, randf() * TAU), "av": Vector3.ZERO, "r": 0.09 if k == "b" else 0.07, "hg": hgt, "kt": 0.0, "rest": true}
+			"rb": Basis(Vector3.UP, randf() * TAU), "av": Vector3.ZERO, "r": 0.135, "hg": hgt, "kt": 0.0, "rest": true}
 		props.append(d)
 		props0.append(d.duplicate())
 
@@ -4472,6 +4437,8 @@ func _props_update(dt: float) -> void:
 	var gz: float = ships[0].z
 	var lap0 = floor((gz - 20.0) / T.LAP) * T.LAP
 	for d in props:
+		if not is_instance_valid(d.n):
+			continue
 		var nd: Node3D = d.n
 		if not d.rest:
 			d.vh -= 14.0 * dt
@@ -4567,31 +4534,61 @@ var prop_shield_mat: ShaderMaterial = null
 
 
 func _shield_flash(d: Dictionary, nrm: Vector3) -> void:
-	if shield_hits.size() > 6:
+	if not is_instance_valid(d.n):
+		return
+	var gz: float = ships[0].z
+	var lap0 = floor((gz - 20.0) / T.LAP) * T.LAP
+	var zw = float(d.z) + lap0
+	if zw < gz - T.LAP * 0.5:
+		zw += T.LAP
+	elif zw > gz + T.LAP * 0.5:
+		zw -= T.LAP
+	_shield_flash_at((d.n as Node3D).global_position, zw, nrm, float(d.r), 1.2, -8.0, randf_range(1.3, 1.6))
+
+
+# Schild-Aufleuchten an einer Stelle: nrm.x = seitlich (Vorzeichen = Seite), nrm.y = oben
+func _shield_flash_at(p: Vector3, zw: float, nrm: Vector3, off: float, size: float, vol: float, pitch: float, sn: String = "shield") -> void:
+	if shield_hits.size() > 6 or not p.is_finite():
 		return
 	if prop_shield_mat == null:
 		prop_shield_mat = _shader_mat(SHIELD_CODE)
+	var f = T.frame(zw)
+	var n: Vector3 = f.rr * nrm.x + f.uu * nrm.y
+	if n.length_squared() < 0.01:
+		return
+	n = n.normalized()
+	var up: Vector3 = f.fw if absf(nrm.y) > 0.5 else f.uu
+	if absf(n.dot(up.normalized())) > 0.95:
+		return
 	var q = MeshInstance3D.new()
 	var qm = QuadMesh.new()
-	qm.size = Vector2(1.2, 1.2)
+	qm.size = Vector2(size, size)
 	q.mesh = qm
 	var m: ShaderMaterial = prop_shield_mat.duplicate()
 	q.material_override = m
 	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	q.set_meta("rfx", true)
 	add_child(q)
-	var p: Vector3 = (d.n as Node3D).global_position
-	var gz: float = ships[0].z
-	var lap0 = floor((gz - 20.0) / T.LAP) * T.LAP
-	var zw = float(d.z) + lap0
-	if zw < gz - T.LAP * 0.5:
-		zw += T.LAP
-	var f = T.frame(zw)
-	var n: Vector3 = f.rr * nrm.x + f.uu * nrm.y
-	var at: Vector3 = p + n * float(d.r)
-	q.global_transform = Transform3D(Basis.looking_at(n, f.fw if absf(nrm.y) > 0.5 else f.uu), at)
+	var at: Vector3 = p + n * off
+	q.global_transform = Transform3D(Basis.looking_at(n, up), at)
 	shield_hits.append({"n": q, "m": m, "t": 0.0})
-	_snd("shield", -8.0, randf_range(1.3, 1.6), at)
+	_snd(sn, vol, pitch, null if sn == "phase" else at)
+
+
+# Schiff prallt an der Schutzröhre ab
+func _ship_shield_hit(s: Dictionary, nrm: Vector3) -> void:
+	if race_t - float(s.get("shT", -9.0)) < 0.25:
+		return
+	s.shT = race_t
+	s.slow = minf(s.slow, 0.8)
+	s.boost *= 0.5
+	if not _prot(s) and (state == "race"):
+		_dmg(s, 0.03, -1, "ram")
+	var is_p = s.idx == 0
+	_shield_flash_at((s.node as Node3D).global_position, s.z, nrm, 0.45, 2.2, -1.0, randf_range(1.0, 1.15), "phase" if is_p else "shield")
+	if is_p:
+		shake = maxf(shake, 0.3)
+		_flash(Color(0.4, 0.85, 1.0), 0.12)
 
 
 func _shield_hits_update(dt: float) -> void:
@@ -8347,11 +8344,7 @@ const FX_INFO = {
 	"sound.reverb": "Hall wie in einem großen Raum.",
 	"sound.room": "Wie groß der Raum für den Hall klingt.",
 	"sound.rumble": "Tiefes Grollen des Triebwerks.",
-	"sound.beeps": "Lautstärke der ursprünglichen Countdown-Pieptöne.",
-	"sound.synth": "Lautstärke der Synthesizer-Pieptöne.",
-	"sound.spitch": "Tonhöhe der Synthesizer-Töne.",
-	"sound.sshape": "Klangfarbe der Synthesizer-Töne (weich bis kantig).",
-	"sound.sweep": "Aufsteigender Ton beim GO."
+	"sound.beeps": "Lautstärke der Countdown-Pieptöne."
 }
 # ================================================================ Live-Regler vom PC (gleiches WLAN)
 # Das Spiel öffnet einen kleinen Webserver (Port 8080). Im PC-Browser erscheinen alle FX-Lab-Regler;
@@ -10586,23 +10579,22 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.h = 0.45
 		var tf = maxf(8.5 / maxf(1.0, fwd), 0.6)  # flacher, gut sichtbarer Sprung, kurze Flugzeit
 		s.vy = (2.0 * tf * tf - s.h) / tf
-	# über die Leitplanke hinaus geflogen: sofort mittig über der Strecke neu erscheinen (mit Glitch),
-	# aus etwa Force-field-Höhe fallen lassen, auf dem Antigrav-Polster abfedern – kostet nur gut eine Sekunde
-	if s.air and absf(s.lat) > T.TW + 0.15 and not s.out:
-		s.lat = 0.0
-		s.psi = 0.0
-		s.vpsi = 0.0
-		s.u = 0.0
-		s.h = 1.5
-		s.vy = 0.0
-		s.drop = 1
-		s.rsT = 0.45
-		s.slow = minf(s.slow, 0.55)
-		s.boost = 0.0
-		if is_p:
-			_snd("phase", 0.0, 1.3)
-			_flash(Color(0.5, 0.9, 1.0), 0.18)
-		_zap_ship(s)
+	# Schutzschild-Röhre um die Strecke: wer über die Leitplanke hinausfliegt oder zu hoch springt, prallt ab –
+	# Schild blitzt auf, kleiner Energieverlust, etwas Tempo weg
+	if s.air and not s.out:
+		var slim = T.TW + 0.1
+		if absf(s.lat) > slim and signf(s.lat) == signf(sin(s.vpsi)):
+			var sd = signf(s.lat)
+			s.lat = sd * slim
+			s.vpsi = -s.vpsi * 0.6
+			s.psi = -s.psi * 0.6
+			_ship_shield_hit(s, Vector3(sd, 0.0, 0.0))
+		elif absf(s.lat) > slim:
+			s.lat = signf(s.lat) * slim
+		if s.h > SHIELD_H - 0.25 and s.vy > 0.0:
+			s.h = SHIELD_H - 0.25
+			s.vy = -s.vy * 0.4
+			_ship_shield_hit(s, Vector3(0.0, 1.0, 0.0))
 	if s.get("rsT", 0.0) > 0.0:
 		# Glitch beim Erscheinen: Schiff flackert ein paar Mal
 		s.rsT -= dt
@@ -11338,7 +11330,7 @@ func _process(delta: float) -> void:
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
-		_snd("win")
+		_snd("win", 2.5)
 		get_tree().create_timer(0.9).timeout.connect(func(): _snd("vo_p1", 3.0))
 		hud.res.text = "1st  ·  LAST ONE STANDING\n%s" % _fmt(race_t)
 		_fin_flow(1)
@@ -11347,7 +11339,7 @@ func _process(delta: float) -> void:
 		state = "done"
 		t_state = 0.0
 		g.fin = race_t
-		_snd("win" if place == 1 else "lap", 0.0 if place == 1 else -2.0)
+		_snd("win", 2.5 if place == 1 else -1.0)
 		var pv = "vo_p%d" % clampi(place, 1, 4)
 		_stadium("an_p%d" % clampi(place, 1, 4), 0.0)
 		_snd("crowd_roar", -2.0 if place == 1 else -6.0)
@@ -12059,6 +12051,24 @@ func _shot() -> void:
 				ships[1].z = ships[0].z + 7.0
 				ships[1].lat = ships[0].lat + 1.2
 				ships[1].spd = ships[0].spd
+			if shot_s.contains("srtest") and shot_n == 45:
+				print("SR ret=", _soft_reset(), " props=", props.size())
+				for n in get_children():
+					if n.has_meta("rfx"):
+						n.queue_free()   # wie beim Neustart
+				state = "race"
+			if shot_s.contains("srtest") and shot_n == 50:
+				print("SR valid=", props.map(func(d): return is_instance_valid(d.n)))
+			if shot_s.contains("shtest"):
+				if shot_n == 41:
+					ships[0].air = true
+					ships[0].h = 0.6
+					ships[0].vy = 4.5
+					ships[0].lat = 1.6
+					ships[0].vpsi = 0.45
+					ships[0].psi = 0.45
+				if shot_n > 41 and shot_n < 90:
+					print("SH n=", shot_n, " lat=", snappedf(ships[0].lat, 0.01), " h=", snappedf(ships[0].h, 0.01), " vpsi=", snappedf(ships[0].vpsi, 0.01), " en=", snappedf(ships[0].en, 0.01), " slow=", snappedf(ships[0].slow, 0.01), " hits=", shield_hits.size())
 			if shot_n == 41 and not blimp.is_empty() and OS.get_environment("BLIMPDBG") != "":
 				print("BLIMP pos=", (blimp.n as Node3D).global_position, " cam=", cam.global_position, " c=", blimp.c, " r=", blimp.rx, ",", blimp.rz)
 			if shot_s.contains("rkctest") and shot_n % 5 == 0:
@@ -13576,7 +13586,7 @@ func _stt_update(dt: float) -> void:
 				stt.res[gd[3]][0] += 1
 				_snd("pick", -10.0, 1.4)
 			else:
-				_snd("beep", -8.0, 0.6)
+				_snd("beep", -5.0, 1.0)
 		if e.fl > 0.0:
 			e.fl -= dt
 			(e.m as StandardMaterial3D).albedo_color = (Color(0.3, 1.0, 0.4) if e.ok else Color(1.0, 0.15, 0.1)) if e.fl > 0.0 else STT_COL[gd[3]]
