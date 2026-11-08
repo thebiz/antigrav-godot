@@ -420,7 +420,7 @@ func _sounds() -> void:
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "vo_turret.wav", "gun.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
-			"cbeep.wav", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "hover.wav",
+			"cbeep.wav", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
@@ -8754,8 +8754,7 @@ func _mine_warn(dt: float, racing: bool) -> void:
 		return
 	if not lamp.visible:
 		# Lämpchen geht an: kurzes Doppelsignal wie im Cockpit
-		_snd("beep", -4.0, 1.7)
-		get_tree().create_timer(0.13).timeout.connect(func(): _snd("beep", -4.0, 1.7))
+		_snd("minewarn", -2.0)
 	lamp.visible = true
 	lamp.queue_redraw()
 
@@ -9794,7 +9793,6 @@ func _process(delta: float) -> void:
 
 # ---------------------------------------------------------------- FX Lab: Teststrecke für alle Effekte, mit Reglern
 const LZ = 40.0
-const VOICE_LAB_URL = "https://claude.ai/artifact/E8ePfMb2RbvnrVhn1Q1HeD"
 var lab = {}
 
 
@@ -9963,13 +9961,6 @@ func _lab_open() -> void:
 	bc.pressed.connect(_lab_copy)
 	row2.add_child(bc)
 	lab.cb = bc
-	var bvl = _btn("Voice Lab")
-	bvl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bvl.size_flags_stretch_ratio = 1.3
-	bvl.custom_minimum_size = Vector2(0, 84)
-	bvl.add_theme_font_size_override("font_size", 22)
-	bvl.pressed.connect(func(): OS.shell_open(VOICE_LAB_URL))
-	row2.add_child(bvl)
 	var bb = _btn("Done", true)
 	bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bb.custom_minimum_size = Vector2(0, 84)
@@ -12653,7 +12644,7 @@ func _gun_tracer(o: Dictionary, tg: Dictionary, hit: bool) -> void:
 	im.surface_end()
 	add_child(mi)
 	tracers.append({"mi": mi, "t": 0.0})
-	_snd("gun", -12.0 if o.idx == 0 else -16.0, randf_range(0.92, 1.08), a)
+	_snd("gun", -1.0 if o.idx == 0 else -6.0, randf_range(0.95, 1.05), null if o.idx == 0 else a)
 	if hit and tg.idx == 0:
 		shake = maxf(shake, 0.12)
 
