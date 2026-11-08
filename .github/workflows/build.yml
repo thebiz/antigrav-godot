@@ -61,6 +61,9 @@ jobs:
         run: |
           sed -i "s/^version\/code=.*/version\/code=${{ github.run_number }}/" export_presets.cfg
           sed -i "s/^version\/name=.*/version\/name=\"1.${{ github.run_number }}${{ matrix.suffix }}\"/" export_presets.cfg
+          # Versionsnummer auch im Spiel selbst (für das Fehlerprotokoll)
+          sed -i '/^config\/version=/d' project.godot
+          sed -i '/^\[application\]/a config/version="1.${{ github.run_number }}"' project.godot
 
       - name: Android-Bauvorlage und Video-Baustein
         shell: bash

@@ -8,6 +8,14 @@ static var pending_free = false
 static var pending_test = false
 static var stt_spd = 1.0   # Tempo auf der Teststrecke (Anteil vom normalen Tempo)   # Neustart direkt in die Lenk-Teststrecke   # nach dem FX Lab gleich wieder ins Free ride (Live-Regler vom PC)
 static var restart = false
+# Fehlerprotokoll (bleibt über Neustarts der Szene erhalten): Spur der letzten Ereignisse, Fehlermeldungen, letzter Haltepunkt
+static var dg_trail: Array = []
+static var dg_init = false
+static var dg_logger = null
+static var dg_cpf: FileAccess = null
+static var dg_report = ""        # Bericht vom letzten Absturz (leer = keiner)
+static var dg_shown = false
+static var dg_reloading = false
 static var bench_req = false   # Leistungstest: nach dem Neuladen direkt starten   # „Race again“: nach dem Neuladen direkt losfahren
 
 const T = preload("res://track.gd")
@@ -97,6 +105,7 @@ var rpf = {}   # geladenes Replay aus einer Datei
 
 
 func _ready() -> void:
+	_dg_start()
 	if pending_rp != "":
 		var fa = FileAccess.open_compressed(pending_rp, FileAccess.READ, FileAccess.COMPRESSION_ZSTD)
 		if fa != null:
@@ -3482,6 +3491,7 @@ var debris = []
 
 
 func _shatter(o: Dictionary, sd := -1) -> void:
+	_bc("shatter ship %d" % int(o.idx))
 	var nd: Node3D = o.node
 	if not nd.has_meta("mxf"):
 		return
@@ -4190,6 +4200,8 @@ func _party_helmet(ren: Node3D) -> void:
 
 
 func _party_start() -> void:
+	_bc("party start")
+	_dg_flush()
 	_party_end()
 	party_on = true
 	var g: Dictionary = ships[0]
@@ -6353,6 +6365,8 @@ var free_ride = false   # freies Fahren: keine Gegner, kein Schaden, keine Runde
 
 
 func _start() -> void:
+	_bc("start race")
+	_dg_flush()
 	race_kids = get_children()
 	if free_ride:
 		for i in range(1, ships.size()):
@@ -7617,6 +7631,7 @@ func _orbs_update(dt: float, live: bool) -> void:
 
 
 func _fire() -> void:
+	_bc("fire %s" % (str(ships[0].wpn) if not ships.is_empty() else ""))
 	var g: Dictionary = ships[0]
 	var w: String = g.wpn
 	# Super: dieselbe Waffe doppelt eingesammelt – oder Orbs, während die Orbs noch laufen
@@ -9653,6 +9668,8 @@ func _pool(key: String, n: int, mk: Callable) -> Array:
 
 
 func _replay_start() -> void:
+	_bc("replay start")
+	_dg_flush()
 	if rec.size() < 10 or state == "replay":
 		return
 	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0, "fix": -1, "paused": false, "scrub": false,
@@ -9716,6 +9733,8 @@ func _replay_start() -> void:
 
 
 func _replay_end() -> void:
+	_bc("replay end")
+	_dg_flush()
 	if state != "replay":
 		return
 	if vx.get("on", false):
@@ -10203,6 +10222,8 @@ func _kc_check() -> void:
 
 
 func _kc_start() -> void:
+	_bc("killcam start victim=%s kind=%s" % [kc_pending.get("idx", -1), kc_pending.get("kind", "")])
+	_dg_flush()
 	var t0: float = kc_pending.t0
 	var F = rec
 	var ts = t0 - 5.0   # gut 5 s vorher einsteigen: man sieht, wie es dazu kam
@@ -10258,6 +10279,8 @@ func _kc_step(dt: float) -> void:
 func _kc_end() -> void:
 	if kc.is_empty():
 		return
+	_bc("killcam end")
+	_dg_flush()
 	# alles zurück auf den Stand des laufenden Rennens
 	for k in range(ships.size()):
 		var o: Dictionary = ships[k]
@@ -10772,7 +10795,14 @@ func _notification(what: int) -> void:
 				_pause(false)
 			return
 		_go_back()
-	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED:
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_RESUMED:
+		_dg_mark("run")
+	elif what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_dg_mark("exit")
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED:
+		_bc("app in background")
+		_dg_flush()
+		_dg_mark("bg")
 		# App verlassen (Anruf, Home-Taste): mitten im Rennen automatisch anhalten
 		if state in ["intro", "count", "race"] and fin.is_empty() and kc.is_empty():
 			_pause(true)
@@ -11220,6 +11250,8 @@ func _process(delta: float) -> void:
 	if flash_rect != null and flash_rect.visible and flash_rect.color.a <= 0.003:
 		flash_rect.visible = false   # unsichtbare Vollbild-Fläche nicht jedes Bild zeichnen
 	t_state += dt
+	_cp("frame")
+	_dg_tick(delta)
 	_measure(delta)
 	_live_poll(dt)
 	_duck(delta / maxf(0.01, Engine.time_scale))
@@ -11261,7 +11293,9 @@ func _process(delta: float) -> void:
 		_lab_step(dt)
 		return
 	if state == "kill":
+		_cp("kc_step")
 		_kc_step(dt)
+		_cp("kc_view")
 		if state == "kill":
 			_lap_pos(g.z)
 			_tunnel(dt)
@@ -11291,8 +11325,10 @@ func _process(delta: float) -> void:
 			_shot()
 			return
 	var racing = state == "race"
+	_cp("fin_update")
 	_fin_update(dt)
 	if not cm.is_empty():
+		_cp("comic_update")
 		_comic_update(dt)
 		if state == "intro":
 			t_state = 0.0   # Vorbeiflug wartet, bis der Comic durch ist
@@ -11368,8 +11404,10 @@ func _process(delta: float) -> void:
 		steer = _ai_inp(g, Time.get_ticks_msec() / 1000.0, dt)
 		if g.wpn != "" and randf() < 0.03:
 			_fire()
+	_cp("phys_player")
 	for k in range(n):
 		_phys(g, steer, true, hdt, racing)
+	_cp("ai")
 	for i in range(1, ships.size()):
 		var o: Dictionary = ships[i]
 		if o.out:
@@ -11423,11 +11461,17 @@ func _process(delta: float) -> void:
 	for i in range(1, ships.size()):
 		if ships[i].z > g.z and not ships[i].out:
 			place += 1
+	_cp("collide")
 	_collide(dt)
+	_cp("debris")
 	_debris_update(dt)
+	_cp("props")
 	_props_update(dt)
+	_cp("weapons")
 	_weapons(dt, racing)
+	_cp("mine_warn")
 	_mine_warn(dt, racing)
+	_cp("race_end_check")
 	if racing and g.out:
 		state = "done"
 		t_state = 0.0
@@ -11457,8 +11501,10 @@ func _process(delta: float) -> void:
 		hud.res.text = "%s  ·  %s" % [["1st", "2nd", "3rd", "4th"][place - 1], _fmt(race_t)]
 		_fin_flow(place)
 		_records_end(true)
+	_cp("board")
 	_board_update(dt)
 	_resb_arm(dt)
+	_cp("hud")
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
 	if state != "done" or t_state < 0.1:
 		hud.top.text = _fmt(race_t)
@@ -11480,15 +11526,23 @@ func _process(delta: float) -> void:
 	hud.pl.modulate = Color(1, 1, 1).lerp(pl_col, pl_flash)
 	hud.plbox.scale = Vector2.ONE * (1.0 + 0.18 * pl_flash)
 	hud.plbox.pivot_offset = hud.plbox.size
+	_cp("record")
 	_record(dt)
+	_cp("kc_check")
 	_kc_check()
 	# Rundenkopien mitwandern lassen
+	_cp("lap_tunnel")
 	_lap_pos(g.z)
 	_tunnel(dt)
+	_cp("pose")
 	_pose_all(dt)
+	_cp("camera")
 	_camera(dt)
+	_cp("sound")
 	_sound_update(dt)
+	_cp("post")
 	_post_update(dt)
+	_cp("end")
 	_shot()
 
 
@@ -12751,6 +12805,7 @@ func _pick(a: Array):
 
 # kind: start | win | lose | ko · who: Gewinner (lose) bzw. Opfer (ko)
 func _comic_start(kind: String, who := 0) -> void:
+	_bc("comic %s who=%d" % [kind, who])
 	if not cm.is_empty():
 		_comic_end()
 	cm = {"pending": kind, "who": who}   # erst bauen, wenn das Vorwärmen der Shader fertig ist (das räumt neue Knoten weg)
@@ -13337,6 +13392,8 @@ func _scale_tex() -> ImageTexture:
 
 # Neu laden mit Ladebildschirm: erst das Bild zeigen, dann die Szene bauen (das hängt ein paar Sekunden)
 func _reload() -> void:
+	dg_reloading = true
+	_bc("reload")
 	# Pause unbedingt aufheben – sonst lädt die neue Szene eingefroren und der Ladebalken bleibt stehen
 	get_tree().paused = false
 	if paused_ui != null and is_instance_valid(paused_ui):
@@ -14098,6 +14155,8 @@ func _free_fx_entry(e) -> void:
 
 # Rennen zurücksetzen (Strecke bleibt stehen). false = geht nicht, dann klassisch neu laden.
 func _soft_reset() -> bool:
+	_bc("soft reset")
+	_dg_flush()
 	if race0.is_empty() or ships0.size() != ships.size() or not rpf.is_empty() or T.S or free_ride or not vx.is_empty():
 		return false
 	get_tree().paused = false
@@ -14208,6 +14267,7 @@ func _to_menu() -> void:
 
 # Pause: alles friert ein, darüber ein kleines Menü (läuft weiter, obwohl das Spiel steht)
 func _pause(on: bool) -> void:
+	_bc("pause %s" % on)
 	if not on:
 		get_tree().paused = false
 		if paused_ui != null and is_instance_valid(paused_ui):
@@ -14373,3 +14433,167 @@ func _music_update(dt: float) -> void:
 	else:
 		music_f = minf(1.0, music_f + dt / 1.2)
 	music_p.volume_db = linear_to_db(maxf(0.0005, music_f))
+
+
+# ================================================================ Fehlerprotokoll
+# Schreibt mit, was im Spiel passiert (Ereignisse, alle 2 s ein Lebenszeichen, Fehlermeldungen der Engine) und welcher Teil
+# der Hauptschleife gerade läuft. Stürzt die App ab, merkt sie das beim nächsten Start und bietet an, den Bericht zu kopieren.
+const DG_DIR = "user://diag"
+const DG_MAX = 260
+
+
+class DgLogger extends Logger:
+	var mx = Mutex.new()
+	var buf: Array = []
+
+	func _log_error(function: String, file: String, line: int, code: String, rationale: String, editor_notify: bool, error_type: int, script_backtraces: Array[ScriptBacktrace]) -> void:
+		var t = "%s %s:%d %s — %s" % [["ERROR", "WARNING", "SCRIPT", "SHADER"][clampi(error_type, 0, 3)], file.get_file(), line, function, rationale if rationale != "" else code]
+		for bt in script_backtraces:
+			if bt != null and not bt.is_empty():
+				t += "\n" + bt.format(4, 6)
+		mx.lock()
+		buf.append(t)
+		if buf.size() > 60:
+			buf.pop_front()
+		mx.unlock()
+
+	func _log_message(message: String, error: bool) -> void:
+		pass
+
+	func take() -> Array:
+		mx.lock()
+		var b = buf.duplicate()
+		buf.clear()
+		mx.unlock()
+		return b
+
+
+var dg_t = 0.0
+var dg_state = ""
+
+
+func _dg_start() -> void:
+	if dg_init:
+		return
+	dg_init = true
+	DirAccess.make_dir_recursive_absolute(DG_DIR)
+	var testing = OS.get_cmdline_user_args().size() > 0 or OS.get_environment("SHOTPATH") != ""
+	# letzter Lauf ohne sauberes Ende (stand auf „run“) = Absturz
+	var st = FileAccess.get_file_as_string(DG_DIR + "/state.txt").strip_edges()
+	if (st == "run" and not testing) or OS.get_environment("DGFAKE") != "":
+		var cp = FileAccess.get_file_as_string(DG_DIR + "/cp.txt").strip_edges()
+		var tr = FileAccess.get_file_as_string(DG_DIR + "/trail.txt")
+		dg_report = "AntiGrav 3D – Absturzbericht\nVersion: %s · Gerät: %s (%s) · %s\nLetzter Haltepunkt (Hauptschleife): %s\n\n--- Verlauf (älteste zuerst) ---\n%s" % [
+			str(ProjectSettings.get_setting("application/config/version", "?")), OS.get_model_name(), OS.get_name(), Time.get_datetime_string_from_system(), cp, tr]
+		var f = FileAccess.open(DG_DIR + "/crash_report.txt", FileAccess.WRITE)
+		if f != null:
+			f.store_string(dg_report)
+			f.close()
+	_dg_mark("run")
+	dg_cpf = FileAccess.open(DG_DIR + "/cp.txt", FileAccess.WRITE)
+	dg_logger = DgLogger.new()
+	OS.add_logger(dg_logger)
+	_bc("app start %s" % OS.get_model_name())
+
+
+func _exit_tree() -> void:
+	# Szene wird beim Neustart nur neu geladen – das ist kein Ende der App
+	if dg_reloading:
+		dg_reloading = false
+		return
+	_bc("app exit")
+	_dg_flush()
+	_dg_mark("exit")
+
+
+func _dg_mark(v: String) -> void:
+	var f = FileAccess.open(DG_DIR + "/state.txt", FileAccess.WRITE)
+	if f != null:
+		f.store_string(v)
+		f.close()
+
+
+# Ereignis in die Spur schreiben (im Speicher; auf die Platte alle 2 s und bei wichtigen Momenten)
+func _bc(msg: String) -> void:
+	dg_trail.append("%8.2f  %-7s r%6.1f  %s" % [Time.get_ticks_msec() / 1000.0, str(state), race_t, msg])
+	if dg_trail.size() > DG_MAX:
+		dg_trail.pop_front()
+
+
+# Haltepunkt: welcher Teil der Hauptschleife läuft gerade – sofort auf die Platte (überlebt einen Absturz)
+func _cp(nm: String) -> void:
+	if dg_cpf == null:
+		return
+	dg_cpf.seek(0)
+	dg_cpf.store_string(("%s · %s · r%.1f" % [nm, str(state), race_t]).rpad(72))
+	dg_cpf.flush()
+
+
+func _dg_flush() -> void:
+	if dg_logger != null:
+		for e in (dg_logger as DgLogger).take():
+			_bc(e)
+	var f = FileAccess.open(DG_DIR + "/trail.txt", FileAccess.WRITE)
+	if f != null:
+		f.store_string("\n".join(dg_trail))
+		f.close()
+
+
+func _dg_tick(delta: float) -> void:
+	if str(state) != dg_state:
+		_bc("state %s -> %s" % [dg_state, state])
+		dg_state = str(state)
+	dg_t += delta
+	if dg_t >= 2.0:
+		dg_t = 0.0
+		var g: Dictionary = ships[0] if not ships.is_empty() else {}
+		_bc("hb z=%.1f en=%.2f wpn=%s fps=%d kids=%d fx=%d zaps=%d deb=%d mines=%d shots=%d shh=%d party=%s kc=%s cm=%s" % [
+			float(g.get("z", 0.0)), float(g.get("en", 0.0)), str(g.get("wpn", "")), Engine.get_frames_per_second(), get_child_count(),
+			fxs.size(), zaps.size(), debris.size(), mines.size(), shots.size(), shield_hits.size(), not party.is_empty(), not kc.is_empty(), not cm.is_empty()])
+		_dg_flush()
+	# Bericht vom letzten Absturz anbieten, sobald das Menü steht
+	if dg_report != "" and not dg_shown and state == "menu" and warm_t < 0.0 and menu_t > 1.0:
+		dg_shown = true
+		_dg_popup()
+
+
+func _dg_popup() -> void:
+	var cl = CanvasLayer.new()
+	cl.layer = 40
+	add_child(cl)
+	var dim = ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.6)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cl.add_child(dim)
+	var pc = PanelContainer.new()
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.04, 0.04, 0.07, 0.97)
+	sb.border_color = Color(1, 0.55, 0.15, 0.6)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(18)
+	sb.set_content_margin_all(28)
+	pc.add_theme_stylebox_override("panel", sb)
+	pc.anchor_left = 0.06
+	pc.anchor_right = 0.94
+	pc.anchor_top = 0.5
+	pc.anchor_bottom = 0.5
+	pc.grow_vertical = Control.GROW_DIRECTION_BOTH
+	cl.add_child(pc)
+	var vb = VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 22)
+	pc.add_child(vb)
+	var t = _lbl("Absturz beim letzten Mal", 40)
+	t.add_theme_color_override("font_color", Color(1, 0.6, 0.25))
+	vb.add_child(t)
+	var l = _lbl("Das Spiel hat mitgeschrieben, was kurz davor passiert ist. Kopier den Bericht und füg ihn im Chat ein – damit lässt sich der Fehler finden.", 28)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(l)
+	var b1 = _btn("Bericht kopieren", true)
+	b1.pressed.connect(func():
+		DisplayServer.clipboard_set(dg_report)
+		_toast("Kopiert – jetzt einfach im Chat einfügen")
+		cl.queue_free())
+	vb.add_child(b1)
+	var b2 = _btn("Schließen")
+	b2.pressed.connect(func(): cl.queue_free())
+	vb.add_child(b2)
