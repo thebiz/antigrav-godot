@@ -8514,6 +8514,8 @@ func _warm_step(delta: float) -> void:
 		_orbs_update(0.0, false)
 		_drop_mines(g)
 		_add_shot(g, false, false)
+		_turret_node(g).visible = true   # Geschütz-Modell schon beim Start einmal zeichnen (kein Ruckler beim ersten Einsammeln)
+		_gun_tracer(g, ships[1], true)
 		warm = false
 		return
 	# ein paar Bilder lang aktualisieren, damit alles wirklich gezeichnet wird
@@ -8533,6 +8535,8 @@ func _warm_step(delta: float) -> void:
 	mines.clear()
 	g2.shield = 0.0
 	_shield_vis(g2)
+	_turret_node(g2).visible = false
+	tracers.clear()
 	g2.orbs = 0.0
 	_orbs_update(0.0, false)
 	orb_n.clear()
@@ -10823,6 +10827,14 @@ func _camera(dt: float) -> void:
 		return
 	if state == "done" and _fly_cam(dt):
 		return
+	if OS.get_environment("CLOSECAM") != "" and not ships.is_empty():
+		# Test: Nahaufnahme des eigenen Schiffs schräg von hinten oben
+		var nd0: Node3D = ships[0].node
+		var bz = nd0.global_transform.basis
+		cam.global_position = nd0.global_position - bz.z * 1.1 + bz.y * 0.75 + bz.x * 0.55
+		cam.look_at(nd0.global_position + bz.y * 0.2, Vector3.UP)
+		cam.fov = 50.0
+		return
 	if OS.get_environment("TOPCAM") != "":
 		# nur zum Testen: Blick senkrecht von oben auf die Strecke
 		var tz = float(OS.get_environment("TOPCAM"))
@@ -12520,34 +12532,22 @@ func _turret_node(o: Dictionary) -> Node3D:
 	# Schiffsmodelle sind unterschiedlich skaliert – das Geschütz soll immer gleich groß wirken
 	var sc: Vector3 = nd.global_transform.basis.get_scale()
 	t.scale = Vector3(1.0 / maxf(0.001, sc.x), 1.0 / maxf(0.001, sc.y), 1.0 / maxf(0.001, sc.z))
-	var mt = StandardMaterial3D.new()
-	mt.albedo_color = Color(0.12, 0.12, 0.14)
-	mt.metallic = 0.85
-	mt.roughness = 0.35
-	mt.emission_enabled = true
-	mt.emission = Color(WC.turret) * 0.12
-	var base = MeshInstance3D.new()
-	var sm = SphereMesh.new()
-	sm.radius = 0.13
-	sm.height = 0.13
-	sm.is_hemisphere = true
-	base.mesh = sm
-	base.material_override = mt
-	t.add_child(base)
+	# Geschützturm-Modell (Tripo): Lauf zeigt im Modell nach −X, Sockel steht auf y = 0, Drehpunkt mitten im Turm
 	var head = Node3D.new()
-	head.position = Vector3(0, 0.06, 0)
 	t.add_child(head)
-	for x in [-0.035, 0.035]:
-		var br = MeshInstance3D.new()
-		var cm = CylinderMesh.new()
-		cm.top_radius = 0.022
-		cm.bottom_radius = 0.028
-		cm.height = 0.38
-		br.mesh = cm
-		br.material_override = mt
-		br.rotation = Vector3(PI * 0.5, 0, 0)
-		br.position = Vector3(x, 0.0, 0.19)
-		head.add_child(br)
+	var TS = 0.0055
+	var ps: PackedScene = load("res://ships/turret.glb")
+	if ps != null:
+		var mdl: Node3D = ps.instantiate()
+		var hold = Node3D.new()
+		hold.rotation = Vector3(0, PI * 0.5, 0)   # −X → nach vorn (+Z)
+		hold.scale = Vector3.ONE * TS
+		head.add_child(hold)
+		mdl.position = Vector3(-15.0, 0.0, 0.0)
+		hold.add_child(mdl)
+		for m in mdl.find_children("*", "MeshInstance3D", true, false):
+			(m as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	t.set_meta("muzzle", Vector3(0.0, 17.0 * TS, 65.0 * TS))
 	t.set_meta("head", head)
 	t.visible = false
 	nd.add_child(t)
@@ -12635,7 +12635,7 @@ func _gun_tracer(o: Dictionary, tg: Dictionary, hit: bool) -> void:
 		gun_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var tn = _turret_node(o)
 	var head: Node3D = tn.get_meta("head")
-	var a: Vector3 = head.global_position + head.global_transform.basis.z * 0.38
+	var a: Vector3 = head.global_transform * (tn.get_meta("muzzle", Vector3(0, 0.05, 0.38)) as Vector3)
 	var b: Vector3 = (tg.node as Node3D).global_position + Vector3(0, 0.15, 0)
 	if not hit:
 		b += Vector3(randf_range(-0.9, 0.9), randf_range(0.2, 0.7), randf_range(-0.5, 0.5))
