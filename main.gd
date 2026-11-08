@@ -1549,6 +1549,7 @@ func _build_track() -> void:
 	if not _jungle():
 		_tribunes()
 		_blimp_make()
+	_props_make()
 	for k in range(2, 51):
 		var zc = k * 14.0 + 7.0
 		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle():
@@ -3780,16 +3781,18 @@ var neon_font: Font = null
 func _tribunes() -> void:
 	if not mats.has("tconc"):
 		var m = StandardMaterial3D.new()
-		m.albedo_color = Color(0.34, 0.34, 0.37)
-		m.roughness = 0.8
+		m.albedo_color = Color(0.42, 0.43, 0.48)
+		m.roughness = 0.75
 		m.metallic = 0.1
 		m.emission_enabled = true
-		m.emission = Color(0.05, 0.055, 0.07)   # nachts leicht angestrahlt
+		m.emission = Color(0.12, 0.14, 0.2) if not _noir() else Color(0.14, 0.14, 0.15)   # nachts angestrahlt (bläulich)
 		mats["tconc"] = m
 		var m2 = StandardMaterial3D.new()
-		m2.albedo_color = Color(0.07, 0.07, 0.08)
+		m2.albedo_color = Color(0.1, 0.1, 0.12)
 		m2.roughness = 0.6
 		m2.metallic = 0.4
+		m2.emission_enabled = true
+		m2.emission = Color(0.03, 0.035, 0.05)
 		mats["tseat"] = m2
 		mats["tneo"] = _neon(OR if _noir() else Color(1.0, 0.5, 0.1), 2.6)
 		mats["tnec"] = _neon(Color(0.9, 0.9, 0.95) if _noir() else Color(0.2, 0.85, 1.0), 2.2)
@@ -3886,7 +3889,7 @@ void vertex(){
 	float s=length(MODEL_MATRIX[0].xyz);
 	vec3 x=normalize(vec3(INV_VIEW_MATRIX[0].x,0.,INV_VIEW_MATRIX[0].z));
 	vec3 z=normalize(vec3(INV_VIEW_MATRIX[2].x,0.,INV_VIEW_MATRIX[2].z));
-	VERTEX.y+=abs(sin(TIME*(4.+ph*3.)+ph*6.28))*.05*step(.35,ph);
+	VERTEX.y+=abs(sin(TIME*(4.+ph*3.)+ph*6.28))*.012*step(.7,ph);   // nur ein paar hüpfen, und nur wenig
 	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(vec4(x*s,0.),vec4(0.,s,0.,0.),vec4(z*s,0.),MODEL_MATRIX[3]);
 }
 void fragment(){
@@ -4196,6 +4199,27 @@ func _party_fig(nm: String, anim: String, pos: Vector3, look: Vector3, tint: Col
 	return root
 
 
+# Helm (eigenes Modell) an Rens linke Hand hängen – Kinnöffnung zur Hand, ≈ 30 cm groß
+func _party_helmet(ren: Node3D) -> void:
+	if not ResourceLoader.exists("res://win/helmet.glb"):
+		return
+	var sk: Skeleton3D = ren.find_children("*", "Skeleton3D", true, false)[0]
+	var hb = sk.find_bone("mixamorig_LeftHand")
+	if hb < 0:
+		return
+	var ba = BoneAttachment3D.new()
+	sk.add_child(ba)
+	ba.bone_idx = hb
+	var h: Node3D = load("res://win/helmet.glb").instantiate()
+	ba.add_child(h)
+	# Größe im Weltmaß: ≈ 0,3 m = 0,075 Einheiten; Skelett ist schon skaliert, also durch dessen Weltmaßstab teilen
+	var ws = sk.global_transform.basis.get_scale().x
+	var k = 0.075 / maxf(ws, 1e-4)
+	h.transform = Transform3D(Basis(Vector3(1, 0, 0), PI).scaled(Vector3.ONE * k), Vector3(0, 0.6 * k, 0.15 * k))
+	for mi in h.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
 func _party_start() -> void:
 	_party_end()
 	party_on = true
@@ -4242,6 +4266,7 @@ func _party_start() -> void:
 	# Ren mit Helm neben seinem Schiff, schaut zur Kamera-Seite
 	var rp: Vector3 = at.call(0.25, -0.6)
 	party.ren = _party_fig("ren", "victory_idle", rp, rp - f.rr * 2.0 + f.fw * 0.4, Color(1, 1, 1), 1.0, 0.0)
+	_party_helmet(party.ren)
 	party.c = rp
 	# Mechanikerinnen am Schiff, Fans im Halbkreis
 	# Kamera steht links (−lat) und schaut nach rechts: Ren vorn, dahinter Schiff, Team und Fans
@@ -4297,7 +4322,7 @@ var conf_mesh: QuadMesh = null
 func _confetti(pos: Vector3) -> void:
 	if conf_mesh == null:
 		conf_mesh = QuadMesh.new()
-		conf_mesh.size = Vector2(0.03, 0.018)
+		conf_mesh.size = Vector2(0.014, 0.009)
 		var m = StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.vertex_color_use_as_albedo = true
@@ -4306,15 +4331,16 @@ func _confetti(pos: Vector3) -> void:
 	var p = GPUParticles3D.new()
 	var pm = ParticleProcessMaterial.new()
 	pm.direction = Vector3(0, 1, 0)
-	pm.spread = 22.0
-	pm.initial_velocity_min = 5.0
-	pm.initial_velocity_max = 9.0
-	pm.gravity = Vector3(0, -2.2, 0)
-	pm.damping_min = 2.2
-	pm.damping_max = 3.5
-	pm.angular_velocity_min = -720.0
-	pm.angular_velocity_max = 720.0
+	pm.spread = 18.0
+	pm.initial_velocity_min = 4.0
+	pm.initial_velocity_max = 7.0
+	pm.gravity = Vector3(0, -3.2, 0)
+	pm.damping_min = 1.0
+	pm.damping_max = 1.6
+	pm.angular_velocity_min = -540.0
+	pm.angular_velocity_max = 540.0
 	pm.particle_flag_rotate_y = true
+	pm.particle_flag_disable_z = false
 	pm.turbulence_enabled = true
 	pm.turbulence_noise_strength = 0.6
 	pm.turbulence_noise_scale = 1.5
@@ -4326,8 +4352,8 @@ func _confetti(pos: Vector3) -> void:
 	pm.color_initial_ramp = gt
 	p.process_material = pm
 	p.draw_pass_1 = conf_mesh
-	p.amount = 220
-	p.lifetime = 5.0
+	p.amount = 260
+	p.lifetime = 4.0
 	p.one_shot = true
 	p.explosiveness = 0.92
 	p.local_coords = false
@@ -4372,6 +4398,213 @@ func _party_live(dt: float) -> bool:
 		cam.look_at(c + f.uu * 0.25, Vector3.UP)
 		cam.fov = 40.0
 	return true
+
+
+
+# ---------------------------------------------------------------- Hindernisse: Fässer und Leitkegel auf der Strecke
+# Liegen in Gruppen auf der Fahrbahn; wer sie anfährt, kickt sie weg (2 % Energie, 2 % Tempo). Die Strecke ist von einem
+# unsichtbaren Schutzschild (Röhre) umgeben: Teile prallen davon ab – an der Stelle blitzt der Schild kurz auf.
+const PROP_SPOTS = [[130.0, 0.9, "b"], [132.0, 1.4, "b"], [131.0, 0.3, "c"], [275.0, -1.2, "c"], [277.0, -0.7, "c"], [279.0, -1.5, "b"],
+	[360.0, 1.3, "b"], [361.5, 1.7, "b"], [362.0, 0.9, "c"], [420.0, -0.4, "c"], [421.0, 0.1, "c"], [422.0, 0.6, "c"],
+	[485.0, 1.6, "b"], [486.0, 1.1, "c"], [620.0, -1.4, "b"], [621.5, -1.0, "b"], [622.0, -1.8, "c"], [668.0, 0.6, "c"], [669.5, 1.1, "b"]]
+const SHIELD_H = 2.6   # Höhe der Schutzröhre über der Fahrbahn
+var props = []
+var props0 = []
+var prop_res = {}
+var shield_hits = []
+
+
+func _props_make() -> void:
+	props.clear()
+	props0.clear()
+	if _jungle() or T.S:
+		return
+	for k in ["b", "c"]:
+		var pth = "res://city/%s.glb" % ("barrel" if k == "b" else "cone")
+		if not ResourceLoader.exists(pth):
+			return
+		prop_res[k] = load(pth)
+	for sp in PROP_SPOTS:
+		if T.in_tun(sp[0], 3.0):
+			continue
+		var k: String = sp[2]
+		var n: Node3D = (prop_res[k] as PackedScene).instantiate()
+		var hgt = 0.27 if k == "b" else 0.2   # Fass ≈ 1,1 m, Kegel ≈ 0,8 m
+		n.scale = Vector3.ONE * hgt
+		var root = Node3D.new()
+		root.add_child(n)
+		add_child(root)
+		root.set_meta("rfx", false)
+		if k == "c":
+			# Leuchtstreifen am Kegel: oranges Glimmen
+			var gl = OmniLight3D.new()
+			gl.light_color = Color(1.0, 0.5, 0.1)
+			gl.light_energy = 0.8
+			gl.omni_range = 0.6
+			gl.position = Vector3(0, hgt * 0.7, 0)
+			root.add_child(gl)
+			for mi in n.find_children("*", "MeshInstance3D", true, false):
+				var src = (mi as MeshInstance3D).mesh.surface_get_material(0)
+				if src is StandardMaterial3D:
+					var mm = (src as StandardMaterial3D).duplicate()
+					mm.emission_enabled = true
+					mm.emission_texture = mm.albedo_texture
+					mm.emission = Color(1.0, 0.55, 0.15)
+					mm.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+					mm.emission_energy_multiplier = 0.9
+					(mi as MeshInstance3D).material_override = mm
+		var d = {"n": root, "k": k, "z": float(sp[0]), "lat": float(sp[1]), "h": 0.0, "vz": 0.0, "vl": 0.0, "vh": 0.0,
+			"rb": Basis(Vector3.UP, randf() * TAU), "av": Vector3.ZERO, "r": 0.09 if k == "b" else 0.07, "hg": hgt, "kt": 0.0, "rest": true}
+		props.append(d)
+		props0.append(d.duplicate())
+
+
+func _props_reset() -> void:
+	for i in range(props.size()):
+		var n = props[i].n
+		props[i] = props0[i].duplicate()
+		props[i].n = n
+
+
+func _props_update(dt: float) -> void:
+	if props.is_empty() or ships.is_empty():
+		return
+	var gz: float = ships[0].z
+	var lap0 = floor((gz - 20.0) / T.LAP) * T.LAP
+	for d in props:
+		var nd: Node3D = d.n
+		if not d.rest:
+			d.vh -= 14.0 * dt
+			d.z = wrapf(float(d.z) + d.vz * dt, 20.0, 20.0 + T.LAP)
+			d.lat += d.vl * dt
+			d.h += d.vh * dt
+			var r: float = d.r
+			if d.h <= 0.0:
+				d.h = 0.0
+				if d.vh < -1.5:
+					d.vh = -d.vh * 0.35
+					d.av = (d.av as Vector3) * 0.6
+				else:
+					d.vh = 0.0
+				d.vz *= exp(-2.4 * dt)
+				d.vl *= exp(-3.0 * dt)
+				var av: Vector3 = d.av
+				d.av = Vector3(av.x * exp(-4.0 * dt), av.y * exp(-2.0 * dt), av.z * exp(-4.0 * dt))
+				if absf(d.vz) < 0.15 and absf(d.vl) < 0.15 and absf(d.vh) < 0.1 and (d.av as Vector3).length() < 0.4:
+					d.rest = true
+			# Schutzschild: seitlich und oben – abprallen, Schild blitzt auf
+			var lim = T.TW + 0.35 - r
+			if absf(d.lat) > lim:
+				d.lat = signf(d.lat) * lim
+				if absf(d.vl) > 0.8:
+					_shield_flash(d, Vector3(signf(d.lat), 0.0, 0.0))
+				d.vl = -d.vl * 0.55
+			if d.h > SHIELD_H - r:
+				d.h = SHIELD_H - r
+				if d.vh > 0.8:
+					_shield_flash(d, Vector3(0.0, 1.0, 0.0))
+				d.vh = -d.vh * 0.5
+			var av2: Vector3 = d.av
+			if av2.length() > 0.01:
+				d.rb = (Basis(av2.normalized(), av2.length() * dt) * (d.rb as Basis)).orthonormalized()
+		# an der Runde des Spielers zeigen
+		var zw = float(d.z) + lap0
+		if zw < gz - T.LAP * 0.5:
+			zw += T.LAP
+		elif zw > gz + T.LAP * 0.5:
+			zw -= T.LAP
+		var f = T.frame(zw)
+		var B = Basis(-f.rr, f.uu, f.fw)
+		nd.global_transform = Transform3D(B * (d.rb as Basis), f.c + f.rr * d.lat + f.uu * (d.h + 0.005))
+		# Zusammenstoß mit Schiffen
+		d.kt = maxf(0.0, float(d.kt) - dt)
+		if d.kt > 0.0 or not (state == "race" or state == "done") or party_on:
+			continue
+		for o in ships:
+			if o.out or o.air:
+				continue
+			var dz = wrapf(float(d.z) - wrapf(o.z, 20.0, 20.0 + T.LAP), -T.LAP * 0.5, T.LAP * 0.5)
+			if absf(dz) < 0.75 + d.r and absf(d.lat - o.lat) < 0.3 + d.r and d.h < 0.5:
+				d.kt = 0.35
+				d.rest = false
+				var sp = maxf(o.spd, 1.0)
+				var away = signf(d.lat - o.lat) if absf(d.lat - o.lat) > 0.02 else (1.0 if randf() < 0.5 else -1.0)
+				var light = 1.0 if d.k == "c" else 0.75
+				d.vz = sp * randf_range(0.7, 1.05) * light
+				d.vl = away * sp * randf_range(0.15, 0.4) * light + o.spd * sin(o.vpsi)
+				d.vh = sp * randf_range(0.12, 0.28) * light
+				d.av = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)).normalized() * randf_range(6.0, 16.0)
+				o.spd *= 0.98
+				if not _prot(o):
+					_dmg(o, 0.02, -1, "ram")
+				var pos: Vector3 = nd.global_position
+				_snd("crash_bump", -10.0 if o.idx == 0 else -8.0, randf_range(1.2, 1.5) if d.k == "c" else randf_range(0.85, 1.05), null if o.idx == 0 else pos)
+				if o.idx == 0:
+					shake = maxf(shake, 0.12)
+				break
+	_shield_hits_update(dt)
+	if OS.get_environment("PROPDBG") != "" and Engine.get_process_frames() % 10 == 0:
+		var mv = []
+		for d in props:
+			if not d.rest or float(d.h) > 0.0:
+				mv.append("%s z%.1f l%.2f h%.2f" % [d.k, d.z, d.lat, d.h])
+		print("PROPS en=", snappedf(ships[0].en, 0.01), " ", mv, " hits=", shield_hits.size())
+
+
+# Schutzschild leuchtet an der Aufprallstelle kurz auf (Sechseck-Raster, cyan), mit Schild-Klang
+const SHIELD_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
+uniform float a=1.;uniform vec3 c=vec3(.3,.9,1.);
+vec2 hx(vec2 p){vec2 r=vec2(1.,1.732);vec2 h=r*.5;vec2 a1=mod(p,r)-h;vec2 b=mod(p-h,r)-h;return dot(a1,a1)<dot(b,b)?a1:b;}
+void fragment(){
+	vec2 q=UV-.5;float d=length(q)*2.;
+	vec2 g=hx(q*9.);float e=smoothstep(.42,.5,max(abs(g.x)*1.5+abs(g.y)*.866,abs(g.y)*1.732));
+	float ring=smoothstep(.15,0.,abs(d-(1.-a)*.9));
+	ALBEDO=c*(e*.9+ring*1.6+.25)*smoothstep(1.,.2,d)*a;
+}"""
+var prop_shield_mat: ShaderMaterial = null
+
+
+func _shield_flash(d: Dictionary, nrm: Vector3) -> void:
+	if shield_hits.size() > 6:
+		return
+	if prop_shield_mat == null:
+		prop_shield_mat = _shader_mat(SHIELD_CODE)
+	var q = MeshInstance3D.new()
+	var qm = QuadMesh.new()
+	qm.size = Vector2(1.2, 1.2)
+	q.mesh = qm
+	var m: ShaderMaterial = prop_shield_mat.duplicate()
+	q.material_override = m
+	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	q.set_meta("rfx", true)
+	add_child(q)
+	var p: Vector3 = (d.n as Node3D).global_position
+	var gz: float = ships[0].z
+	var lap0 = floor((gz - 20.0) / T.LAP) * T.LAP
+	var zw = float(d.z) + lap0
+	if zw < gz - T.LAP * 0.5:
+		zw += T.LAP
+	var f = T.frame(zw)
+	var n: Vector3 = f.rr * nrm.x + f.uu * nrm.y
+	var at: Vector3 = p + n * float(d.r)
+	q.global_transform = Transform3D(Basis.looking_at(n, f.fw if absf(nrm.y) > 0.5 else f.uu), at)
+	shield_hits.append({"n": q, "m": m, "t": 0.0})
+	_snd("shield", -8.0, randf_range(1.3, 1.6), at)
+
+
+func _shield_hits_update(dt: float) -> void:
+	for i in range(shield_hits.size() - 1, -1, -1):
+		var h: Dictionary = shield_hits[i]
+		h.t += dt
+		var a = 1.0 - h.t / 0.55
+		if a <= 0.0 or not is_instance_valid(h.n):
+			if is_instance_valid(h.n):
+				(h.n as Node).queue_free()
+			shield_hits.remove_at(i)
+			continue
+		(h.m as ShaderMaterial).set_shader_parameter("a", a)
 
 
 # ---------------------------------------------------------------- Gleiter
@@ -11092,6 +11325,7 @@ func _process(delta: float) -> void:
 			place += 1
 	_collide(dt)
 	_debris_update(dt)
+	_props_update(dt)
 	_weapons(dt, racing)
 	_mine_warn(dt, racing)
 	if racing and g.out:
@@ -13720,6 +13954,7 @@ func _soft_reset() -> bool:
 	_party_end()
 	for o in ships:
 		(o.node as Node3D).visible = true
+	_props_reset()
 	Engine.time_scale = 1.0
 	AudioServer.playback_speed_scale = 1.0
 	# Effekte des letzten Rennens wegräumen
