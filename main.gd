@@ -409,7 +409,7 @@ func _sounds() -> void:
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
-			"cbeep.wav", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav", "ignite.wav",
+			"cbeep.wav", "wspin.wav", "holozap.wav", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
@@ -2451,12 +2451,14 @@ var sign_mat: ShaderMaterial
 var srch_mat: ShaderMaterial
 var car_mat: ShaderMaterial
 # Standorte je Runde: [z, Seite (+1 rechts, -1 links), Art]  – nicht in den Tunneln (160–245, 510–595)
-const HOLO_SPOTS = [[80.0, 1.0, "dancer"], [300.0, -1.0, "dancer"], [455.0, 1.0, "dancer"], [655.0, -1.0, "dancer"],
+# Hologramm-Plätze: z, Seite, Art, Abstand der Figur-Achse zur Streckenmitte (klein = die Strecke läuft durch ihre Beine)
+const HOLO_SPOTS = [[80.0, 1.0, "dancer", 30.0], [370.0, -1.0, "dancer", 3.0], [455.0, 1.0, "dancer", 30.0], [680.0, -1.0, "dancer", 3.0],
 	[128.0, -1.0, "koi"], [392.0, 1.0, "koi"], [615.0, -1.0, "koi"]]
 const DANCER_H = 1.66   # Größe der Figur im Modell (m)
 # Hologramm-Figuren: [Datei, Höhe im Modell, dreht sich (stehende Figur)]
 # fig_woman3: Blade-Runner-Frau (Tripo, Mixamo-Skelett) – tanzt mit dem Samba des Tänzers (zur Laufzeit übertragen)
-const HOLO_FIGS = [["res://holo/dancer.glb", 1.66, false], ["res://holo/fig_woman1.glb", 1.0, true], ["res://holo/fig_robot.glb", 1.0, true], ["res://holo/fig_woman2.glb", 1.0, true], ["res://holo/fig_woman3.glb", 0.0, false, "samba"]]
+# Der Tänzer selbst wird nicht mehr gezeigt, er liefert nur noch den Samba („src“)
+const HOLO_FIGS = [["res://holo/dancer.glb", 1.66, false, "", "src"], ["res://holo/fig_woman3.glb", 0.0, false, "samba"]]
 const HOLO_H = 45.0     # Höhe der Hologramme in der Stadt (m)
 
 const HOLO_CODE = """
@@ -2709,7 +2711,9 @@ func _holo_node(kind: String) -> Dictionary:
 				(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				(mi as MeshInstance3D).extra_cull_margin = 0.6
 			var fg = {"n": n, "h": fd[1], "spin": fd[2]}
-			if fd.size() > 3 and not h.figs.is_empty() and h.figs[0].has("ap"):
+			if fd.size() > 4 and fd[4] == "src":
+				fg.src = true
+			if fd.size() > 3 and fd[3] == "samba" and not h.figs.is_empty() and h.figs[0].has("ap"):
 				fg = _holo_samba(n, h.figs[0], fg)
 				n = fg.n
 			var aps = n.find_children("*", "AnimationPlayer", true, false)
@@ -2723,9 +2727,15 @@ func _holo_node(kind: String) -> Dictionary:
 			n.visible = false
 			root.add_child(n)
 			h.figs.append(fg)
-		h.fi = 0
+		h.show = []
+		for k in range(h.figs.size()):
+			if not h.figs[k].get("src", false):
+				h.show.append(k)
+		h.fi = h.show[0] if not h.show.is_empty() else 0
 		h.swt = 0.0
 		h.gx = 0.0
+		h.zap = 0.0
+		h.inside = false
 		h.n = root
 	else:
 		mat = _shader_mat(KOI_CODE)
@@ -2811,6 +2821,16 @@ func _holo_samba(n: Node3D, src: Dictionary, fg: Dictionary) -> Dictionary:
 		htr = na.add_track(Animation.TYPE_POSITION_3D)
 		na.track_set_path(htr, NodePath(dp + "mixamorig_Hips"))
 		hr0 = (dx * ds.get_bone_global_rest(hd).origin).y / maxf(0.001, (sx * ss.get_bone_global_rest(hs).origin).y)
+	# Hüft-Bewegung relativ zur mittleren Lage im Tanz (die Ruhelage des Tänzers passt nicht dazu – sonst schwebt sie)
+	var pmean = Vector3.ZERO
+	if htr >= 0:
+		var nsm = 0
+		var ts = 0.0
+		while ts <= a.length:
+			pmean += sx * a.position_track_interpolate(ptr, ts)
+			nsm += 1
+			ts += 0.1
+		pmean /= maxf(1.0, float(nsm))
 	var t = 0.0
 	while t <= a.length + 0.001:
 		var sg = []
@@ -2834,7 +2854,7 @@ func _holo_samba(n: Node3D, src: Dictionary, fg: Dictionary) -> Dictionary:
 			var lq2: Quaternion = (dg[pb].inverse() * g) if pb >= 0 else g
 			na.rotation_track_insert_key(otr[b], t, lq2.normalized())
 		if htr >= 0:
-			var sw: Vector3 = sx * a.position_track_interpolate(ptr, t) - sx * ss.get_bone_rest(hs).origin
+			var sw: Vector3 = sx * a.position_track_interpolate(ptr, t) - pmean
 			var dw: Vector3 = dx * ds.get_bone_rest(hd).origin + sw * hr0
 			na.position_track_insert_key(htr, t, dx.affine_inverse() * dw)
 		t += 1.0 / 24.0
@@ -2853,10 +2873,44 @@ func _holo_samba(n: Node3D, src: Dictionary, fg: Dictionary) -> Dictionary:
 		first = false
 	var hold = Node3D.new()
 	n.position = -Vector3(bb.get_center().x, bb.position.y, bb.get_center().z)
+	# Skelett-Ruhelage und Mesh-Lage stimmen bei dem Tripo-Modell nicht überein: an den Knöcheln ausrichten
+	var lf = ds.find_bone("mixamorig_LeftFoot")
+	var hb = ds.find_bone("mixamorig_Hips")
+	if lf >= 0 and hb >= 0:
+		var fy = (dx * ds.get_bone_global_rest(lf).origin).y
+		var hpz: Vector3 = dx * ds.get_bone_global_rest(hb).origin
+		n.position = -Vector3(hpz.x, fy - 0.045 * bb.size.y, hpz.z)
 	hold.add_child(n)
 	fg.n = hold
 	fg.h = bb.size.y
+	# Körperteile als Kapseln (Knochen von–bis, Dicke in Figurhöhen) – für die Durchfahrt
+	fg.sk = ds
+	fg.caps = []
+	for cp in [["LeftUpLeg", "LeftLeg", 0.055], ["LeftLeg", "LeftFoot", 0.04], ["RightUpLeg", "RightLeg", 0.055], ["RightLeg", "RightFoot", 0.04],
+			["Hips", "Neck", 0.09], ["LeftArm", "LeftForeArm", 0.035], ["LeftForeArm", "LeftHand", 0.03], ["RightArm", "RightForeArm", 0.035], ["RightForeArm", "RightHand", 0.03]]:
+		var a0 = ds.find_bone("mixamorig_" + cp[0])
+		var a1 = ds.find_bone("mixamorig_" + cp[1])
+		if a0 >= 0 and a1 >= 0:
+			fg.caps.append([a0, a1, cp[2]])
 	return fg
+
+
+# Steckt der Punkt (Schiff) gerade in der Hologramm-Figur? Prüft Kapseln entlang der Knochen.
+func _holo_hit(h: Dictionary, q: Vector3) -> bool:
+	var fg: Dictionary = h.figs[int(h.fi)]
+	if not fg.has("caps") or not (fg.n as Node3D).visible:
+		return false
+	var sk: Skeleton3D = fg.sk
+	var xf: Transform3D = sk.global_transform
+	var R = float(h.H)
+	for cp in fg.caps:
+		var a: Vector3 = xf * sk.get_bone_global_pose(cp[0]).origin
+		var b: Vector3 = xf * sk.get_bone_global_pose(cp[1]).origin
+		var ab = b - a
+		var tt = clampf((q - a).dot(ab) / maxf(ab.length_squared(), 1e-6), 0.0, 1.0)
+		if q.distance_to(a + ab * tt) < float(cp[2]) * R:
+			return true
+	return false
 
 
 func _rel_path(top: Node, n: Node) -> String:
@@ -2873,11 +2927,10 @@ func _holos_make() -> void:
 		var h = _holo_node(kind)
 		_sp(h.mat, "sd", float(holos.size()) * 1.37)
 		if kind == "dancer":
-			h.fi = [HOLO_FIGS.size() - 1, 0][holos.size() % 2]   # die zwei Plätze starten verschieden – zuerst die neue Frau
 			h.swt = 4.0 * holos.size()
 			for a in OS.get_cmdline_user_args():
 				if a.begins_with("--holofig="):
-					h.fi = int(a.substr(10)) % HOLO_FIGS.size()
+					h.fi = h.show[int(a.substr(10)) % h.show.size()]
 				if a.begins_with("--holoswt="):
 					h.swt = float(a.substr(10))
 		holos.append(h)
@@ -3196,7 +3249,7 @@ func _city_live() -> void:
 			var zz: float = sp[0] + base + k * T.LAP
 			var d = zz - cz
 			if d > -80.0 and d < 520.0:
-				cands[sp[2]].append([d, zz, sp[1]])
+				cands[sp[2]].append([d, zz, sp[1], sp[3] if sp.size() > 3 else 30.0])
 	for kd in cands:
 		cands[kd].sort_custom(_by_first)
 	var used = {"dancer": 0, "koi": 0}
@@ -3227,11 +3280,12 @@ func _city_live() -> void:
 		var mat: ShaderMaterial = h.mat
 		_sp(mat, "fl", float(C.hflick))
 		if kind == "dancer":
-			var H = HOLO_H * hs
+			var H = HOLO_H * hs * (1.15 if h.get("near", false) else 1.0)
 			if h.spot != c[1] or h.get("H", 0.0) != H:
 				h.spot = c[1]
 				h.H = H
-				var p: Vector3 = f.c + f.rr * (c[2] * (T.TW + 22.0 + 8.0 * hs)) + Vector3.UP * (-14.0)
+				h.near = float(c[3]) < 15.0
+				var p: Vector3 = f.c + f.rr * (c[2] * (float(c[3]) if h.near else (T.TW + 22.0 + 8.0 * hs))) + Vector3.UP * (-14.0)
 				var dir: Vector3 = (f.c - f.fw * 40.0 - p) * Vector3(1, 0, 1)
 				nd.global_transform = Transform3D(Basis.looking_at(-dir.normalized(), Vector3.UP), p)
 				_sp(mat, "by", p.y)
@@ -3245,7 +3299,17 @@ func _city_live() -> void:
 				gx = clampf((h.swt - (per - 0.3)) / 0.3, 0.0, 1.0)
 			if h.swt > per:
 				h.swt = -0.4 * randf()
-				h.fi = (int(h.fi) + 1 + randi() % maxi(1, HOLO_FIGS.size() - 1)) % HOLO_FIGS.size()
+				if h.show.size() > 1:
+					h.fi = h.show[(h.show.find(int(h.fi)) + 1 + randi() % (h.show.size() - 1)) % h.show.size()]
+			# Durchfahrt: Schiff steckt in einem Bein/Arm/Körper der Riesin → knistern und flackern
+			h.zap = maxf(0.0, float(h.zap) - dt2)
+			var ins = h.get("near", false) and not ships.is_empty() and _holo_hit(h, (ships[0].node as Node3D).global_position)
+			if ins and not h.inside and state == "race":
+				_snd("holozap", -2.0, randf_range(0.9, 1.1))
+				h.zap = 0.35
+			h.inside = ins
+			if h.zap > 0.0:
+				gx = maxf(gx, 0.55 * h.zap / 0.35 + 0.25 * randf())
 			if h.swt < 0.0:
 				gx = maxf(gx, clampf(-h.swt / 0.4 + 0.5, 0.0, 1.0))
 			if h.swt >= 0.0 and h.swt < 0.45:
@@ -3437,6 +3501,17 @@ func _rings_build(root: Node3D, idx: int) -> Array:
 		pl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		pl.position = Vector3(p.x, -0.15, p.z)
 		root.add_child(pl)
+		if p.z < 0.0:
+			# hintere Antigrav-Felder strahlen nach unten: echtes Licht, damit der nasse Asphalt den Schein spiegelt
+			var gl = OmniLight3D.new()
+			gl.light_color = Color(0.35, 0.9, 1.0)
+			gl.light_energy = 5.0
+			gl.light_specular = 2.0
+			gl.omni_range = 1.9
+			gl.omni_attenuation = 1.4
+			gl.shadow_enabled = false
+			gl.position = Vector3(p.x, -0.06, p.z)
+			root.add_child(gl)
 		out.append([rm, pm, pl, signf(p.x)])
 	if not out.is_empty():
 		var ol = OmniLight3D.new()
@@ -4860,7 +4935,7 @@ func _dot(r: int) -> ImageTexture:
 
 func _refresh_ui() -> void:
 	ui.ship.text = SHIPS[int(cfg.ship)][1].to_upper()
-	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Holograms: Mixamo (Adobe), robotic girl by suddel, “Sexy Woman” and “Sexy Wet T-Shirt Babe” (Sketchfab), CC BY 4.0 · Textures: ambientCG (CC0) · Voices: ElevenLabs · Characters & start girl: John, 3D via Tripo AI · “Jungle Tree” by gelmi.com.br, CC BY 4.0 · private use only"
+	ui.credit.text = "Ship: " + SHIPS[int(cfg.ship)][3] + " · Hologram: John, 3D via Tripo AI, dance by Mixamo (Adobe) · Textures: ambientCG (CC0) · Voices: ElevenLabs · Characters & start girl: John, 3D via Tripo AI · “Jungle Tree” by gelmi.com.br, CC BY 4.0 · private use only"
 	ui.sl.speed.text = "Speed  %d %%" % int(round(float(cfg.speed) * 100.0))
 	ui.sl.ai.text = "Rivals speed  %d %%" % int(round(float(cfg.ai) * 100.0))
 	ui.sl.res.text = "Resolution  %d %%" % int(round(float(cfg.res) * 100.0))
@@ -7594,11 +7669,12 @@ func _weapons(dt: float, racing: bool) -> void:
 		if g.wpn == "":
 			g.wpn = _pick_w()
 			g.wpc = 1
-			_snd("pick", -4.0)
-			_snd("vo_" + g.wpn, 3.0)   # Ansage, was du eingesammelt hast
+			_snd("wspin", 0.0)   # Waffenrad dreht sich (Johns Sound); die Ansage kommt erst, wenn es steht
+			var wv = "vo_" + g.wpn
+			get_tree().create_timer(1.2).timeout.connect(func(): _snd(wv, 3.0))
 			if g.wpn == "orbs" and g.orbs > 0.0:
 				g.sup = true
-				get_tree().create_timer(0.75).timeout.connect(func(): _snd("vo_super", 3.0))
+				get_tree().create_timer(1.95).timeout.connect(func(): _snd("vo_super", 3.0))
 		else:
 			# Waffe behalten und noch zwei Waffenfelder überfahren → deine Waffe wird zur Superwaffe
 			g.wpc = int(g.get("wpc", 1)) + 1
@@ -12065,8 +12141,8 @@ func _ga_frame(g: Dictionary, dt: float) -> void:
 	f.modulate.a = 0.0
 	f.offset_left = -150.0 * k
 	f.offset_right = 150.0 * k
-	f.offset_top = -(GA_H - 1250.0) * k
-	f.offset_bottom = -(GA_H - 1585.0) * k
+	f.offset_top = -(GA_H - 1200.0) * k
+	f.offset_bottom = -(GA_H - 1560.0) * k
 	# Roulette starten, wenn eine neue Waffe eingesammelt wurde
 	var w: String = g.wpn
 	if w != ga_last:
@@ -12084,7 +12160,8 @@ func _ga_frame(g: Dictionary, dt: float) -> void:
 		var idx = mini(n - 1, int(floor((1.0 - pow(1.0 - u, 2.6)) * (n - 1) + 0.0001)))
 		if idx != ga_rl.i:
 			ga_rl.i = idx
-			_snd("beep", -16.0, 2.2 if idx < n - 1 else 1.4)
+			if idx == n - 1:
+				_snd("beep", -16.0, 1.4)   # nur noch das Einrasten – das Drehen macht jetzt der Rad-Sound
 		if ga_rl.t > 1.6:
 			ga_rl = {}
 	hud.gs = lerpf(float(hud.gs), g.spd, 1.0 - exp(-dt / 0.15))
@@ -12129,19 +12206,19 @@ func _ga_draw(c: Control) -> void:
 	var TXT = Color(1.0, 0.82, 0.62)
 	# ---- oben
 	c.draw_set_transform(Vector2.ZERO, 0.0, Vector2(k, k))
-	c.draw_texture_rect_region(ga_tex, Rect2(0, 0, GA_W, 420), Rect2(0, 0, GA_W, 420))
-	_ga_txt(c, Vector2(72, 150), "POS", 22, OR2)
+	c.draw_texture_rect_region(ga_tex, Rect2(0, 0, GA_W, 460), Rect2(0, 0, GA_W, 460))
+	_ga_txt(c, Vector2(78, 163), "POS", 22, OR2)
 	if free_ride:
-		_ga_txt(c, Vector2(72, 200), "FREE", 46, TXT, 0, 6)
+		_ga_txt(c, Vector2(78, 213), "FREE", 46, TXT, 0, 6)
 	else:
 		var pl = str(hud.pl.text).substr(0, 1)
-		_ga_txt(c, Vector2(150, 202), pl if pl != "" else "-", 62, Color(1, 1, 1), 2, 6)
-		_ga_txt(c, Vector2(156, 202), str(hud.pln.text), 34, TXT, 0, 5)
+		_ga_txt(c, Vector2(156, 215), pl if pl != "" else "-", 62, Color(1, 1, 1), 2, 6)
+		_ga_txt(c, Vector2(162, 215), str(hud.pln.text), 34, TXT, 0, 5)
 	var lap = clampi(int(floor((g.z - T.ZST) / T.LAP)) + 1, 1, 99)
-	_ga_txt(c, Vector2(668, 150), "LAP", 22, OR2)
-	_ga_txt(c, Vector2(872, 160), ("%d" % lap) if free_ride else ("%d/%d" % [mini(lap, T.LAPS), T.LAPS]), 44, Color(1, 1, 1), 2, 6)
-	_ga_txt(c, Vector2(646, 226), "TIME", 20, OR2)
-	_ga_txt(c, Vector2(868, 234), _fmt(race_t), 32, TXT, 2, 5)
+	_ga_txt(c, Vector2(636, 165), "LAP", 22, OR2)
+	_ga_txt(c, Vector2(866, 175), ("%d" % lap) if free_ride else ("%d/%d" % [mini(lap, T.LAPS), T.LAPS]), 44, Color(1, 1, 1), 2, 6)
+	_ga_txt(c, Vector2(632, 255), "TIME", 20, OR2)
+	_ga_txt(c, Vector2(866, 263), _fmt(race_t), 32, TXT, 2, 5)
 	# ---- unten
 	var oy = vp.y - GA_H * k
 	c.draw_set_transform(Vector2(0, oy), 0.0, Vector2(k, k))
@@ -12149,22 +12226,22 @@ func _ga_draw(c: Control) -> void:
 	# Tempo
 	var bo = clampf(g.boost, 0.0, 1.0)
 	var sc = Color(1.0, 0.3, 0.2) if bo > 0.02 else Color(1, 1, 1)
-	_ga_txt(c, Vector2(62, 1497), "BOOST" if bo > 0.02 else "SPEED", 20, Color(1.0, 0.3, 0.2) if bo > 0.02 else OR2)
-	_ga_txt(c, Vector2(232, 1540), str(int(round(float(hud.gs) * 12.0))), 52, sc, 2, 6)
-	_ga_txt(c, Vector2(240, 1538), "KM/H", 16, TXT)
+	_ga_txt(c, Vector2(66, 1469), "BOOST" if bo > 0.02 else "SPEED", 20, Color(1.0, 0.3, 0.2) if bo > 0.02 else OR2)
+	_ga_txt(c, Vector2(236, 1512), str(int(round(float(hud.gs) * 12.0))), 52, sc, 2, 6)
+	_ga_txt(c, Vector2(244, 1510), "KM/H", 16, TXT)
 	# Energie: zehn schräge Segmente
 	var en = clampf(g.en, 0.0, 1.0)
 	var low = en <= 0.25 and not g.out
 	var ec = OR2 if en > 0.5 else (Color(1.0, 0.85, 0.25) if en > 0.25 else Color(1.0, 0.2, 0.15))
-	_ga_txt(c, Vector2(646, 1497), "ENERGY", 20, ec)
-	_ga_txt(c, Vector2(880, 1497), "%d %%" % int(round(en * 100.0)), 20, TXT, 2)
+	_ga_txt(c, Vector2(628, 1469), "ENERGY", 20, ec)
+	_ga_txt(c, Vector2(872, 1469), "%d %%" % int(round(en * 100.0)), 20, TXT, 2)
 	for i in range(10):
-		var x0 = 648.0 + i * 24.0
+		var x0 = 630.0 + i * 24.0
 		var fl = clampf(en * 10.0 - i, 0.0, 1.0)
 		var col = Color(0.18, 0.1, 0.06, 0.9).lerp(ec, fl)
 		if low and fl > 0.0 and fmod(t * 7.0 + i * 0.37, 1.0) > 0.6:
 			col.a *= 0.4
-		c.draw_colored_polygon(PackedVector2Array([Vector2(x0 + 9, 1506), Vector2(x0 + 29, 1506), Vector2(x0 + 20, 1534), Vector2(x0, 1534)]), col)
+		c.draw_colored_polygon(PackedVector2Array([Vector2(x0 + 9, 1478), Vector2(x0 + 29, 1478), Vector2(x0 + 20, 1506), Vector2(x0, 1506)]), col)
 	# Waffenrad: Mitte = deine Waffe, links/rechts die Nachbarn; beim Einsammeln rattert es durch (Roulette)
 	var w: String = g.wpn
 	var cw = w
@@ -12178,8 +12255,8 @@ func _ga_draw(c: Control) -> void:
 	if cw != "":
 		var lw = _ga_wsel(ci - 1)
 		var rw = _ga_wsel(ci + 1)
-		_wicon(c, Vector2(366, 1352), 26.0, lw, Color(1, 1, 1, 0.3 if not spin else 0.55))
-		_wicon(c, Vector2(574, 1352), 26.0, rw, Color(1, 1, 1, 0.3 if not spin else 0.55))
+		_wicon(c, Vector2(366, 1302), 26.0, lw, Color(1, 1, 1, 0.3 if not spin else 0.55))
+		_wicon(c, Vector2(574, 1302), 26.0, rw, Color(1, 1, 1, 0.3 if not spin else 0.55))
 		var bounce = 0.0
 		if not ga_rl.is_empty():
 			var since = float(ga_rl.t) - 1.15
@@ -12188,25 +12265,25 @@ func _ga_draw(c: Control) -> void:
 		var pu = 0.5 + 0.5 * sin(t * 5.0)
 		if not spin:
 			# Glühen hinter dem mittleren Feld
-			var tr = PackedVector2Array([Vector2(394, 1298), Vector2(548, 1298), Vector2(502, 1430), Vector2(440, 1430), Vector2(394, 1298)])
+			var tr = PackedVector2Array([Vector2(388, 1250), Vector2(552, 1250), Vector2(502, 1383), Vector2(440, 1383), Vector2(388, 1250)])
 			c.draw_polyline(tr, Color(gc, 0.35 + 0.4 * pu), 9.0, true)
 			c.draw_polyline(tr, Color(gc, 0.9), 3.0, true)
-		_wicon(c, Vector2(471, 1340 + bounce), 40.0, cw, Color(1, 1, 1, 0.95) if not spin else Color(1, 1, 1, 0.75))
+		_wicon(c, Vector2(471, 1292 + bounce), 40.0, cw, Color(1, 1, 1, 0.95) if not spin else Color(1, 1, 1, 0.75))
 		var nm = str(WN.get(cw, "")).replace("FORCE FIELD", "FIELD")
-		_ga_txt(c, Vector2(471, 1405 + bounce), nm, 22 if nm.length() < 7 else 18, Color(gc, 1.0) if not spin else TXT, 1, 5)
+		_ga_txt(c, Vector2(471, 1357 + bounce), nm, 22 if nm.length() < 7 else 18, Color(gc, 1.0) if not spin else TXT, 1, 5)
 		if (sup or mega) and not spin:
-			_ga_txt(c, Vector2(471, 1290), "MEGA" if mega else "SUPER", 18, gc, 1, 5)
+			_ga_txt(c, Vector2(471, 1244), "MEGA" if mega else "SUPER", 18, gc, 1, 5)
 	elif g.auto > 0.0:
-		_wicon(c, Vector2(471, 1340), 40.0, "auto", Color(0.5, 0.95, 1.0, 0.9))
-		_ga_txt(c, Vector2(471, 1405), "AUTO %.1f" % g.auto, 20, Color(0.5, 0.95, 1.0), 1, 5)
+		_wicon(c, Vector2(471, 1292), 40.0, "auto", Color(0.5, 0.95, 1.0, 0.9))
+		_ga_txt(c, Vector2(471, 1357), "AUTO %.1f" % g.auto, 20, Color(0.5, 0.95, 1.0), 1, 5)
 	else:
-		_ga_txt(c, Vector2(471, 1372), "—", 30, Color(1, 1, 1, 0.25), 1)
+		_ga_txt(c, Vector2(471, 1322), "—", 30, Color(1, 1, 1, 0.25), 1)
 	# Autopilot-Restzeit als Bogen ums Rad
 	if g.auto > 0.0 and state == "race":
-		c.draw_arc(Vector2(467, 1400), 152.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(g.auto / 5.0, 0.0, 1.0), 64, Color(0.4, 0.95, 1.0, 0.9), 6.0, true)
+		c.draw_arc(Vector2(470, 1368), 150.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(g.auto / 5.0, 0.0, 1.0), 64, Color(0.4, 0.95, 1.0, 0.9), 6.0, true)
 	# FIRE-Knopf: Schwert und Schrift, glüht, wenn eine Waffe bereit ist
 	var armed = w != "" and not spin
-	var fp = Vector2(470, 1532)
+	var fp = Vector2(470, 1498)
 	if armed:
 		var pf = 0.5 + 0.5 * sin(t * 6.0)
 		c.draw_circle(fp, 44.0, Color(gc, 0.16 + 0.14 * pf))
