@@ -3857,7 +3857,7 @@ void vertex(){
 	float s=length(MODEL_MATRIX[0].xyz);
 	vec3 x=normalize(vec3(INV_VIEW_MATRIX[0].x,0.,INV_VIEW_MATRIX[0].z));
 	vec3 z=normalize(vec3(INV_VIEW_MATRIX[2].x,0.,INV_VIEW_MATRIX[2].z));
-	VERTEX.y+=abs(sin(TIME*(4.+ph*3.)+ph*6.28))*.012*step(.7,ph);   // nur ein paar hüpfen, und nur wenig
+	VERTEX.y+=abs(sin(TIME*(4.+ph*3.)+ph*6.28))*.005*step(.88,ph);   // nur wenige wippen, ganz leicht (Füße bleiben am Boden)
 	MODELVIEW_MATRIX=VIEW_MATRIX*mat4(vec4(x*s,0.),vec4(0.,s,0.,0.),vec4(z*s,0.),MODEL_MATRIX[3]);
 }
 void fragment(){
@@ -3885,7 +3885,8 @@ func _crowd(z0: float, z1: float, sd: float, L0: float) -> void:
 			z += rng.randf_range(0.35, 1.6)   # locker verteilt, Lücken dazwischen
 			if rng.randf() < 0.15:
 				continue
-			pts.append([z, sd * (L0 + (r + 0.55) * TRIB_SD + rng.randf_range(-0.04, 0.04)), TRIB_BASE + (r + 1) * TRIB_RISE])
+			# mitten auf der Stufe, Füße leicht eingesenkt – so schwebt keiner über der Kante
+			pts.append([z, sd * (L0 + (r + 0.45) * TRIB_SD + rng.randf_range(-0.03, 0.03)), TRIB_BASE + (r + 1) * TRIB_RISE - 0.012])
 	var mm = MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_custom_data = true
@@ -4223,7 +4224,7 @@ func _party_start() -> void:
 		var pk: Array = parked[k]
 		var idx = (int(g.get("sm", 0)) + 1 + k) % SHIPS.size()
 		var sn = _ship_node(idx)
-		root.add_child(sn)
+		sn.reparent(root, false)   # _ship_node hängt es schon an die Szene – zur Feier umhängen, damit es mit ihr verschwindet
 		var pp: Vector3 = at.call(pk[0], pk[1])
 		sn.global_transform = Transform3D(B.rotated(f.uu, float(pk[2])), pp + f.uu * 0.04)
 		# abgestellt: nur der Rumpf – Düsen, Strahlen, Ringe und Lichter aus
@@ -4279,6 +4280,10 @@ func _party_start() -> void:
 	for i in range(1, ships.size()):
 		(ships[i].node as Node3D).visible = false
 	party.cannons = [at.call(-1.9, 2.1), at.call(2.4, 2.1), at.call(0.3, 2.3)]
+	# Nass-Spiegelung kopiert das Bild in festen Bildschirmschritten nach unten – bei Nahaufnahmen sieht man unter
+	# Rens Schuhen dann 2–3 Kopien. Während der Feier deshalb fast aus.
+	if road_wet != null:
+		_sp(road_wet, "wk", float(fx.env.wet) * 0.15)
 	_snd("crowd_roar", 0.0)
 	_stadium("an_wow", 0.0)
 	hud.layer.visible = false
@@ -4295,6 +4300,7 @@ func _party_end() -> void:
 			(c as Node).queue_free()
 	party = {}
 	party_on = false
+	_wet_apply()
 	if not ships.is_empty():
 		for pj in (ships[0].node as Node3D).get_meta("pj", []):
 			(pj[0] as Node3D).visible = true
@@ -5470,6 +5476,8 @@ func _hud() -> void:
 	ring.draw.connect(func():
 		# Autopilot: Restzeit als Bogen um den Knopf (leert sich im Uhrzeigersinn); wartet er auf eine Gerade, pulsiert er
 		var ga: Dictionary = ships[0]
+		if int(cfg.get("hud", 2)) == 2:
+			return   # Altar-HUD zeichnet den Autopilot-Bogen selbst (im Ring des Rahmens)
 		if ga.auto > 0.0 and state == "race":
 			var cc = ring.size * 0.5
 			var fr = clampf(ga.auto / 5.0, 0.0, 1.0)
@@ -11352,6 +11360,14 @@ func _process(delta: float) -> void:
 		g.boost = maxf(g.boost, 1.5)
 	g.shield = maxf(0.0, g.shield - dt)
 	g.mshield = maxf(0.0, float(g.get("mshield", 0.0)) - dt)
+	if OS.get_environment("BOT") != "" and racing and not g.out:
+		# nur zum Testen: Spieler fährt wie ein Gegner und schießt alles ab, was er aufsammelt
+		if not g.has("lane"):
+			g.lane = 0.0
+			g.tl = g.lat
+		steer = _ai_inp(g, Time.get_ticks_msec() / 1000.0, dt)
+		if g.wpn != "" and randf() < 0.03:
+			_fire()
 	for k in range(n):
 		_phys(g, steer, true, hdt, racing)
 	for i in range(1, ships.size()):
@@ -12143,12 +12159,13 @@ func _shot() -> void:
 				ships[1].z = ships[0].z + 7.0
 				ships[1].lat = ships[0].lat + 1.2
 				ships[1].spd = ships[0].spd
-			if shot_s.contains("srtest") and shot_n == 45:
-				print("SR ret=", _soft_reset(), " props=", props.size())
-				for n in get_children():
-					if n.has_meta("rfx"):
-						n.queue_free()   # wie beim Neustart
-				state = "race"
+			if shot_s.contains("srtest") and shot_n == int(OS.get_environment("SRN") if OS.get_environment("SRN") != "" else "45"):
+				if OS.get_environment("SRN") == "":
+					print("SR ret=", _soft_reset(), " props=", props.size(), " state=", state)
+					state = "race"
+				else:
+					_race_again()
+					print("SR again state=", state)
 			if shot_s.contains("srtest") and shot_n == 50:
 				print("SR valid=", props.map(func(d): return is_instance_valid(d.n)))
 			if shot_s.contains("prtest") and shot_n > 41 and shot_n % 4 == 0:
@@ -12224,6 +12241,15 @@ func _shot() -> void:
 					print("DEB2 chunk=", c0.global_position, " piece=", m0.global_transform, " ship0=", (ships[0].node as Node3D).global_position, " cam=", cam.global_position, " vis=", m0.is_visible_in_tree(), " layers=", m0.layers)
 			if shot_s.contains("frz") and shot_n == int(OS.get_environment("KOF") if OS.get_environment("KOF") != "" else "60"):
 				Engine.time_scale = 0.0001   # Test: Trümmer einfrieren, damit die Aufnahme sie zeigt
+			if shot_s.contains("autotest") and shot_n >= 41:
+				ships[0].auto = 3.0
+			if OS.get_environment("FIN2") != "" and shot_n == int(OS.get_environment("FIN2")):
+				print("FIN2 state=", state, " party=", party.is_empty())
+				state = "done"
+				t_state = 0.0
+				_fin_flow(1)
+			if OS.get_environment("PTDBG") != "" and shot_n % 100 == 0:
+				print("PT n=", shot_n, " state=", state, " fin=", fin.get("phase", -1), " pt=", fin.get("pt", -1), " party=", not party.is_empty())
 			if shot_n == 60 and shot_s.contains("finwin"):
 				state = "done"
 				t_state = 0.0
@@ -13881,7 +13907,13 @@ func _ga_draw(c: Control) -> void:
 		_ga_txt(c, Vector2(471, 1322), "—", 30, Color(1, 1, 1, 0.25), 1)
 	# Autopilot-Restzeit als Bogen ums Rad
 	if g.auto > 0.0 and state == "race":
-		c.draw_arc(Vector2(GA_RC.x, GA_RC.y), GA_RR, -PI * 0.5, -PI * 0.5 + TAU * clampf(g.auto / 5.0, 0.0, 1.0), 64, Color(0.4, 0.95, 1.0, 0.9), 6.0, true)
+		var ac = Color(1.0, 0.78, 0.2) if g.get("sauto", false) else Color(0.4, 0.95, 1.0)
+		c.draw_arc(GA_RC, GA_RR, 0.0, TAU, 64, Color(ac, 0.15), 6.0, true)
+		if g.get("ahold", false):
+			# wartet auf eine Gerade: pulsiert
+			c.draw_arc(GA_RC, GA_RR, 0.0, TAU, 64, Color(ac, 0.3 + 0.5 * (0.5 + 0.5 * sin(t * 8.0))), 6.0, true)
+		else:
+			c.draw_arc(GA_RC, GA_RR, -PI * 0.5, -PI * 0.5 + TAU * clampf(g.auto / 5.0, 0.0, 1.0), 64, Color(ac, 0.9), 6.0, true)
 	# FIRE-Knopf: Schwert und Schrift, glüht, wenn eine Waffe bereit ist
 	var armed = w != "" and not spin
 	var fp = Vector2(470, 1498)
