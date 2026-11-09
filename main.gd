@@ -3969,6 +3969,9 @@ func _crowd(z0: float, z1: float, sd: float, L0: float) -> void:
 		var z = z0 + 0.3
 		while z < z1 - 0.3:
 			z += rng.randf_range(0.22, 0.75)   # gut gefüllt, ein paar Lücken
+			# nicht über das Tribünenende hinaus (sonst stehen am Rand Leute in der Luft)
+			if z > z1 - 0.2:
+				break
 			if rng.randf() < 0.08:
 				continue
 			# mitten auf der Stufe, Füße leicht eingesenkt – so schwebt keiner über der Kante
