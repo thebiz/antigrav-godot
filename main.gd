@@ -59,7 +59,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -3168,18 +3168,27 @@ func _starter_live() -> void:
 	var lean = 0.0
 	var reach = 10.0
 	var grow = 1.0
+	var hkk = 1.0
 	if state == "race" and t_state < 1.4:
 		var u = clampf(t_state / 0.5, 0.0, 1.0)
 		u = 1.0 - pow(1.0 - u, 3.0)
 		lean = deg_to_rad(68.0) * u
 		reach = lerpf(10.0, 55.0, u)
 		grow = 1.0 + 0.25 * u
+		hkk = 1.0 - 0.62 * u   # kommt sie nah, wird sie durchsichtiger (sonst strahlt das Bild weiß aus)
 		ps[1] = lerpf(62.0, -18.0, u) + sin(t_state * 30.0) * 4.0 * u   # Hände greifen nach unten zu den Schiffen
 		ps[2] = ps[1]
-	var bb: Basis = Basis.looking_at(fw, Vector3.UP)
-	bb = Basis(bb.x, -lean) * bb   # nach vorn kippen (Kopf zu den Schiffen)
+	var bb: Basis = Basis.looking_at(fw, Vector3.UP)   # Modell-Vorderseite (+Z) zeigt so den Startenden entgegen
+	bb = Basis(bb.x, lean) * bb   # nach vorn kippen: Kopf und Hände zu den Schiffen hin (in 167 war das Vorzeichen falsch – sie kippte nach hinten)
 	n.global_transform = Transform3D(bb.scaled(Vector3.ONE * sc * grow), base)
 	_st_arms(starter, float(ps[2]), float(ps[1]), reach, reach)
+	if OS.get_environment("STDBG") != "" and state == "race" and Engine.get_process_frames() % 4 == 0:
+		var skh: Skeleton3D = starter.sk
+		var hdb = skh.find_bone("mixamorig_Head")
+		var tob = skh.find_bone("mixamorig_LeftToeBase")
+		var hw: Vector3 = skh.global_transform * skh.get_bone_global_pose(hdb).origin
+		var tw: Vector3 = skh.global_transform * skh.get_bone_global_pose(tob).origin if tob >= 0 else base
+		print("STLEAN t=", snappedf(t_state, 0.01), " head_toward_ships=", snappedf((hw - base).dot(-fw), 0.1), " head_h=", snappedf(hw.y - base.y, 0.1), " toes_toward_ships=", snappedf((tw - base).dot(-fw), 0.2))
 	if OS.get_environment("STDBG") != "" and Engine.get_process_frames() % 6 == 0:
 		var skd: Skeleton3D = starter.sk
 		var hy = []
@@ -3189,7 +3198,7 @@ func _starter_live() -> void:
 	var mat: ShaderMaterial = starter.mat
 	_sp(mat, "by", base.y)
 	_sp(mat, "hh", ST_H)
-	_sp(mat, "hk", 1.0)
+	_sp(mat, "hk", hkk)
 	_sp(mat, "fl", 0.3)
 	_sp(mat, "c1", _v3(OR if _noir() else Color(1.0, 0.3, 0.75)))
 	_sp(mat, "c2", _v3(Color(0.9, 0.9, 0.95) if _noir() else Color(0.25, 0.85, 1.0)))
@@ -3417,6 +3426,8 @@ func _collide(dt: float) -> void:
 				var me = a.idx == 0 or b.idx == 0
 				var hard = kind == "bump" and rel > base_spd * 0.06
 				_snd("crash_bump" if kind == "bump" else "crash_scrape", (0.0 if hard else -5.0) if kind == "bump" else -13.0, randf_range(0.9, 1.1), null if me else mid)
+				if me:
+					_vib(80 if hard else (45 if kind == "bump" else 30), 0.85 if hard else (0.55 if kind == "bump" else 0.3))
 				_fx_res()
 				_burst(mid, fxr.spark, 26 if hard else 14, 0.6, 3.0, 9.0, 70.0, Vector3(0, -9, 0), 0.6, 0.5, 1.0,
 					_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.15)
@@ -3716,6 +3727,8 @@ func _debris_hits(d: Dictionary, dt: float) -> void:
 			_debris_sparks(d, 10)
 			var pos: Vector3 = (d.n as Node3D).global_position
 			_snd("crash_bump", -9.0 if o.idx == 0 else -6.0, randf_range(1.0, 1.25), null if o.idx == 0 else pos)
+			if o.idx == 0:
+				_vib(90 if big else 50, 0.8 if big else 0.55)
 			if o.idx == 0:
 				shake = maxf(shake, 0.3 if big else 0.15)
 			return
@@ -4743,6 +4756,8 @@ func _props_update(dt: float) -> void:
 				var pos: Vector3 = nd.global_position
 				_snd("crash_bump", -10.0 if o.idx == 0 else -8.0, randf_range(1.2, 1.5) if d.k == "c" else randf_range(0.85, 1.05), null if o.idx == 0 else pos)
 				if o.idx == 0:
+					_vib(55 if d.k == "c" else 85, 0.55 if d.k == "c" else 0.8)
+				if o.idx == 0:
 					shake = maxf(shake, 0.25)
 				break
 	_shield_hits_update(dt)
@@ -4825,6 +4840,7 @@ func _ship_shield_hit(s: Dictionary, nrm: Vector3) -> void:
 	if is_p:
 		shake = maxf(shake, 0.3)
 		_flash(Color(0.4, 0.85, 1.0), 0.12)
+		_vib(100, 0.85)
 
 
 func _shield_hits_update(dt: float) -> void:
@@ -6365,6 +6381,14 @@ func _menu() -> void:
 		_save_cfg()
 		bcm.text = "Comic intro: " + ("On" if int(cfg.comic) == 1 else "Off"))
 	sp.add_child(bcm)
+	var bvb = _btn("Vibration: " + ("On" if int(cfg.get("vib", 1)) == 1 else "Off"))
+	bvb.add_theme_font_size_override("font_size", 30)
+	bvb.pressed.connect(func():
+		cfg.vib = 1 - int(cfg.get("vib", 1))
+		_save_cfg()
+		bvb.text = "Vibration: " + ("On" if int(cfg.vib) == 1 else "Off")
+		_vib(60, 0.8))
+	sp.add_child(bvb)
 	var HN = ["Classic", "Dragon gauge", "Gothic altar"]
 	var bhd = _btn("HUD style: " + HN[clampi(int(cfg.get("hud", 2)), 0, 2)])
 	bhd.add_theme_font_size_override("font_size", 30)
@@ -7487,6 +7511,8 @@ func _shield_ping(o: Dictionary) -> void:
 	if race_t - o.get("shpT", -9.0) > 0.25:
 		o.shpT = race_t
 		_snd("shield", -6.0 if o.idx == 0 else 0.0, 1.9, null if o.idx == 0 else (o.node as Node3D).global_position)
+		if o.idx == 0:
+			_vib(40, 0.45)
 
 
 # Schild zerbricht: Funkenregen, Meldung, Schutz weg
@@ -7534,6 +7560,8 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 		return
 	var before: float = o.en
 	o.en = maxf(0.0, o.en - a)
+	if o.idx == 0 and a > 0.0:
+		_vib(450 if o.en <= 0.0 else int(clampf(50.0 + a * 700.0, 50.0, 320.0)), 1.0 if o.en <= 0.0 else clampf(0.45 + a * 2.2, 0.45, 1.0))
 	if src >= 0 and src < ships.size() and src != o.idx:
 		ships[src].dealt += before - o.en
 	# wer austeilt, heilt sich: abgezogene Energie wird dir gutgeschrieben
@@ -7821,6 +7849,14 @@ func _orbs_update(dt: float, live: bool) -> void:
 
 
 func _fire() -> void:
+	if not ships.is_empty():
+		var fw0 = str(ships[0].wpn)
+		if fw0 == "mine":
+			_vib(14, 0.22)        # Mine legen: nur ein ganz kleines Zucken
+		elif fw0 in ["rak", "lenk"]:
+			_vib(45, 0.55)        # Rakete: spürbarer Rückstoß
+		elif fw0 != "":
+			_vib(30, 0.4)
 	_bc("fire %s" % (str(ships[0].wpn) if not ships.is_empty() else ""))
 	var g: Dictionary = ships[0]
 	var w: String = g.wpn
@@ -11003,6 +11039,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 			s.slow = minf(s.slow, 0.65)
 			if is_p:
 				_snd("zap", -2.0, randf_range(0.9, 1.1))
+				_vib(45, 0.6)
 	# Boost-Feld
 	var k = int(round(s.z / 35.0))
 	var fz = (s.z - _bzp(k)) / 35.0
@@ -11011,6 +11048,8 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		s.boost = 1.0
 		if is_p:
 			_snd("boost", -3.0)
+			_vib(55, 1.0)
+			get_tree().create_timer(0.09).timeout.connect(func(): _vib(140, 0.6))
 
 
 # Gegner fahren ruhig: eigene Spur, sanft zur Kurvenaußenseite (Boost-Felder), Regler auf Wunsch-Querbewegung statt Pendeln
@@ -14873,6 +14912,7 @@ void fragment(){
 var chg_mat: ShaderMaterial = null
 var chg_p: AudioStreamPlayer = null
 var chg_on = false
+var chg_vt = 0.0
 
 
 func _chg_build() -> void:
@@ -14934,6 +14974,11 @@ func _chg_update(dt: float, racing: bool) -> void:
 			o.en = minf(1.0, o.en + CHG_MAX * dz / (CHG_Z[1] - CHG_Z[0]))
 			if o.idx == 0 and o.en > before:
 				pl_on = true
+				var pr = clampf((lz - CHG_Z[0]) / (CHG_Z[1] - CHG_Z[0]), 0.0, 1.0)
+				chg_vt -= dt
+				if chg_vt <= 0.0:
+					chg_vt = lerpf(0.22, 0.045, pr)
+					_vib(16 + int(pr * 14.0), 0.3 + 0.45 * pr)
 	if pl_on != chg_on:
 		chg_on = pl_on
 		_sp(chg_mat, "on", 1.0 if pl_on else 0.0)
@@ -14951,3 +14996,21 @@ func _chg_update(dt: float, racing: bool) -> void:
 			chg_p.play()
 		else:
 			chg_p.stop()
+
+
+# ================================================================ Vibration
+# Kurze Rückmeldungen am Handy: Stärke 0–1 (ab Android 8 echte Abstufung), abschaltbar in den Einstellungen.
+var vib_until = 0.0
+var vib_amp = 0.0
+
+
+func _vib(ms: int, amp: float) -> void:
+	if int(cfg.get("vib", 1)) == 0 or state == "replay" or state == "kill":
+		return
+	var now = Time.get_ticks_msec() / 1000.0
+	# läuft schon ein stärkeres Rütteln, das nicht unterbrechen
+	if now < vib_until and amp <= vib_amp:
+		return
+	vib_until = now + ms / 1000.0
+	vib_amp = amp
+	Input.vibrate_handheld(ms, clampf(amp, 0.05, 1.0))
