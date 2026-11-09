@@ -4112,7 +4112,26 @@ const BEAM_CODE = """
 shader_type spatial;
 render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled,fog_disabled;
 uniform vec3 c=vec3(.6,.75,1.);uniform float k=.25;
-void fragment(){float v=UV.y;float e=1.-abs(UV.x-.5)*2.;ALBEDO=c*k*pow(1.-v,1.6)*(.35+.65*e*e);}
+uniform sampler2D dtex:hint_depth_texture,filter_nearest;
+varying float t;
+void vertex(){t=clamp((35.-VERTEX.y)/70.,0.,1.);}   // 0 am Zeppelin, 1 am unteren Ende des Kegels
+void fragment(){
+	// Länge: hell am Scheinwerfer, läuft weich und lang aus – am Ende ist nichts mehr zu sehen
+	float len=pow(1.-t,1.5)*smoothstep(1.,.45,t);
+	// Ränder: von der Seite gesehen weich statt harter Kante
+	float side=pow(abs(dot(normalize(NORMAL),normalize(VIEW))),1.4);
+	// wo der Kegel Häuser oder die Fahrbahn schneidet: sanft ausblenden statt harter Schnittlinie
+	float d=texture(dtex,SCREEN_UV).r;
+#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
+	vec3 nd=vec3(SCREEN_UV,d)*2.-1.;
+#else
+	vec3 nd=vec3(SCREEN_UV*2.-1.,d);
+#endif
+	vec4 vp=INV_PROJECTION_MATRIX*vec4(nd,1.);
+	float scene=-vp.z/vp.w;
+	float soft=clamp((scene+VERTEX.z)/8.,0.,1.);
+	ALBEDO=c*k*len*(.2+.8*side)*soft;
+}
 """
 
 
@@ -7019,6 +7038,8 @@ func _flash(c: Color, a: float) -> void:
 		flash_rect.color = Color(0, 0, 0, 0)
 		cl.add_child(flash_rect)
 	# starker Blitz: von der Effektfarbe ins grelle Weiß (sonst bleibt ein voller Blitz nur orange)
+	if state == "kill":
+		a = minf(a, 0.3)   # in der Zeitlupe nur ein kurzes Aufblitzen, sonst bleibt alles weiß
 	var w = clampf((a - 0.35) / 0.45, 0.0, 1.0)
 	var cc = c.lerp(Color(1, 1, 1), w * w)
 	if flash_rect.color.a > a:
@@ -7287,8 +7308,12 @@ func _deb_ramp(gl: float, hu := 0.0) -> GradientTexture1D:
 func _fire_ball(pos: Vector3, k: float, am := 1.0, hu := 0.0) -> void:
 	if am < 0.01:
 		return
+	# Kill-Cam: Feuerball kleiner und nicht weißglühend – in der Zeitlupe überstrahlte er sonst das ganze Bild
+	var kl = state == "kill"
+	if kl:
+		k *= 0.75
 	_burst(pos, fxr.fire, int(16 * k * am), 1.0, 2.0 * k, 5.5 * k, 180.0, Vector3(0, 1.6, 0), 4.0, 1.1 * k, 1.9 * k,
-		_ramp(_rh([[0.0, Color(12, 10, 7, 1)], [0.1, Color(9, 4.5, 1.2, 1)], [0.35, Color(4, 1.1, 0.15, 0.85)], [0.7, Color(1.0, 0.2, 0.04, 0.45)], [1.0, Color(0.1, 0.02, 0.01, 0)]], hu)),
+		_ramp(_rh([[0.0, Color(4.5, 2.8, 1.2, 1) if kl else Color(12, 10, 7, 1)], [0.1, Color(3.6, 1.6, 0.4, 1) if kl else Color(9, 4.5, 1.2, 1)], [0.35, Color(4, 1.1, 0.15, 0.85)], [0.7, Color(1.0, 0.2, 0.04, 0.45)], [1.0, Color(0.1, 0.02, 0.01, 0)]], hu)),
 		_curve([[0.0, 0.5], [0.2, 1.25], [1.0, 1.6]]), false, false, 0.5 * k)
 
 
@@ -9882,13 +9907,17 @@ func _fx_update(dt: float) -> void:
 		if e.ring != null:
 			e.ring.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
 			e.rm.set_shader_parameter("u", u)
+			# Druckwelle in der Kill-Cam schwächer – in Zeitlupe stand sie sonst als grellweißer Ring vor der Kamera
+			e.rm.set_shader_parameter("rk", float(fx.boom.ring) * (0.3 if state == "kill" else 1.0))
 			if u >= 1.0:
 				e.ring.queue_free()
 				e.ring = null
 		# Licht: greller Blitz, dann langes oranges Nachglühen
 		var lt2: OmniLight3D = e.l
 		var tl = e.t
-		lt2.light_energy = (38.0 * exp(-tl * 7.0) + 7.0 * pow(clampf(1.0 - tl / 2.2, 0.0, 1.0), 1.6) * (1.0 + 0.15 * sin(tl * 37.0))) * e.get("lk", 1.0)
+		# in der Kill-Cam (Zeitlupe) gedämpft: der grelle Blitz dauert dort fünfmal so lang und brennt die Fahrbahn weiß aus
+		var kdim = 0.18 if state == "kill" else 1.0
+		lt2.light_energy = (38.0 * kdim * exp(-tl * 7.0) + 7.0 * (0.6 if state == "kill" else 1.0) * pow(clampf(1.0 - tl / 2.2, 0.0, 1.0), 1.6) * (1.0 + 0.15 * sin(tl * 37.0))) * e.get("lk", 1.0)
 		lt2.light_color = _hs(Color(1.0, 0.92, 0.8).lerp(Color(1.0, 0.4, 0.08), clampf(tl * 2.2, 0.0, 1.0)), e.get("hu", 0.0))
 		lt2.omni_range = e.rg * (0.7 + 0.5 * exp(-tl * 3.0))
 		if tl >= 2.2:
@@ -10553,7 +10582,18 @@ func _kc_start() -> void:
 			var sv: Array = fr.s[kc_pending.idx]
 			dzl = Vector2(float(sv[0]), float(sv[1]))
 			break
-	kc = {"t0": t0, "end": t0 + 2.4, "victim": kc_pending.idx, "imp": dzl, "kind": kc_pending.kind, "saved": saved, "hidden": hidden,
+	# Bebenwelle: welche (vorwärts/rückwärts) war beim Treffer am Opfer – bestimmt die Blickrichtung der Einschlag-Kamera
+	var qdir = 1.0
+	var qbest = 1e9
+	for fr in F:
+		if float(fr.t) >= t0 - 0.6 and float(fr.t) <= t0 + 0.05:
+			for qk in [["q", 1.0], ["q2", -1.0]]:
+				if fr.get(qk[0]) != null:
+					var dd = absf(wrapf(dzl.x - float(fr[qk[0]][0]), -T.LAP * 0.5, T.LAP * 0.5))
+					if dd < qbest:
+						qbest = dd
+						qdir = qk[1]
+	kc = {"qd": qdir, "t0": t0, "end": t0 + 2.4, "victim": kc_pending.idx, "imp": dzl, "kind": kc_pending.kind, "saved": saved, "hidden": hidden,
 		"before": get_children(), "fxs": fxs.duplicate(), "zaps": zaps.duplicate(), "top": hud.top.text, "side": 1.0 if randf() < 0.5 else -1.0,
 		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0}
 	if OS.get_environment("KCDBG") != "":
@@ -10654,10 +10694,48 @@ func _kc_shot(rel: float) -> void:
 	if kk < ks.size() and rel >= float(ks[kk]):
 		kc.sk = kk + 1
 		var kpath = OS.get_environment("SHOTPATH").replace(".png", "_%d.png" % kk)
+		if OS.get_environment("KCX") == "nofx":
+			for nd in get_tree().root.find_children("*", "GPUParticles3D", true, false):
+				(nd as Node3D).visible = false
+		if OS.get_environment("KCX") == "noq":
+			_rset("qs", 0.0)
+			_rset("qs2", 0.0)
+		if OS.get_environment("KCX") == "nolight":
+			for nd in get_tree().root.find_children("*", "OmniLight3D", true, false):
+				(nd as Node3D).visible = false
+		if OS.get_environment("KCNEAR") != "":
+			for nd in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
+				var gi: GeometryInstance3D = nd
+				if gi.is_visible_in_tree():
+					var ab: AABB = gi.global_transform * gi.get_aabb()
+					var cp: Vector3 = cam.global_position
+					var dd = (ab.get_center() - cp).length()
+					if dd < 9.0 or ab.has_point(cp):
+						print("NEAR k=", kk, " ", gi.get_path(), " cls=", gi.get_class(), " d=", snappedf(dd, 0.1), " size=", ab.size, " mat=", gi.material_override.resource_name if gi.material_override else "")
 		get_tree().process_frame.connect(func(): get_viewport().get_texture().get_image().save_png(kpath), CONNECT_ONE_SHOT)
 
 
+# Abstand der Einschlag-Kamera so wählen, dass sie nicht direkt in einem der Leuchtringe über der Strecke steht
+# (die Ringe füllten sonst als grellweiße Bögen das Bild)
+func _kc_free_d(z: float, dir: float, base: float) -> float:
+	for dd in [0.0, -1.0, 1.0, -2.0, 2.0, -3.0, 3.0]:
+		var d = base + dd
+		var lz = T.lz(z + d * dir)
+		var ok = true
+		for rz in ([] if _jungle() else T.RINGS):
+			if absf(lz - float(rz)) < 2.4:
+				ok = false
+				break
+		if ok:
+			return d
+	return base
+
+
 func _kc_cam() -> bool:
+	# Blitz und Überbelichtung in der Kill-Cam schnell abklingen lassen (vorher blieb das Bild beim Einschlag weiß stehen)
+	if flash_rect != null and flash_rect.color.a > 0.0:
+		flash_rect.color.a = maxf(0.0, flash_rect.color.a - 0.06)
+	expo_v = minf(expo_v, 0.3)
 	# Kill-Cam je nach Waffe: Rakete = Kamera fliegt auf der Rakete mit; Schockwelle = reitet auf der Welle;
 	# Mine = flach auf der Fahrbahn neben der Mine; Kraftfeld & Rest = von hinten. Nach dem Knall: kurzer Rundflug über den Trümmern.
 	var v: Dictionary = ships[kc.victim]
@@ -10684,12 +10762,31 @@ func _kc_cam() -> bool:
 		if T.in_tun(T.lz(ip.x), 3.0):
 			# im Tunnel: tiefer und näher, sonst steckt die Kamera in der Decke
 			lat_c = clampf(ip.y + sdi * 1.6, -(T.TW - 0.45), T.TW - 0.45)
-			cam.global_position = fi.c + fi.rr * lat_c + fi.fw * 4.2 + fi.uu * 0.95
+			cam.global_position = fi.c + fi.rr * lat_c + fi.fw * 6.0 + fi.uu * 0.95
 			cam.look_at(I - fi.fw * 0.3, fi.uu)
 		else:
-			cam.global_position = fi.c + fi.rr * lat_c + fi.fw * 8.5 + up * 3.4
-			cam.look_at(I - fi.fw * 0.4, up)
+			if kc.kind in ["quake", "mega", "wave"]:
+				# Bebenwelle: Kamera steht dort, wo die Welle herkommt, und schaut ihr nach – der glühende Kamm rollt
+				# vom Bild weg aufs Opfer zu, statt direkt durch die Kamera (das machte alles weiß)
+				var qd: float = kc.get("qd", 1.0)
+				cam.global_position = fi.c + fi.rr * lat_c * 0.6 - fi.fw * (_kc_free_d(ip.x, -qd, 17.0) * qd) + up * 6.0
+				cam.look_at(I + fi.fw * (1.5 * qd), up)
+				if OS.get_environment("KCDBG") != "":
+					print("KCI rel=", snappedf(rel, 0.01), " wavedir=", qd, " camfw·wavedir=", snappedf((-cam.global_transform.basis.z).dot(fi.fw * qd), 0.02))
+			else:
+				cam.global_position = fi.c + fi.rr * (lat_c * 0.55) + fi.fw * _kc_free_d(ip.x, 1.0, 14.0) + up * 4.4   # eher mittig: am Rand stehen Laternen
+				cam.look_at(I - fi.fw * 0.4, up)
 		cam.fov = 52.0
+		# Bebenwelle in der Zeitlupe nur angedeutet: der glühende Fahrbahnkamm brennt sonst als weiße Fläche das halbe Bild aus
+		if kc.kind in ["quake", "mega", "wave"]:
+			var qf = clampf((rel + 0.4) / 0.25, 0.0, 1.0)
+			var f0q: Dictionary = rec[mini(rp.i, rec.size() - 1)]
+			_rset("qs", (float(f0q.q[1]) if f0q.get("q") != null else 0.0) * (1.0 - qf))
+			_rset("qs2", (float(f0q.q2[1]) if f0q.get("q2") != null else 0.0) * (1.0 - qf))
+		# andere Schiffe, die dicht an der Kamera vorbeirasen (meist du selbst), ausblenden – sonst füllt ein greller Rumpf das Bild
+		for o in ships:
+			if o.idx != kc.victim and (o.node as Node3D).visible and (o.node as Node3D).global_position.distance_to(cam.global_position) < 7.0:
+				(o.node as Node3D).visible = false
 		_kc_shot(rel)
 		return true
 	# Rakete: deine Rakete suchen, die das Opfer trifft (die nächste hinter ihm, nur deine, nur vorwärts geflogen)
@@ -10754,12 +10851,25 @@ func _kc_cam() -> bool:
 				ro = V - f.fw * 4.0 + up * 0.8
 				ta = V
 			"quake", "mega", "wave":
+				# die Welle, die das Opfer erwischt: vorwärts (q) oder rückwärts (q2) – die näher am Opfer
 				var qz = z - 3.0
-				if fr.get("q") != null:
-					qz = float(fr.q[0])
+				var qd = 1.0
+				var qb = 1e9
+				for qk in [["q", 1.0], ["q2", -1.0]]:
+					if fr.get(qk[0]) != null:
+						var wz = float(fr[qk[0]][0])
+						var dd = absf(wrapf(z - wz, -T.LAP * 0.5, T.LAP * 0.5))
+						if dd < qb:
+							qb = dd
+							qz = wz
+							qd = qk[1]
+				# Kamera reitet hinter dem Kamm mit und schaut in Laufrichtung der Welle aufs Opfer
 				var fq = T.frame(qz)
-				ro = fq.c + fq.uu * 0.9 - fq.fw * 1.6 + fq.rr * (0.6 * sd)
-				ta = V
+				ro = fq.c + fq.uu * 1.0 - fq.fw * (2.2 * qd) + fq.rr * (0.6 * sd)
+				var wf: Vector3 = fq.fw * qd
+				ta = V if (V - ro).normalized().dot(wf) > 0.2 else fq.c + wf * 6.0 + fq.uu * 0.3
+				if OS.get_environment("KCDBG") != "":
+					print("KCQ rel=", snappedf(rel, 0.01), " wavedir=", qd, " camfw·wavedir=", snappedf((ta - ro).normalized().dot(wf), 0.02), " camfw·toVictim=", snappedf((ta - ro).normalized().dot((V - ro).normalized()), 0.02), " wave-victim=", snappedf(wrapf(z - qz, -T.LAP * 0.5, T.LAP * 0.5), 0.1))
 			"mine":
 				# flach neben der Mine, die vor dem Opfer liegt; der Gegner rast drüber
 				var mz = z + 3.0
@@ -12655,7 +12765,13 @@ func _shot() -> void:
 				ships[0].wpn = "lenk"
 				lk_tg = ships[1]
 				lk_k = 1.0
-				_fire()
+				if OS.get_environment("RKQ") == "fwd":
+					ships[0].wpn = "beben"
+				if OS.get_environment("RKQ") == "back":
+					ships[1].z = ships[0].z - float(OS.get_environment("RKD") if OS.get_environment("RKD") != "" else "14")
+					quake2 = _quake_make(ships[0].z - 3.0, -1.0, quake2)
+				else:
+					_fire()
 				print("RKC fired shots=", shots.size(), " wpn=", ships[0].wpn)
 			if shot_n == 41 and shot_s.contains("dmgtest"):
 				ships[0].en = 0.12
@@ -13105,6 +13221,14 @@ func _camera(dt: float) -> void:
 		cam.global_position = bn.global_position + bn.global_transform.basis.x * dd + Vector3.UP * (-dd * 0.35)
 		cam.look_at(bn.global_position, Vector3.UP)
 		cam.fov = 50.0
+		return
+	if OS.get_environment("BLIMPCAM") != "" and not blimp.is_empty():
+		# nur zum Testen: seitlicher Blick auf den Zeppelin und seine Lichtkegel
+		var bp: Vector3 = (blimp.n as Node3D).global_position
+		var bo = OS.get_environment("BLIMPCAM").split(",")
+		cam.global_position = bp + Vector3(float(bo[0]), float(bo[1]), float(bo[2]))
+		cam.look_at(bp - Vector3(0, 14, 0), Vector3.UP)
+		cam.fov = 60.0
 		return
 	if OS.get_environment("VIEWCAM") != "":
 		# nur zum Testen: freie Kamera „z,seitlich,Höhe,Drehung(Grad)“ – schaut längs der Strecke, gedreht um die Hochachse
