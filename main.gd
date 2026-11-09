@@ -2961,6 +2961,8 @@ func _holos_make() -> void:
 
 # Start-Mädel: großes Hologramm über der Strecke vor dem Feld – Arme hoch bei 3‑2‑1, bei GO runter, dann zack weg mit Glitch
 var starter = {}
+const ST_A0 = 0.0     # Ausschnitt aus „Start Plank“ (Sekunden): vom Stand …
+const ST_A1 = 1.35    # … bis tief vorgebeugt, Hände nach vorn unten (Zahlen nachgemessen: Kopf ~5 Einheiten zu den Schiffen hin)
 const ST_H = 15.5   # Größe in m (so groß, dass sie im Hochformat ganz ins Bild passt)
 
 
@@ -3018,7 +3020,16 @@ func _starter_make() -> void:
 	root.visible = false
 	add_child(root)
 	var mb: Basis = dx.basis.orthonormalized().inverse()
-	var d = {"n": root, "sk": sk, "arms": [], "mat": mat, "mh": maxf(0.1, top - foot), "mb": mb}
+	var d = {"n": root, "sk": sk, "arms": [], "mat": mat, "mh": maxf(0.1, top - foot), "mb": mb, "tr": []}
+	# Bewegung für GO: sie geht in die Knie und greift nach vorn (Ausschnitt aus Mixamo „Start Plank“)
+	if ResourceLoader.exists("res://holo/st_plank.res"):
+		var pa: Animation = load("res://holo/st_plank.res")
+		d.anim = pa
+		for i in pa.get_track_count():
+			var pth = str(pa.track_get_path(i))
+			var bi = sk.find_bone(pth.substr(pth.rfind(":") + 1))
+			if bi >= 0:
+				d.tr.append([i, bi, pa.track_get_type(i)])
 	for b in [["mixamorig_LeftArm", 1.0], ["mixamorig_RightArm", -1.0]]:
 		var ia = sk.find_bone(b[0])
 		var ifa = sk.find_bone(b[0].replace("Arm", "ForeArm"))
@@ -3169,19 +3180,30 @@ func _starter_live() -> void:
 	var reach = 10.0
 	var grow = 1.0
 	var hkk = 1.0
-	if state == "race" and t_state < 1.4:
-		var u = clampf(t_state / 0.5, 0.0, 1.0)
-		u = 1.0 - pow(1.0 - u, 3.0)
-		lean = deg_to_rad(68.0) * u
-		reach = lerpf(10.0, 55.0, u)
-		grow = 1.0 + 0.25 * u
-		hkk = 1.0 - 0.62 * u   # kommt sie nah, wird sie durchsichtiger (sonst strahlt das Bild weiß aus)
-		ps[1] = lerpf(62.0, -18.0, u) + sin(t_state * 30.0) * 4.0 * u   # Hände greifen nach unten zu den Schiffen
-		ps[2] = ps[1]
+	var anim_t = -1.0
+	if state == "race" and t_state < 1.4 and starter.has("anim"):
+		# echte Bewegung: in die Knie gehen, vorbeugen, nach den Schiffen greifen – dann zerfällt sie
+		var u = clampf(t_state / 0.6, 0.0, 1.0)
+		u = 1.0 - pow(1.0 - u, 2.0)
+		var a0 = float(OS.get_environment("STA0")) if OS.get_environment("STA0") != "" else ST_A0
+		var a1 = float(OS.get_environment("STA1")) if OS.get_environment("STA1") != "" else ST_A1
+		anim_t = lerpf(a0, a1, u)
+		grow = 1.0 + 0.15 * u
+		hkk = 1.0 - 0.55 * u   # kommt sie nah, wird sie durchsichtiger (sonst strahlt das Bild weiß aus)
 	var bb: Basis = Basis.looking_at(fw, Vector3.UP)   # Modell-Vorderseite (+Z) zeigt so den Startenden entgegen
 	bb = Basis(bb.x, lean) * bb   # nach vorn kippen: Kopf und Hände zu den Schiffen hin (in 167 war das Vorzeichen falsch – sie kippte nach hinten)
 	n.global_transform = Transform3D(bb.scaled(Vector3.ONE * sc * grow), base)
-	_st_arms(starter, float(ps[2]), float(ps[1]), reach, reach)
+	var sks: Skeleton3D = starter.sk
+	if anim_t >= 0.0:
+		var pa: Animation = starter.anim
+		for tr in starter.tr:
+			if tr[2] == Animation.TYPE_ROTATION_3D:
+				sks.set_bone_pose_rotation(tr[1], pa.rotation_track_interpolate(tr[0], anim_t))
+			elif tr[2] == Animation.TYPE_POSITION_3D:
+				sks.set_bone_pose_position(tr[1], pa.position_track_interpolate(tr[0], anim_t))
+	else:
+		sks.reset_bone_poses()
+		_st_arms(starter, float(ps[2]), float(ps[1]), reach, reach)
 	if OS.get_environment("STDBG") != "" and state == "race" and Engine.get_process_frames() % 4 == 0:
 		var skh: Skeleton3D = starter.sk
 		var hdb = skh.find_bone("mixamorig_Head")
@@ -4168,7 +4190,7 @@ func _blimp_make() -> void:
 		var c: Vector3 = T.frame(20.0 + i).c
 		lo = Vector3(minf(lo.x, c.x), minf(lo.y, c.y), minf(lo.z, c.z))
 		hi = Vector3(maxf(hi.x, c.x), maxf(hi.y, c.y), maxf(hi.z, c.z))
-	blimp = {"bz": T.ZST + 95.0, "n": root, "c": (lo + hi) * 0.5, "rx": maxf(115.0, (hi.x - lo.x) * 0.7), "rz": maxf(115.0, (hi.z - lo.z) * 0.55),
+	blimp = {"bz": T.ZST + 230.0, "n": root, "c": (lo + hi) * 0.5, "rx": maxf(115.0, (hi.x - lo.x) * 0.7), "rz": maxf(115.0, (hi.z - lo.z) * 0.55),
 		"y": hi.y + 36.0, "a": randf() * TAU, "signs": signs, "blinks": blinks, "beams": beams, "t": 0.0}
 
 
@@ -4236,13 +4258,13 @@ func _party_fig(nm: String, anim: String, pos: Vector3, look: Vector3, tint: Col
 	var hgt = maxf(0.05, (hy - fy) * 1.12)
 	n.position = -Vector3(hpp.x, fy - 0.05 * hgt, hpp.z)
 	if nm.begins_with("host"):
-		# hohe Absätze: Sohle liegt deutlich unter dem Knöchel – an der tiefsten Stelle des Modells ausrichten
-		var lo = 1e9
-		for mi in n.find_children("*", "MeshInstance3D", true, false):
-			var bx: AABB = _rel_xf(n, mi) * (mi as MeshInstance3D).get_aabb()
-			lo = minf(lo, bx.position.y)
-		if lo < 1e8:
-			n.position.y = -lo
+		# hohe Absätze: Fußspitze steht auf dem Boden (die Hülle des Modells ist zu groß und hob sie in die Luft)
+		var tb = sk.find_bone("mixamorig_LeftToe_End")
+		if tb < 0:
+			tb = sk.find_bone("mixamorig_LeftToeBase")
+		if tb >= 0:
+			var ty = (dx * sk.get_bone_global_rest(tb).origin).y
+			n.position.y = -(ty - 0.012 * hgt)
 	var k = 0.45 * sc / hgt
 	var dir: Vector3 = (look - pos) * Vector3(1, 0, 1)
 	root.global_transform = Transform3D(Basis.looking_at(-dir.normalized() if dir.length() > 0.01 else Vector3.FORWARD, Vector3.UP).scaled(Vector3.ONE * k), pos)
@@ -4367,7 +4389,8 @@ func _party_start() -> void:
 	for hs in [["host1", 0.33], ["host2", -0.31]]:
 		if ResourceLoader.exists("res://win/%s.glb" % hs[0]):
 			var hp: Vector3 = at.call(0.25 + float(hs[1]), -0.52)
-			_party_fig(hs[0], "idle", hp, hp - f.rr * 2.0 + f.fw * (0.3 - float(hs[1])), Color(1, 1, 1), 0.96, randf() * 2.0)
+			var hn = _party_fig(hs[0], "idle", hp, hp - f.rr * 2.0 + f.fw * (0.3 - float(hs[1])), Color(1, 1, 1), 0.96, randf() * 2.0)
+			party.get_or_add("hosts", []).append(hn)
 	if ResourceLoader.exists("res://win/wreath.glb"):
 		var wr: Node3D = load("res://win/wreath.glb").instantiate()
 		root.add_child(wr)
@@ -4527,6 +4550,24 @@ func _party_live(dt: float) -> bool:
 	if party.is_empty():
 		return false
 	var t: float = fin.get("pt", 0.0)
+	# Hostessen nach dem ersten Bild mit Bewegung auf den Boden stellen (tiefster Fußknochen + Sohle)
+	if t > 0.25 and not party.has("grounded"):
+		party.grounded = true
+		var fz0 = T.frame(float(party.z))
+		for hn in party.get("hosts", []):
+			if not is_instance_valid(hn):
+				continue
+			var skl: Array = (hn as Node3D).find_children("*", "Skeleton3D", true, false)
+			if skl.is_empty():
+				continue
+			var skf: Skeleton3D = skl[0]
+			var lo = 1e9
+			for bn in ["mixamorig_LeftToe_End", "mixamorig_LeftToeBase", "mixamorig_LeftFoot", "mixamorig_RightToe_End", "mixamorig_RightToeBase", "mixamorig_RightFoot"]:
+				var bi = skf.find_bone(bn)
+				if bi >= 0:
+					lo = minf(lo, (skf.global_transform * skf.get_bone_global_pose(bi).origin).y)
+			if lo < 1e8:
+				(hn as Node3D).global_position -= Vector3.UP * (lo - fz0.c.y - 0.004)
 	if party.has("wreath") and is_instance_valid(party.wreath) and is_instance_valid(party.ren):
 		var rn: Node3D = party.ren
 		var sks: Array = rn.find_children("*", "Skeleton3D", true, false)
@@ -13475,6 +13516,17 @@ func _fin_update(dt: float) -> void:
 				_comic_start("win" if fin.win else "lose", fin.who)
 	elif fin.phase == 5:
 		fin.pt = float(fin.pt) + dt
+		if OS.get_environment("FEETDBG") != "" and not party.is_empty() and int(fin.get("fdb", 0)) == 0 and float(fin.pt) > 1.0:
+			fin.fdb = 1
+			for fg in (party.n as Node3D).find_children("*", "Skeleton3D", true, false):
+				var skf: Skeleton3D = fg
+				var lo = 1e9
+				for bn in ["mixamorig_LeftToe_End", "mixamorig_LeftToeBase", "mixamorig_LeftFoot", "mixamorig_RightToe_End", "mixamorig_RightFoot"]:
+					var bi = skf.find_bone(bn)
+					if bi >= 0:
+						lo = minf(lo, (skf.global_transform * skf.get_bone_global_pose(bi).origin).y)
+				var fz = T.frame(float(party.z))
+				print("FEET ", skf.get_parent().get_parent().name if skf.get_parent() else "?", " lowest foot bone above road=", snappedf(lo - fz.c.y, 0.001))
 		if OS.get_environment("PARTYT") != "":
 			# nur zum Testen: mehrere Bilder der Feier (Zeiten mit Komma), Pfad SHOTPATH + _n.png
 			var ts = OS.get_environment("PARTYT").split(",")
