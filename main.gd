@@ -59,7 +59,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -4261,6 +4261,63 @@ var party_on = false
 var party_cache = {}
 
 
+const BLOB_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled;
+uniform float a=.5;
+void fragment(){float d=length(UV-.5)*2.;ALBEDO=vec3(0.);ALPHA=a*pow(clamp(1.-d,0.,1.),1.6);}
+"""
+var blob_mat: ShaderMaterial = null
+# Schlagschatten in Figurform: die Figur wird (mitsamt Animation) flach auf die Fahrbahn projiziert und halbdunkel gezeichnet.
+# Die Fahrbahn ist so dunkel und spiegelnd, dass echte Lichtschatten darauf kaum zu sehen waren.
+const PSHADOW_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_mix,depth_draw_always,cull_disabled,shadows_disabled,world_vertex_coords,fog_disabled;
+uniform vec3 n=vec3(0.,1.,0.);uniform float d=0.;uniform vec3 L=vec3(.3,-1.,.2);uniform float a=.5;
+varying float h;
+void vertex(){
+	float k=(dot(n,VERTEX)-d);
+	h=k;
+	VERTEX-=L*(k/dot(n,L));
+	VERTEX+=n*.008;
+}
+void fragment(){ALBEDO=vec3(0.);ALPHA=a*clamp(1.-h*.35,.25,1.);}
+"""
+
+
+func _party_planar(m: MeshInstance3D) -> void:
+	if not party.has("ld") or int(cfg.gfx) < 1:
+		return
+	var f = T.frame(float(party.z))
+	var sm: MeshInstance3D = m.duplicate()
+	var mat = _shader_mat(PSHADOW_CODE)
+	mat.set_shader_parameter("n", f.uu)
+	mat.set_shader_parameter("d", f.uu.dot(f.c))
+	mat.set_shader_parameter("L", party.ld)
+	mat.set_shader_parameter("a", 0.5)
+	sm.material_override = mat
+	sm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	sm.sorting_offset = -1.0
+	for c in sm.get_children():
+		c.queue_free()
+	m.add_sibling(sm)
+
+
+# weicher dunkler Kontaktschatten unter einer Figur (flach auf der Fahrbahn)
+func _party_blob(pos: Vector3, r: float) -> void:
+	if blob_mat == null:
+		blob_mat = _shader_mat(BLOB_CODE)
+	var f = T.frame(float(party.z))
+	var bm = MeshInstance3D.new()
+	var pm = PlaneMesh.new()
+	pm.size = Vector2(r * 2.0, r * 2.0)
+	bm.mesh = pm
+	bm.material_override = blob_mat
+	bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	party.n.add_child(bm)
+	bm.global_transform = Transform3D(Basis(f.rr, f.uu, -f.fw), pos + f.uu * 0.01)
+
+
 func _party_fig(nm: String, anim: String, pos: Vector3, look: Vector3, tint: Color, sc: float, t0: float) -> Node3D:
 	if not party_cache.has(nm):
 		party_cache[nm] = load("res://win/%s.glb" % nm)
@@ -4290,9 +4347,12 @@ func _party_fig(nm: String, anim: String, pos: Vector3, look: Vector3, tint: Col
 	var k = 0.45 * sc / hgt
 	var dir: Vector3 = (look - pos) * Vector3(1, 0, 1)
 	root.global_transform = Transform3D(Basis.looking_at(-dir.normalized() if dir.length() > 0.01 else Vector3.FORWARD, Vector3.UP).scaled(Vector3.ONE * k), pos)
+	_party_blob(pos, 0.34 * sc)
+	# Schatten: echter Schatten vom Feier-Strahler (Form der Figur) + weicher Kontaktschatten unter den Füßen
 	for mi in n.find_children("*", "MeshInstance3D", true, false):
 		var m: MeshInstance3D = mi
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_party_planar(m)
 		if OS.get_environment("FIGNOCULL") != "":
 			var s0 = m.mesh.surface_get_material(0)
 			if s0 is StandardMaterial3D:
@@ -4368,6 +4428,8 @@ func _party_start() -> void:
 	party = {"n": root, "z": zs, "conf": [], "ct": 0.0, "a0": randf() * TAU}
 	var f = T.frame(zs)
 	var B = Basis(-f.rr, f.uu, f.fw)
+	# Licht für die Schlagschatten: schräg von oben, von der Kameraseite und leicht von vorn – Schatten fallen nach hinten rechts
+	party.ld = -(f.uu * 6.5 - f.rr * 2.6 + f.fw * 1.4).normalized()
 	var at = func(dz: float, lat: float) -> Vector3:
 		var ff = T.frame(zs + dz)
 		return ff.c + ff.rr * lat
@@ -4377,6 +4439,7 @@ func _party_start() -> void:
 		var pk: Array = parked[k]
 		var idx = (int(g.get("sm", 0)) + 1 + k) % SHIPS.size()
 		var sn = _ship_node(idx)
+		party.get_or_add("parked", []).append(sn)
 		sn.reparent(root, false)   # _ship_node hängt es schon an die Szene – zur Feier umhängen, damit es mit ihr verschwindet
 		var pp: Vector3 = at.call(pk[0], pk[1])
 		sn.global_transform = Transform3D(B.rotated(f.uu, float(pk[2])), pp + f.uu * 0.04)
@@ -6471,6 +6534,13 @@ func _menu() -> void:
 		bvb.text = "Vibration: " + ("On" if int(cfg.vib) == 1 else "Off")
 		_vib(60, 0.8))
 	sp.add_child(bvb)
+	var bkc = _btn("Kill cam: " + ("On" if int(cfg.get("kcam", 0)) == 1 else "Off"))
+	bkc.add_theme_font_size_override("font_size", 30)
+	bkc.pressed.connect(func():
+		cfg.kcam = 1 - int(cfg.get("kcam", 0))
+		_save_cfg()
+		bkc.text = "Kill cam: " + ("On" if int(cfg.kcam) == 1 else "Off"))
+	sp.add_child(bkc)
 	var HN = ["Classic", "Dragon gauge", "Gothic altar"]
 	var bhd = _btn("HUD style: " + HN[clampi(int(cfg.get("hud", 2)), 0, 2)])
 	bhd.add_theme_font_size_override("font_size", 30)
@@ -10549,6 +10619,13 @@ func _kc_check() -> void:
 	if state != "race" or ships[0].out:
 		kc_pending = {}
 		return
+	# Kill-Cam abgeschaltet (Standard): nur das K.o.-Comic, kein Replay
+	if int(cfg.get("kcam", 0)) != 1 and not shot_s.contains("rkctest"):
+		var vk: int = int(kc_pending.get("idx", -1))
+		kc_pending = {}
+		if int(cfg.get("comic", 1)) == 1 and vk >= 1 and vk <= 3:
+			_comic_start("ko", vk)
+		return
 	if rec_clk >= kc_pending.t0 + 1.0:
 		_kc_start()
 
@@ -12717,7 +12794,7 @@ func _shot() -> void:
 					pending_rp = "user://replays/" + fs[fs.size() - 1]
 					_reload()
 					return
-			if shot_n == 2 and p.size() > 2 and p[2] != "menu":
+			if shot_n == 2 and p.size() > 2 and p[2] != "menu" and p[2] != "stay":
 				_start()
 				if p[2] != "intro":
 					state = "race"
@@ -15123,6 +15200,17 @@ func _dg_flush() -> void:
 
 
 func _dg_tick(delta: float) -> void:
+	if OS.get_environment("SETOPEN") != "":
+		# nur zum Testen: Einstellungen öffnen und ganz nach unten scrollen
+		var fn = Engine.get_process_frames()
+		if not has_meta("setopen") and Engine.get_process_frames() > 15:
+			set_meta("setopen", fn)
+			print("SETOPEN at ", fn)
+			_show_settings(true)
+		if has_meta("setopen") and fn == int(get_meta("setopen")) + 10:
+			for sc in get_tree().root.find_children("*", "ScrollContainer", true, false):
+				if (sc as Control).is_visible_in_tree():
+					(sc as ScrollContainer).scroll_vertical = int(OS.get_environment("SETOPEN"))
 	if str(state) != dg_state:
 		_bc("state %s -> %s" % [dg_state, state])
 		dg_state = str(state)
