@@ -4222,6 +4222,14 @@ func _party_fig(nm: String, anim: String, pos: Vector3, look: Vector3, tint: Col
 	var hpp: Vector3 = dx * sk.get_bone_global_rest(hp).origin
 	var hgt = maxf(0.05, (hy - fy) * 1.12)
 	n.position = -Vector3(hpp.x, fy - 0.05 * hgt, hpp.z)
+	if nm.begins_with("host"):
+		# hohe Absätze: Sohle liegt deutlich unter dem Knöchel – an der tiefsten Stelle des Modells ausrichten
+		var lo = 1e9
+		for mi in n.find_children("*", "MeshInstance3D", true, false):
+			var bx: AABB = _rel_xf(n, mi) * (mi as MeshInstance3D).get_aabb()
+			lo = minf(lo, bx.position.y)
+		if lo < 1e8:
+			n.position.y = -lo
 	var k = 0.45 * sc / hgt
 	var dir: Vector3 = (look - pos) * Vector3(1, 0, 1)
 	root.global_transform = Transform3D(Basis.looking_at(-dir.normalized() if dir.length() > 0.01 else Vector3.FORWARD, Vector3.UP).scaled(Vector3.ONE * k), pos)
@@ -4340,7 +4348,7 @@ func _party_start() -> void:
 		ap.playback_default_blend_time = 0.35
 		ap.play("a")
 		ap.queue("w")
-	_party_helmet(party.ren)
+	# (kein Helm mehr in der Hand – er trägt jetzt den Siegerkranz)
 	party.c = rp
 	# zwei Hostessen links und rechts von Ren, Siegerkranz um seinen Hals, Champagner neben dem Schiff
 	for hs in [["host1", 0.33], ["host2", -0.31]]:
@@ -4514,13 +4522,19 @@ func _party_live(dt: float) -> bool:
 			var nb = sk.find_bone("mixamorig_Neck")
 			var cb = sk.find_bone("mixamorig_Spine2")
 			if nb >= 0 and cb >= 0:
-				var np: Vector3 = sk.global_transform * sk.get_bone_global_pose(nb).origin
-				var cp: Vector3 = sk.global_transform * sk.get_bone_global_pose(cb).origin
-				var rb: Basis = rn.global_transform.basis.orthonormalized()
-				var up: Vector3 = (np - cp).normalized()
-				var fwd: Vector3 = (rb.z - up * rb.z.dot(up)).normalized()
-				var wb = Basis(up.cross(fwd).normalized(), up, fwd)
-				(party.wreath as Node3D).global_transform = Transform3D(wb.scaled(Vector3.ONE * (0.15 / 97.0)), np - up * 0.105 + fwd * 0.015)
+				# einmal in der Grundhaltung ausrichten (vor der Brust, Öffnung um den Hals), danach fest an der Brust
+				# mitführen – so bleibt er auch beim Vorbeugen am Oberkörper und rutscht nicht übers Gesicht
+				if not party.has("wofs"):
+					var gr: Transform3D = sk.global_transform * sk.get_bone_global_rest(cb)
+					var np0: Vector3 = sk.global_transform * sk.get_bone_global_rest(nb).origin
+					var rb0: Basis = rn.global_transform.basis.orthonormalized()
+					var up0: Vector3 = (np0 - gr.origin).normalized()
+					var fw0: Vector3 = (rb0.z - up0 * rb0.z.dot(up0)).normalized()
+					var wb0 = Basis(up0.cross(fw0).normalized(), up0, fw0)
+					var want = Transform3D(wb0.scaled(Vector3.ONE * (0.15 / 97.0)), np0 - up0 * 0.12 + fw0 * 0.02)
+					party.wofs = gr.affine_inverse() * want
+				var gp: Transform3D = sk.global_transform * sk.get_bone_global_pose(cb)
+				(party.wreath as Node3D).global_transform = gp * (party.wofs as Transform3D)
 	# Konfettikanonen: zuerst alle drei, dann immer wieder einzeln
 	party.ct = float(party.ct) - dt
 	if party.ct <= 0.0:
@@ -4562,7 +4576,7 @@ func _party_live(dt: float) -> bool:
 		cam.look_at(c + f.rr * 0.5, f.fw)
 		cam.fov = 60.0
 	if OS.get_environment("PARTYCAM") != "":
-		cam.global_position = c - f.rr * 0.6 + f.fw * 0.05 + f.uu * 0.33
+		cam.global_position = c - f.rr * 1.1 + f.fw * 0.05 + f.uu * 0.25
 		cam.look_at(c + f.uu * 0.3, Vector3.UP)
 		cam.fov = 40.0
 	return true
