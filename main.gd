@@ -12655,6 +12655,29 @@ func _shot() -> void:
 				shot_s = a
 	if shot_s == "":
 		return
+	if OS.get_environment("CMTAP") != "":
+		# nur zum Testen: Daumen-Tipps während des Comics simulieren und mitschreiben, was der Comic macht
+		var fr_n = Engine.get_process_frames()
+		var vs: Vector2 = get_viewport().get_visible_rect().size
+		for ft in OS.get_environment("CMTAP").split(","):
+			for ph in [0, 2]:
+				if fr_n == int(ft) + ph:
+					var te = InputEventScreenTouch.new()
+					te.index = 0
+					te.position = Vector2(vs.x * 0.15, vs.y * 0.85)
+					te.pressed = ph == 0
+					Input.parse_input_event(te)
+					# wie auf dem Handy: der erste Finger kommt zusätzlich als Maus-Klick an
+					var me = InputEventMouseButton.new()
+					me.button_index = MOUSE_BUTTON_LEFT
+					me.position = te.position
+					me.global_position = te.position
+					me.pressed = te.pressed
+					Input.parse_input_event(me)
+		if fr_n % 10 == 0 and cm.has("t"):
+			print("CMT f=", fr_n, " t=", snappedf(cm.t, 0.01), " skip=", snappedf(cm.skip, 0.01), " fade=", snappedf(float(cm.get("fade", 1.0)), 0.01), " fingers=", fingers.size())
+		if OS.get_environment("CMSKIP") != "" and fr_n == int(OS.get_environment("CMSKIP")) and cm.has("sb"):
+			(cm.sb as Button).pressed.emit()
 	for a in [shot_s]:
 		if a.begins_with("--shot="):
 			var p = a.substr(7).split(",")
@@ -13349,7 +13372,8 @@ func _comic_build(kind: String) -> void:
 	add_child(layer)
 	var c = Control.new()
 	c.set_anchors_preset(Control.PRESET_FULL_RECT)
-	c.mouse_filter = Control.MOUSE_FILTER_IGNORE if kind == "ko" else Control.MOUSE_FILTER_STOP
+	# Start-Comic: Tippen geht durch (die Daumen liegen schon zum Lenken auf dem Display) – überspringen nur per SKIP-Knopf
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE if kind == "ko" or kind == "start" else Control.MOUSE_FILTER_STOP
 	layer.add_child(c)
 	var pn = []
 	var stamp = ["RACE!", Color(0.95, 0.08, 0.12)]
@@ -13392,9 +13416,23 @@ func _comic_build(kind: String) -> void:
 	cm = {"kind": kind, "who": who, "t": 0.0, "layer": layer, "c": c, "pn": pn, "end": end if end > 0.0 else 6.0,
 		"skip": -1.0, "hit": -1, "stamp": stamp, "st": st, "hold": hold}
 	c.draw.connect(_comic_draw)
+	# nur der erste Tipp zählt – vorher setzte jeder weitere Tipp das Ausblenden zurück, und der Comic tauchte wieder auf
 	c.gui_input.connect(func(ev):
-		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed and not cm.is_empty() and cm.t > 0.6:
+		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed and not cm.is_empty() and cm.t > 0.6 and cm.skip < 0.0:
 			cm.skip = cm.t)
+	if kind == "start":
+		var sb = _solid(_btn("SKIP  ▶▶"))
+		sb.anchor_left = 0.62
+		sb.anchor_right = 0.96
+		sb.anchor_top = 0.012
+		sb.anchor_bottom = 0.012
+		sb.offset_bottom = 74
+		sb.add_theme_font_size_override("font_size", 26)
+		sb.pressed.connect(func():
+			if not cm.is_empty() and cm.get("skip", 0.0) < 0.0:
+				cm.skip = cm.t)
+		layer.add_child(sb)
+		cm.sb = sb
 
 
 func _comic_end() -> void:
@@ -13445,6 +13483,9 @@ func _comic_update(dt: float) -> void:
 		_comic_end()
 		return
 	cm.fade = clampf((fin - cm.t) / 0.25, 0.0, 1.0) if cm.t > fin - 0.25 else 1.0
+	if cm.has("sb") and is_instance_valid(cm.sb):
+		(cm.sb as Control).modulate.a = cm.fade
+		(cm.sb as Control).visible = cm.skip < 0.0
 	(cm.c as Control).queue_redraw()
 
 
@@ -13533,7 +13574,7 @@ func _comic_draw() -> void:
 		c.draw_string_outline(font, Vector2(-tw2 * 0.5, fs4 * 0.35), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs4, int(W * 0.035), Color(0, 0, 0, fa))
 		c.draw_string(font, Vector2(-tw2 * 0.5, fs4 * 0.35), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs4, Color(cm.stamp[1], fa))
 		c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	if kind != "ko":
+	if kind != "ko" and kind != "start":
 		var fs5 = int(W * 0.026)
 		var hint = "tap to continue" if cm.hold else "tap to skip"
 		var hw = font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, fs5).x
