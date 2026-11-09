@@ -4443,11 +4443,12 @@ func _party_start() -> void:
 	sl.add_child(sb)
 	# Mechanikerinnen am Schiff, Fans im Halbkreis
 	# Kamera steht links (−lat) und schaut nach rechts: Ren vorn, dahinter Schiff, Team und Fans
+	# Team und Fans dicht um Ren und das Schiff (rechts davon, zwischen den abgestellten Rivalen) – niemand allein am Streckenrand
 	var people = [
-		["mech", "waving", 1.05, 0.55, Color(1, 1, 1)], ["mech", "clapping", -1.0, 0.65, Color(0.85, 0.9, 1.0)], ["mech", "cheering", -0.9, -0.85, Color(1.0, 0.92, 0.85)],
-		["fan1", "cheering", 0.2, 1.25, Color(1, 1, 1)], ["fan2", "rallying", 0.85, 1.9, Color(1, 1, 1)], ["fan1", "standing_cheering", -0.5, 1.95, Color(0.85, 0.8, 1.0)],
-		["fan2", "cheering", 1.6, 1.15, Color(1.0, 0.85, 0.85)], ["fan1", "clapping", -1.6, 1.3, Color(0.8, 1.0, 0.9)], ["fan2", "waving", 0.5, 2.25, Color(0.9, 0.9, 1.0)],
-		["fan1", "rallying", -1.3, 2.25, Color(1.0, 1.0, 0.8)], ["fan2", "standing_cheering", 2.0, 2.0, Color(0.85, 1.0, 1.0)], ["fan2", "clapping", 1.9, -1.0, Color(1, 1, 1)]]
+		["mech", "waving", 1.05, 0.65, Color(1, 1, 1)], ["mech", "clapping", -1.0, 0.7, Color(0.85, 0.9, 1.0)], ["mech", "cheering", -0.9, -0.85, Color(1.0, 0.92, 0.85)],
+		["fan1", "cheering", 0.15, 0.95, Color(1, 1, 1)], ["fan2", "rallying", 0.8, 1.25, Color(1, 1, 1)], ["fan1", "standing_cheering", -0.55, 1.25, Color(0.85, 0.8, 1.0)],
+		["fan2", "cheering", 1.5, 1.0, Color(1.0, 0.85, 0.85)], ["fan1", "clapping", -1.5, 1.05, Color(0.8, 1.0, 0.9)], ["fan2", "waving", 0.35, 1.55, Color(0.9, 0.9, 1.0)],
+		["fan1", "rallying", -1.1, 1.5, Color(1.0, 1.0, 0.8)], ["fan2", "standing_cheering", 1.25, 1.55, Color(0.85, 1.0, 1.0)], ["fan2", "clapping", -0.2, 1.6, Color(1, 1, 1)]]
 	for pe in people:
 		var pp2: Vector3 = at.call(float(pe[2]) + randf_range(-0.08, 0.08), float(pe[3]) + randf_range(-0.06, 0.06))
 		_party_fig(pe[0], pe[1], pp2, rp, pe[4], randf_range(0.93, 1.05), randf() * 3.0)
@@ -4615,7 +4616,7 @@ func _party_live(dt: float) -> bool:
 		var e = u * u * (3.0 - 2.0 * u) * 0.6 + u * 0.4
 		var dz = lerpf(-1.7, 1.5, e)
 		var ff = T.frame(zs + dz)
-		cam.global_position = ff.c + ff.rr * 0.5 + ff.uu * (0.5 + 0.05 * sin(u * PI))
+		cam.global_position = ff.c + ff.rr * 0.35 + ff.uu * (0.5 + 0.05 * sin(u * PI))
 		cam.look_at(cam.global_position + ff.fw * 1.0 + ff.rr * 0.75 - ff.uu * 0.2, Vector3.UP)
 		cam.fov = 52.0
 	else:
@@ -4629,6 +4630,15 @@ func _party_live(dt: float) -> bool:
 		cam.global_position = c + f.uu * 7.0 + f.rr * 0.5
 		cam.look_at(c + f.rr * 0.5, f.fw)
 		cam.fov = 60.0
+		if not party.has("tdbg"):
+			party.tdbg = 1
+			var fz0 = T.frame(float(party.z))
+			for lt in [-2.4, -1.2, 0.0, 1.2, 2.4]:
+				print("PTOP edge lat_abs=", lt, " px=", cam.unproject_position(fz0.c + fz0.rr * lt), " vp=", get_viewport().get_visible_rect().size)
+			for ch in (party.n as Node3D).get_children():
+				if ch is Node3D and ch.get_child_count() > 0:
+					var gp: Vector3 = (ch as Node3D).global_position
+					print("PTOP ", ch.get_child(0).name, " px=", cam.unproject_position(gp), " lat=", snappedf((gp - c).dot(f.rr), 0.01), " dz=", snappedf((gp - c).dot(f.fw), 0.01))
 	if OS.get_environment("PARTYCAM") != "":
 		cam.global_position = c - f.rr * 1.1 + f.fw * 0.05 + f.uu * 0.25
 		cam.look_at(c + f.uu * 0.3, Vector3.UP)
@@ -5852,7 +5862,7 @@ func _hud() -> void:
 				l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			cols.append(l)
 		hud.rows.append(cols)
-	var rb = _btn("EXIT REPLAY")
+	var rb = _solid(_btn("EXIT REPLAY"))
 	rb.anchor_left = 0.5
 	rb.anchor_right = 0.5
 	rb.anchor_top = 1.0
@@ -5881,7 +5891,7 @@ func _hud() -> void:
 	hud.camrow = cr
 	hud.cambtn = []
 	# Pause / weiter
-	var pz = _btn("II")
+	var pz = _solid(_btn("II"))
 	pz.add_theme_font_size_override("font_size", 22)
 	pz.custom_minimum_size = Vector2(76, 76)
 	pz.pressed.connect(func():
@@ -5928,7 +5938,7 @@ func _hud() -> void:
 	fr.visible = false
 	cl.add_child(fr)
 	hud.flwrow = fr
-	var fl = _btn("◀")
+	var fl = _solid(_btn("◀"))
 	fl.custom_minimum_size = Vector2(80, 76)
 	fl.pressed.connect(func(): _rp_follow(-1))
 	fr.add_child(fl)
@@ -5936,7 +5946,7 @@ func _hud() -> void:
 	fn.custom_minimum_size = Vector2(150, 0)
 	fr.add_child(fn)
 	hud.flw = fn
-	var frb = _btn("▶")
+	var frb = _solid(_btn("▶"))
 	frb.custom_minimum_size = Vector2(80, 76)
 	frb.pressed.connect(func(): _rp_follow(1))
 	fr.add_child(frb)
@@ -5986,7 +5996,7 @@ func _hud() -> void:
 			vx.p.share(vx.uri))
 	vd.add_child(vs)
 	hud.vxs = vs
-	var vo = _btn("OK")
+	var vo = _solid(_btn("OK"))
 	vo.pressed.connect(_vx_close)
 	vd.add_child(vo)
 	hud.vxo = vo
@@ -6073,11 +6083,20 @@ func _btn(txt: String, pri := false) -> Button:
 
 # Knopf über dem laufenden Spielbild: dunkel und deckend, damit die Schrift lesbar bleibt
 func _solid(b: Button) -> Button:
-	var n = _style(Color(0.05, 0.05, 0.08, 0.93), Color(1, 0.7, 0.54, 0.55))
+	# voll deckend mit kräftigem Rand – über hellen Szenen (Explosionen, Neon) sonst kaum zu sehen
+	var n = _style(Color(0.06, 0.06, 0.1, 1.0), Color(1, 0.62, 0.38, 0.95))
+	n.set_border_width_all(3)
+	n.shadow_color = Color(0, 0, 0, 0.6)
+	n.shadow_size = 8
 	b.add_theme_stylebox_override("normal", n)
 	b.add_theme_stylebox_override("hover", n)
 	b.add_theme_stylebox_override("focus", n)
-	b.add_theme_stylebox_override("pressed", _style(Color(0.16, 0.12, 0.12, 0.95), Color(1, 1, 1, 0.6)))
+	var pr = _style(Color(0.2, 0.13, 0.1, 1.0), Color(1, 1, 1, 0.95))
+	pr.set_border_width_all(3)
+	b.add_theme_stylebox_override("pressed", pr)
+	b.add_theme_color_override("font_color", Color(1, 1, 1))
+	b.add_theme_color_override("font_pressed_color", Color(1, 1, 1))
+	b.add_theme_color_override("font_hover_color", Color(1, 1, 1))
 	return b
 
 
@@ -9913,7 +9932,7 @@ func _record(dt: float) -> void:
 		sh.append([o.z, o.lat, o.h, o.psi, o.roll, o.boost, o.spd, 0 if o.out else 1, o.shield])
 	var w = []
 	for x in shots:
-		w.append([x.z, x.lat])
+		w.append([x.z, x.lat, int(x.own), float(x.dir)])
 	var m = []
 	for x in mines:
 		m.append([x.z, x.lat])
@@ -10211,7 +10230,8 @@ func _rp_cam_pick(ci: int) -> void:
 func _rp_cam_style() -> void:
 	for it in hud.cambtn:
 		var on = it[1] == rp.get("fix", -1)
-		var st = _style(Color(0.93, 0.41, 0.18) if on else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on else Color(1, 1, 1, 0.22))
+		var st = _style(Color(0.93, 0.41, 0.18) if on else Color(0.06, 0.06, 0.1, 1.0), Color(1, 0.75, 0.6) if on else Color(1, 0.62, 0.38, 0.9))
+		st.set_border_width_all(3)
 		for k in ["normal", "hover", "focus", "pressed"]:
 			it[0].add_theme_stylebox_override(k, st)
 
@@ -10533,6 +10553,8 @@ func _kc_start() -> void:
 	kc = {"t0": t0, "end": t0 + 2.4, "victim": kc_pending.idx, "imp": dzl, "kind": kc_pending.kind, "saved": saved, "hidden": hidden,
 		"before": get_children(), "fxs": fxs.duplicate(), "zaps": zaps.duplicate(), "top": hud.top.text, "side": 1.0 if randf() < 0.5 else -1.0,
 		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0}
+	if OS.get_environment("KCDBG") != "":
+		print("KCDBG imp=", dzl, " lz=", wrapf(dzl.x, T.ZST, T.ZST + T.LAP), " tun=", T.in_tun(wrapf(dzl.x, T.ZST, T.ZST + T.LAP), 8.0))
 	kc_pending = {}
 	rp = {"t": F[i].t, "i": i, "ei": i, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0}
 	state = "kill"
@@ -10620,6 +10642,18 @@ func _kc_end() -> void:
 	big_t = 0.0
 
 
+# nur zum Testen: Bilder der Kill-Cam zu bestimmten Zeiten relativ zum Treffer (KCSHOT="-1.0,0.2", Pfad SHOTPATH)
+func _kc_shot(rel: float) -> void:
+	if OS.get_environment("KCSHOT") == "":
+		return
+	var ks = OS.get_environment("KCSHOT").split(",")
+	var kk = int(kc.get("sk", 0))
+	if kk < ks.size() and rel >= float(ks[kk]):
+		kc.sk = kk + 1
+		var kpath = OS.get_environment("SHOTPATH").replace(".png", "_%d.png" % kk)
+		get_tree().process_frame.connect(func(): get_viewport().get_texture().get_image().save_png(kpath), CONNECT_ONE_SHOT)
+
+
 func _kc_cam() -> bool:
 	# Kill-Cam je nach Waffe: Rakete = Kamera fliegt auf der Rakete mit; Schockwelle = reitet auf der Welle;
 	# Mine = flach auf der Fahrbahn neben der Mine; Kraftfeld & Rest = von hinten. Nach dem Knall: kurzer Rundflug über den Trümmern.
@@ -10644,9 +10678,66 @@ func _kc_cam() -> bool:
 		var I: Vector3 = fi.c + fi.rr * ip.y + fi.uu * 0.3
 		var sdi = sd if absf(ip.y) < 1.2 else -signf(ip.y)
 		var lat_c = clampf(ip.y + sdi * 2.6, -(T.TW - 0.25), T.TW - 0.25)   # innerhalb der Banden (sonst steht die Wand im Bild)
-		cam.global_position = fi.c + fi.rr * lat_c + fi.fw * 8.5 + up * 3.4
-		cam.look_at(I - fi.fw * 0.4, up)
+		if T.in_tun(T.lz(ip.x), 3.0):
+			# im Tunnel: tiefer und näher, sonst steckt die Kamera in der Decke
+			lat_c = clampf(ip.y + sdi * 1.6, -(T.TW - 0.45), T.TW - 0.45)
+			cam.global_position = fi.c + fi.rr * lat_c + fi.fw * 4.2 + fi.uu * 0.95
+			cam.look_at(I - fi.fw * 0.3, fi.uu)
+		else:
+			cam.global_position = fi.c + fi.rr * lat_c + fi.fw * 8.5 + up * 3.4
+			cam.look_at(I - fi.fw * 0.4, up)
 		cam.fov = 52.0
+		_kc_shot(rel)
+		return true
+	# Rakete: deine Rakete suchen, die das Opfer trifft (die nächste hinter ihm, nur deine, nur vorwärts geflogen)
+	var rk = null
+	if alive and kc.kind == "rocket":
+		var best = 1e9
+		for w in fr.get("w", []):
+			if (w as Array).size() >= 4 and (int(w[2]) != 0 or float(w[3]) < 0.0):
+				continue
+			var dz = z - float(w[0])
+			if dz > -0.5 and dz < 60.0 and dz < best:
+				best = dz
+				rk = w
+	if rk != null:
+		# Kamera fliegt mit: knapp hinter und etwas über der Rakete, Blick in Flugrichtung aufs Ziel
+		var fs = T.frame(float(rk[0]))
+		var S: Vector3 = fs.c + fs.rr * float(rk[1]) + fs.uu * 0.25
+		var dirv: Vector3 = fs.fw
+		var fp: Dictionary = rec[maxi(0, mini(rp.i, rec.size() - 1) - 3)]
+		var bp = null
+		var bd = 1e9
+		for w2 in fp.get("w", []):
+			if (w2 as Array).size() >= 4 and (int(w2[2]) != 0 or float(w2[3]) < 0.0):
+				continue
+			var dd = absf(float(w2[0]) - float(rk[0])) + absf(float(w2[1]) - float(rk[1]))
+			if dd < bd:
+				bd = dd
+				bp = w2
+		if bp != null and bd < 6.0:
+			var fb = T.frame(float(bp[0]))
+			var P: Vector3 = fb.c + fb.rr * float(bp[1]) + fb.uu * 0.25
+			if (S - P).length() > 0.05:
+				dirv = (S - P).normalized()
+		if dirv.dot(fs.fw) < 0.3:
+			dirv = fs.fw
+		var dist = (V - S).length()
+		# Kamera auf der Linie Ziel–Rakete, knapp dahinter: Rakete mittig unten im Bild, Ziel genau davor
+		var los: Vector3 = (V - S).normalized()
+		if los.dot(dirv) < 0.3:
+			los = dirv
+		ro = S - los * 2.0 + fs.uu * 0.22
+		ta = S + los * 30.0 + fs.uu * 0.12
+		cam.global_position = ro
+		cam.look_at(ta, up)
+		# Zoom: weit weg = Teleblick (Ziel gut zu sehen), kurz vorm Treffer weitwinklig
+		cam.fov = lerpf(55.0, 30.0, clampf((dist - 4.0) / 20.0, 0.0, 1.0))
+		kc.rk_dot = (-cam.global_transform.basis.z).dot((V - ro).normalized())
+		kc.rk_fly = dirv.dot((V - S).normalized())
+		if OS.get_environment("KCDBG") != "":
+			print("KCR rel=", snappedf(rel, 0.01), " cam->victim=", snappedf(kc.rk_dot, 0.02), " rocketdir->victim=", snappedf(kc.rk_fly, 0.02), " dist=", snappedf(dist, 0.1), " fov=", snappedf(cam.fov, 1), " own=", rk[2] if (rk as Array).size() > 2 else -1)
+		_kc_shot(rel)
 		return true
 	if alive and rp.t < kc.t0 - 1.6 and not g0.out:
 		# Vorlauf: über deine Schulter, Blick auf den Gegner – so sieht man, wie es dazu kam
@@ -10657,39 +10748,8 @@ func _kc_cam() -> bool:
 	elif alive:
 		match kc.kind:
 			"rocket":
-				# die Rakete, die dem Opfer am nächsten von hinten kommt – Kamera sitzt hinter ihr und schaut in Flugrichtung aufs Ziel
-				var best = 1e9
-				var sp = null
-				for w in fr.get("w", []):
-					var dz = z - float(w[0])
-					if dz > -0.5 and dz < best:
-						best = dz
-						sp = w
-				if sp != null:
-					var fs = T.frame(float(sp[0]))
-					var S: Vector3 = fs.c + fs.rr * float(sp[1]) + fs.uu * 0.3
-					# Flugrichtung aus der Lage ein paar Bilder vorher (gleiche Rakete = nächstgelegene)
-					var dirv: Vector3 = fs.fw
-					var fp: Dictionary = rec[maxi(0, mini(rp.i, rec.size() - 1) - 3)]
-					var bp = null
-					var bd = 1e9
-					for w2 in fp.get("w", []):
-						var dd = absf(float(w2[0]) - float(sp[0])) + absf(float(w2[1]) - float(sp[1]))
-						if dd < bd:
-							bd = dd
-							bp = w2
-					if bp != null and bd < 6.0:
-						var fb = T.frame(float(bp[0]))
-						var P: Vector3 = fb.c + fb.rr * float(bp[1]) + fb.uu * 0.3
-						if (S - P).length() > 0.05:
-							dirv = (S - P).normalized()
-					if dirv.dot(fs.fw) < 0.2:
-						dirv = fs.fw
-					ro = S - dirv * 1.1 + up * 0.28
-					ta = (S + dirv * 4.0).lerp(V, 0.35)
-				else:
-					ro = V - f.fw * 4.0 + up * 0.8
-					ta = V
+				ro = V - f.fw * 4.0 + up * 0.8
+				ta = V
 			"quake", "mega", "wave":
 				var qz = z - 3.0
 				if fr.get("q") != null:
@@ -10729,11 +10789,20 @@ func _kc_cam() -> bool:
 			C = C.lerp(acc / cn, 0.6)
 		var k = clampf((rp.t - kc.t0 - 0.9) / 1.5, 0.0, 1.0)
 		var a = sd * (0.6 + k * 1.6)
-		ro = C + (f.fw * cos(a) + f.rr * sin(a)) * (2.4 + k * 1.0) + up * (1.5 + k * 0.6)
+		if T.in_tun(T.lz(z), 3.0):
+			# im Tunnel enger und flacher kreisen
+			ro = C + (f.fw * cos(a) + f.rr * sin(a) * 0.7) * (1.7 + k * 0.4) + f.uu * (0.75 + k * 0.15)
+			up = f.uu
+		else:
+			ro = C + (f.fw * cos(a) + f.rr * sin(a)) * (2.4 + k * 1.0) + up * (1.5 + k * 0.6)
 		ta = C
 	cam.global_position = ro
 	cam.look_at(ta, up)
 	cam.fov = 55.0
+	_kc_shot(rel)
+	if OS.get_environment("KCDBG") != "":
+		var cf: Vector3 = -cam.global_transform.basis.z
+		print("KCV rel=", snappedf(rel, 0.01), " alive=", alive, " camfw·toVictim=", snappedf(cf.dot((V - ro).normalized()), 0.02), " camfw·trackfw=", snappedf(cf.dot(f.fw), 0.02), " camz-vz=", snappedf((ro - V).dot(f.fw), 0.1), " shots=", fr.get("w", []).size())
 	if flash_rect != null and flash_rect.color.a > 0.0:
 		flash_rect.color.a = maxf(0.0, flash_rect.color.a - 0.05)
 	return true
@@ -12528,6 +12597,8 @@ func _shot() -> void:
 				if shot_n == 3 and float(p[1]) > 0.0:
 					ships[0].z = float(p[1])
 				return
+			if shot_s.contains("resbtest") and shot_n % 50 == 0 and hud.has("resb"):
+				print("RESB n=", shot_n, " a=", (hud.resb as CanvasItem).modulate.a, " armed=", resb_armed, " t=", resb_t, " fingers=", fingers.size(), " vis=", hud.resb.visible)
 			if shot_n == 50 and shot_s.contains("resbtest"):
 				state = "done"
 				t_state = 0.0
@@ -12572,8 +12643,8 @@ func _shot() -> void:
 			if shot_s.contains("rkctest") and shot_n % 5 == 0:
 				print("RKC n=", shot_n, " state=", state, " kcp=", kc_pending, " out1=", ships[1].out, " en1=", ships[1].en, " shots=", shots.map(func(x): return [snappedf(x.z - ships[0].z, 0.1), x.lat]), " z1=", snappedf(ships[1].z - ships[0].z, 0.1), " prot=", _prot(ships[1]))
 			if shot_n == 41 and shot_s.contains("rkctest"):
-				ships[1].z = ships[0].z + 14.0
-				ships[1].lat = ships[0].lat
+				ships[1].z = ships[0].z + float(OS.get_environment("RKD") if OS.get_environment("RKD") != "" else "14")
+				ships[1].lat = ships[0].lat + float(OS.get_environment("RKL") if OS.get_environment("RKL") != "" else "0")
 				ships[1].en = 0.05
 				ships[1].shield = 0.0
 				ships[2].z = ships[0].z - 30.0
