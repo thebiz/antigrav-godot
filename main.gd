@@ -11854,13 +11854,13 @@ func _process(delta: float) -> void:
 	var g: Dictionary = ships[0]
 	if warm_t >= 0.0:
 		_warm_step(delta)
-	if state == "menu" and bench_req and warm_t < 0.0:
+	if state == "menu" and bench_req and warm_t < 0.0 and not dg_reloading:   # nicht die alte Szene, die gerade neu geladen wird
 		bench_req = false
 		_bench_begin()
 	if state == "bench":
 		_bench_step(dt)
 		return
-	if state == "menu" and restart and warm_t < 0.0 and rpf.is_empty():
+	if state == "menu" and restart and warm_t < 0.0 and rpf.is_empty() and not dg_reloading:
 		restart = false
 		_start()
 	if state == "menu" and not rpf.is_empty() and warm_t < 0.0:
@@ -13829,13 +13829,32 @@ func _fin_update(dt: float) -> void:
 		l.set_anchors_preset(Control.PRESET_TOP_WIDE)
 		l.offset_top = 260
 		l.modulate.a = 0.0
-		# Schriftgröße so wählen, dass die längste Zeile in die Breite passt (bei 84 lief „LAST ONE STANDING“ über den Rand)
-		var vw: float = get_viewport().get_visible_rect().size.x * 0.9
+		# zu lange Zeilen umbrechen („LAST ONE“ / „STANDING“), die Schrift bleibt groß;
+		# nur wenn ein einzelnes Wort nicht passt, wird sie kleiner
+		var vw: float = get_viewport().get_visible_rect().size.x * 0.9 - 28.0
 		var fnt: Font = l.get_theme_font("font")
 		var fs = 84
-		for ln in l.text.split("\n"):
-			while fs > 30 and fnt.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 28 > vw:
-				fs -= 2
+		var src: PackedStringArray = l.text.split("\n")
+		var out: Array = []
+		while true:
+			out.clear()
+			var fits = true
+			for ln in src:
+				var cur = ""
+				for wd in ln.split(" ", false):
+					if fnt.get_string_size(wd, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > vw:
+						fits = false
+					var tr = wd if cur == "" else cur + " " + wd
+					if cur != "" and fnt.get_string_size(tr, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > vw:
+						out.append(cur)
+						cur = wd
+					else:
+						cur = tr
+				out.append(cur)
+			if fits or fs <= 30:
+				break
+			fs -= 2
+		l.text = "\n".join(out)
 		l.add_theme_font_size_override("font_size", fs)
 		cl.add_child(l)
 		create_tween().tween_property(l, "modulate:a", 1.0, 0.4)
@@ -15222,6 +15241,14 @@ func _dg_flush() -> void:
 
 
 func _dg_tick(delta: float) -> void:
+	if OS.get_environment("BENCHBTN") != "" and OS.get_environment("AG_RELOADED") == "" and not has_meta("bb") and Engine.get_process_frames() > 20:
+		# nur zum Testen: wie der Knopf „Performance test“ in den Einstellungen
+		set_meta("bb", 1)
+		print("BENCHBTN press state=", state, " warm_t=", warm_t)
+		bench_req = true
+		_reload()
+	if OS.get_environment("BENCHBTN") != "" and Engine.get_process_frames() % 30 == 0:
+		print("BENCHST f=", Engine.get_process_frames(), " state=", state, " warm_t=", warm_t, " bench_req=", bench_req, " reloaded=", OS.get_environment("AG_RELOADED"))
 	if OS.get_environment("SETOPEN") != "":
 		# nur zum Testen: Einstellungen öffnen und ganz nach unten scrollen
 		var fn = Engine.get_process_frames()
