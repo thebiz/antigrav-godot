@@ -4518,13 +4518,7 @@ func _party_start() -> void:
 	var sl = CanvasLayer.new()
 	sl.layer = 8
 	root.add_child(sl)
-	var sb = _solid(_btn("SKIP  ▶▶"))
-	sb.anchor_left = 0.3
-	sb.anchor_right = 0.7
-	sb.anchor_top = 1.0
-	sb.anchor_bottom = 1.0
-	sb.offset_top = -190
-	sb.offset_bottom = -90
+	var sb = _skip_btn()
 	sb.pressed.connect(func(): fin.skip = true)
 	sl.add_child(sb)
 	# Mechanikerinnen am Schiff, Fans im Halbkreis
@@ -5596,7 +5590,7 @@ void fragment(){
 	t3.anchor_right = 1.0
 	t3.anchor_top = 1.0
 	t3.anchor_bottom = 1.0
-	t3.offset_top = -205
+	t3.offset_top = -255
 	t3.modulate = Color(1, 1, 1, 0.85)
 	cl.add_child(t3)
 	kco.ts = t3
@@ -5605,22 +5599,28 @@ void fragment(){
 	t5.anchor_right = 1.0
 	t5.anchor_top = 1.0
 	t5.anchor_bottom = 1.0
-	t5.offset_top = -300
+	t5.offset_top = -350
 	t5.modulate = Color(1.0, 0.3, 0.25, 0.95)
 	cl.add_child(t5)
 	kco.rp = t5
 	# Überspringen nur über diesen Knopf (sonst würde jedes Lenken die Kill-Cam wegdrücken)
-	var sk = _lbl("SKIP  ▶▶", 26)
-	sk.anchor_left = 1.0
-	sk.anchor_right = 1.0
-	sk.offset_left = -260
-	sk.offset_right = -56
-	sk.offset_top = 236
-	sk.offset_bottom = 290
-	sk.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	sk.modulate = Color(1, 1, 1, 0.7)
+	var sk = _skip_btn()
+	sk.mouse_filter = Control.MOUSE_FILTER_IGNORE   # der Tipp wird in _input über die Fläche erkannt
 	cl.add_child(sk)
 	kco.skip = sk
+
+
+# SKIP-Knopf: überall gleich – unten mittig, gut mit dem Daumen erreichbar, zwischen den Lenkzonen links und rechts
+func _skip_btn() -> Button:
+	var sb = _solid(_btn("SKIP  ▶▶"))
+	sb.anchor_left = 0.3
+	sb.anchor_right = 0.7
+	sb.anchor_top = 1.0
+	sb.anchor_bottom = 1.0
+	sb.offset_top = -190
+	sb.offset_bottom = -90
+	sb.add_theme_font_size_override("font_size", 30)
+	return sb
 
 
 var kco = {}
@@ -13513,13 +13513,7 @@ func _comic_build(kind: String) -> void:
 		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed and not cm.is_empty() and cm.t > 0.6 and cm.skip < 0.0:
 			cm.skip = cm.t)
 	if kind == "start":
-		var sb = _solid(_btn("SKIP  ▶▶"))
-		sb.anchor_left = 0.62
-		sb.anchor_right = 0.96
-		sb.anchor_top = 0.012
-		sb.anchor_bottom = 0.012
-		sb.offset_bottom = 74
-		sb.add_theme_font_size_override("font_size", 26)
+		var sb = _skip_btn()
 		sb.pressed.connect(func():
 			if not cm.is_empty() and cm.get("skip", 0.0) < 0.0:
 				cm.skip = cm.t)
