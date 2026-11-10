@@ -44,9 +44,7 @@ const DANG = {4: [
 const CFG_PATH = "user://settings.cfg"
 
 # Lenkung wie in der HTML-Version (von John abgestimmt)
-const RAMP = 0.56
 const START = 0.55
-const SHAPE = 2.3
 const YAW_P = 1.4
 const YAW_AI = 1.5
 const INTRO_T = 3.2
@@ -697,8 +695,6 @@ func _post_update(dt: float) -> void:
 var post_spd = 0.0
 
 
-func asp_v(vp: Vector2) -> float:
-	return vp.y / maxf(1.0, vp.x)
 var gl_v = 0.0
 
 
@@ -1179,37 +1175,6 @@ func _neon(c: Color, e: float = 5.0) -> StandardMaterial3D:
 	m.emission_energy_multiplier = e
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	neon_mats.append([m, e])
-	return m
-
-
-func _road_mat() -> StandardMaterial3D:
-	var m = StandardMaterial3D.new()
-	m.albedo_color = Color(0.022, 0.022, 0.03)
-	m.metallic = 0.0
-	m.metallic_specular = 0.7
-	var n = FastNoiseLite.new()
-	n.frequency = 0.035
-	n.fractal_octaves = 4
-	var nt = NoiseTexture2D.new()
-	nt.noise = n
-	nt.seamless = true
-	nt.width = 512
-	nt.height = 512
-	m.roughness_texture = nt
-	m.roughness = 0.42  # Pfützen (dunkle Stellen im Rauschen) glänzen wie Spiegel
-	var n2 = FastNoiseLite.new()
-	n2.frequency = 0.09
-	var nn = NoiseTexture2D.new()
-	nn.noise = n2
-	nn.seamless = true
-	nn.as_normal_map = true
-	nn.bump_strength = 3.0
-	nn.width = 512
-	nn.height = 512
-	m.normal_enabled = true
-	m.normal_texture = nn
-	m.normal_scale = 0.18
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return m
 
 
@@ -1971,7 +1936,6 @@ void fragment(){
 
 # Bodenprofil neben der Strecke: [Abstand hinter der Leitplanke, Höhe]
 var JF = _jf_make()
-var JF_BANK = 21   # die Punkte der Wanne folgen der Schräglage der Fahrbahn
 
 
 # Profil neben der Fahrbahn: eine runde Mulde wie eine Halfpipe aus Erde – sanft hoch, runde Kuppe, sanft runter
@@ -2131,7 +2095,6 @@ func _xquad_mesh() -> ArrayMesh:
 	return st.commit()
 
 
-var jtree_mm: MultiMesh
 var jmm_t = []   # [MultiMesh, volle Anzahl] – Regler „Trees“
 var jmm_u = []
 var jumat: ShaderMaterial
@@ -2156,7 +2119,6 @@ func _jungle_apply() -> void:
 	if sky_m != null:
 		sky_m.set_shader_parameter("mt", float(J.meteor))
 		sky_m.set_shader_parameter("m3", float(J.far))
-var jund_mm: MultiMesh
 var jfly_mm: MultiMesh
 
 
@@ -2318,7 +2280,6 @@ func _jungle_build() -> void:
 		n.add_child(wm)
 	jumat = umat
 	_jungle_apply()
-	print("JUNGLE trees=", trees.size(), " under=", und.size())
 
 
 # Kommt in den nächsten Metern eine Kurve? (für den Autopiloten)
@@ -2476,7 +2437,6 @@ var car_mat: ShaderMaterial
 # Hologramm-Plätze: z, Seite, Art, Abstand der Figur-Achse zur Streckenmitte (klein = die Strecke läuft durch ihre Beine)
 const HOLO_SPOTS = [[80.0, 1.0, "dancer", 30.0], [370.0, -1.0, "dancer", 3.0], [455.0, 1.0, "dancer", 30.0], [680.0, -1.0, "dancer", 3.0],
 	[128.0, -1.0, "koi"], [392.0, 1.0, "koi"], [615.0, -1.0, "koi"]]
-const DANCER_H = 1.66   # Größe der Figur im Modell (m)
 # Hologramm-Figuren: [Datei, Höhe im Modell, dreht sich (stehende Figur)]
 # fig_woman3: Blade-Runner-Frau (Tripo, Mixamo-Skelett) – tanzt mit dem Samba des Tänzers (zur Laufzeit übertragen)
 # Der Tänzer selbst wird nicht mehr gezeigt, er liefert nur noch den Samba („src“)
@@ -2967,27 +2927,6 @@ const ST_A1 = 1.35    # … bis tief vorgebeugt, Hände nach vorn unten (Zahlen 
 const ST_H = 15.5   # Größe in m (so groß, dass sie im Hochformat ganz ins Bild passt)
 
 
-const ST_MH = 0.955   # Höhe des Start-Mädel-Modells (Kopf oben) in Modell-Einheiten
-const FLAG_CODE = """
-shader_type spatial;
-render_mode unshaded,cull_disabled,shadows_disabled;
-uniform sampler2D tex:source_color,filter_linear_mipmap;
-uniform float sw=1.;uniform float k=1.;
-varying float ed;
-void vertex(){
-	// Welle läuft vom Mast weg, außen stärker; „sw“ = Wind/Schwung
-	float u=UV.x;
-	float w=sin(u*7.5-TIME*(6.+5.*sw)+UV.y*1.7)*.06+sin(u*13.-TIME*9.)*.02;
-	VERTEX.z+=w*u*(.6+sw)*.5;
-	VERTEX.y-=u*u*.04*(1.4-sw*.4);
-}
-void fragment(){
-	vec3 c=texture(tex,UV).rgb;
-	float e=max(max(smoothstep(.965,1.,UV.x),smoothstep(.04,0.,UV.y)),smoothstep(.96,1.,UV.y));
-	ALBEDO=c*k+vec3(1.,.08,.12)*e*2.2*k;
-}"""
-
-
 func _starter_make() -> void:
 	# Start-Mädel = die Hologramm-Frau (Tripo, Mixamo-Skelett), ohne Flagge; Arme werden direkt gestellt
 	var root = Node3D.new()
@@ -3389,7 +3328,6 @@ func _city_live() -> void:
 			_sp(mat, "hk", kk)
 			_sp(mat, "nr", 1.0 if _noir() else 0.0)
 			_sp(mat, "ec", _v3(c2))
-
 
 
 # ---------------------------------------------------------------- Zusammenstöße zwischen Schiffen
@@ -3796,7 +3734,6 @@ func _rear_draw(c: Control) -> void:
 		c.draw_arc(Vector2(x, y), r, 0.0, TAU, 24, Color(1, 1, 1, 0.7 * a), 2.0 * k * 1.6, true)
 
 
-
 # ---------------------------------------------------------------- Tribünen am Ziel (beide Seiten), Zuschauer, Jubel, Stadionsprecher
 const TRIB_Z = [[22.0, 54.0], [686.0, 718.0]]   # Abschnitte vor und hinter der Ziellinie
 const TRIB_L0 = 1.25    # Abstand hinter der Leitplanke
@@ -4103,7 +4040,6 @@ func _neon_live(dt: float) -> void:
 		hum.volume_db = -9.0 if sg.on else -27.0
 
 
-
 # ---------------------------------------------------------------- Werbe-Zeppelin über der Stadt (Blade-Runner-Stil)
 # zieht langsam eine weite Ellipse über der Stadt; Leuchtschrift an beiden Seiten, Blinklichter, zwei Suchscheinwerfer nach unten
 const BLIMP_L = 30.0   # Länge in Einheiten (≈ 120 m)
@@ -4251,7 +4187,6 @@ func _blimp_live(dt: float) -> void:
 		(bm[i] as Node3D).rotation = Vector3(sin(t * 0.31 + i * 2.0) * 0.45, 0.0, cos(t * 0.23 + i * 1.3) * 0.4)
 
 
-
 # ---------------------------------------------------------------- Siegerfeier am Ziel
 # Dein Schiff steht an der Ziellinie, daneben zwei Rivalen-Schiffe quer, Ren mit Helm, Mechanikerinnen, Fans;
 # Konfettikanonen, Jubel, Kamera kreist langsam um Ren. Die Figuren sind Tripo-Modelle mit Mixamo-Bewegungen.
@@ -4380,27 +4315,6 @@ func _party_fig(nm: String, anim: String, pos: Vector3, look: Vector3, tint: Col
 	return root
 
 
-# Helm (eigenes Modell) an Rens linke Hand hängen – Kinnöffnung zur Hand, ≈ 30 cm groß
-func _party_helmet(ren: Node3D) -> void:
-	if not ResourceLoader.exists("res://win/helmet.glb"):
-		return
-	var sk: Skeleton3D = ren.find_children("*", "Skeleton3D", true, false)[0]
-	var hb = sk.find_bone("mixamorig_LeftHand")
-	if hb < 0:
-		return
-	var ba = BoneAttachment3D.new()
-	sk.add_child(ba)
-	ba.bone_idx = hb
-	var h: Node3D = load("res://win/helmet.glb").instantiate()
-	ba.add_child(h)
-	# Größe im Weltmaß: ≈ 0,3 m = 0,075 Einheiten; Skelett ist schon skaliert, also durch dessen Weltmaßstab teilen
-	var ws = sk.global_transform.basis.get_scale().x
-	var k = 0.075 / maxf(ws, 1e-4)
-	h.transform = Transform3D(Basis(Vector3(1, 0, 0), PI).scaled(Vector3.ONE * k), Vector3(0, 0.6 * k, 0.15 * k))
-	for mi in h.find_children("*", "MeshInstance3D", true, false):
-		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-
-
 func _party_start() -> void:
 	_bc("party start")
 	_dg_flush()
@@ -4454,7 +4368,7 @@ func _party_start() -> void:
 	party.ren = _party_fig("ren", "victory_idle", rp, rp - f.rr * 2.0 + f.fw * 0.4, Color(1, 1, 1), 1.0, 0.0)
 	# Ren jubelt einmal (Sprung), dann winkt er
 	var rap: Array = (party.ren as Node3D).find_children("*", "AnimationPlayer", true, false)
-	var ren_next = "res://win/ren_dance.res" if ResourceLoader.exists("res://win/ren_dance.res") else "res://win/ren_waving.res"
+	var ren_next = "res://win/ren_dance.res"
 	if not rap.is_empty() and ResourceLoader.exists(ren_next):
 		var ap: AnimationPlayer = rap[0]
 		var lib: AnimationLibrary = ap.get_animation_library("")
@@ -4724,7 +4638,6 @@ func _party_live(dt: float) -> bool:
 		cam.look_at(c + f.uu * 0.3, Vector3.UP)
 		cam.fov = 40.0
 	return true
-
 
 
 # ---------------------------------------------------------------- Hindernisse: Fässer und Leitkegel auf der Strecke
@@ -8277,83 +8190,6 @@ func _bwaves_clear() -> void:
 		if is_instance_valid(w.n):
 			w.n.queue_free()
 	bwaves.clear()
-	for w in megaw:
-		if is_instance_valid(w.n):
-			w.n.queue_free()
-	megaw.clear()
-
-
-# MEGA: zwei leuchtende Schockwellen rasen von dir aus nach vorn und hinten über die ganze Strecke;
-# jeder Gegner, den sie erreichen (spätestens am Ende: alle), verliert 75 % Energie – Schild hilft nicht
-var megaw = []
-const MEGA_V = 260.0
-
-
-func _mega(g: Dictionary) -> void:
-	var hit = {"ids": []}
-	for dir in [1.0, -1.0]:
-		var mi = _wall_node(true)
-		var m: ShaderMaterial = mi.material_override
-		m.set_shader_parameter("wc", Vector3(1.0, 0.35, 0.9))
-		m.set_shader_parameter("gk", 2.5)
-		(mi.get_meta("l") as OmniLight3D).light_color = Color(1.0, 0.4, 0.9)
-		(mi.get_meta("l") as OmniLight3D).omni_range = 14.0
-		megaw.append({"z": g.z + dir * 2.0, "dir": dir, "age": 0.0, "n": mi, "own": g.idx, "hit": hit})
-	_snd("boom", 4.0, 0.45)
-	_snd("wallon", 2.0, 0.7)
-	_snd("zap", 0.0, 0.6)
-	_flash(Color(1.0, 0.45, 0.95), 0.3)
-	shake = maxf(shake, 1.4)
-
-
-func _mega_hit(o: Dictionary, own: int) -> void:
-	if o.out or o.idx == own:
-		return
-	if o.shield > 0.0:
-		_shield_break(o)
-	_dmg(o, 0.75, own, "mega")
-	_zap_ship(o)
-	if o.idx != 0:
-		_snd("zap", 3.0, 0.8, (o.node as Node3D).global_position)
-
-
-func _megaw_update(dt: float) -> void:
-	for i in range(megaw.size() - 1, -1, -1):
-		var w = megaw[i]
-		w.age += dt
-		var z0: float = w.z
-		# erst sichtbar langsam, dann immer schneller über die halbe Runde
-		var st = (40.0 + MEGA_V * 2.0 * float(w.age)) * dt
-		w.d = float(w.get("d", 0.0)) + st
-		w.z += float(w.dir) * st
-		var done = float(w.d) > T.LAP * 0.5
-		var lo = minf(z0, w.z) - 1.0
-		var hi = maxf(z0, w.z) + 1.0
-		for o in ships:
-			if w.hit.ids.has(o.idx):
-				continue
-			# Strecke ist ein Rundkurs: Gegner auf der Nachbarrunde ebenfalls finden
-			for k in [-1.0, 0.0, 1.0]:
-				var oz: float = o.z + k * T.LAP
-				if oz >= lo and oz <= hi:
-					w.hit.ids.append(o.idx)
-					_mega_hit(o, int(w.own))
-					break
-		var mi: MeshInstance3D = w.n
-		var f = T.frame(w.z)
-		mi.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw).scaled(Vector3(1.15, 2.2, 1.0)), f.c + f.uu * 1.4)
-		var a = clampf(minf(w.age / 0.08, (T.LAP * 0.5 - float(w.d)) / 60.0), 0.0, 1.0)
-		(mi.material_override as ShaderMaterial).set_shader_parameter("a", a)
-		(mi.material_override as ShaderMaterial).set_shader_parameter("hit", 0.6 + 0.4 * sin(w.age * 40.0))
-		(mi.get_meta("l") as OmniLight3D).light_energy = 8.0 * a
-		if done:
-			if w.dir > 0.0:
-				for o in ships:   # wer nicht erreicht wurde, bekommt es jetzt ab
-					if not w.hit.ids.has(o.idx):
-						w.hit.ids.append(o.idx)
-						_mega_hit(o, int(w.own))
-			mi.queue_free()
-			megaw.remove_at(i)
 
 
 func _bwaves_update(dt: float) -> void:
@@ -9748,7 +9584,6 @@ func _weapons(dt: float, racing: bool) -> void:
 	if quake2 != null:
 		quake2 = _quake_step(quake2, dt)
 	_bwaves_update(dt)
-	_megaw_update(dt)
 	_fx_update(dt)
 	# Schild: blaue Hülle (für alle Schiffe)
 	for o in ships:
@@ -10564,6 +10399,22 @@ func _warm_step(delta: float) -> void:
 		var g: Dictionary = ships[0]
 		var o: Dictionary = ships[1]
 		var zf = g.z + 1.5
+		# Start-Mädel (Hologramm-Shader auf einer Figur mit Skelett) einmal mitzeichnen: sonst baut das Handy dieses
+		# Grafik-Programm erst, wenn sie beim Countdown auftaucht – genau dort hing der Vorbeiflug kurz
+		var wf = T.frame(zf + 2.0)
+		var wn: Node3D = load("res://holo/fig_woman3.glb").instantiate()
+		var wm = _shader_mat(HOLO_CODE)
+		for mi in wn.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).material_override = wm
+			(mi as MeshInstance3D).extra_cull_margin = 2.0
+		add_child(wn)
+		wn.global_position = wf.c + wf.uu * 0.2
+		# Comic-Bilder schon jetzt laden (sonst kommen sie erst beim ersten Comic von der Platte)
+		for c3 in ["ren", "kato", "mira", "vega"]:
+			for k3 in ["0", "1", "2"]:
+				_cm_img(c3 + "_" + k3)
+			if c3 != "ren":
+				_cm_img("ko_" + c3)
 		_explode(zf, g.lat, true)
 		_explode(zf, g.lat + 0.6, false)
 		_gbomb(zf, g.lat - 0.6, -2)
@@ -14576,10 +14427,6 @@ func _ga_txt(c: Control, p: Vector2, s: String, sz: int, col: Color, al := 0, ol
 	c.draw_string(ga_font, q, s, HORIZONTAL_ALIGNMENT_LEFT, -1, sz, col)
 
 
-func _ga_wsel(i: int) -> String:
-	return WP[posmod(i, WP.size())][0]
-
-
 func _ga_widx(w: String) -> int:
 	for i in range(WP.size()):
 		if WP[i][0] == w:
@@ -14769,7 +14616,6 @@ func _scr_fling(sc: ScrollContainer, v: float) -> void:
 	tw.tween_property(sc, "scroll_vertical", target, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
-
 # Einstellleiste der Teststrecke: die einzige Stelle, an der die Lenkung eingestellt wird
 const STT_ROWS = [["steer", "ramp", "Reaktion  (weniger = sofort volle Lenkkraft)", 0.05], ["steer", "power", "Lenkkraft  (mehr = engere Kurven)", 0.05],
 	["steer", "assist", "Lenkhilfe zu den Feldern  (0 = aus)", 0.1], ["steer", "bank", "Kurvenneigung  (Optik)", 0.1],
@@ -14812,14 +14658,12 @@ func _stt_rows() -> void:
 	_stt_vals()
 
 
-
-
 # ---------------------------------------------------------------- Neustart ohne Neuladen und Pause
 # „Race again“ und „Menu“ bauen die Strecke nicht neu auf: Schiffe und Rennzustand gehen auf den Stand
 # direkt nach dem Vorwärmen zurück, Effekte des letzten Rennens werden weggeräumt – das geht sofort.
 const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves", "fire_req", "t_state", "race_t", "steer_btn", "btn_t",
 	"last_steer", "touches", "cam_psi", "cam_d", "post_spd", "scr_v", "gl_v", "expo_v", "kmax", "sg_a",
-	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp", "megaw",
+	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
 	"last_c", "tun_k", "cm", "debris", "col_pairs"]
@@ -14872,7 +14716,7 @@ func _soft_reset() -> bool:
 	Engine.time_scale = 1.0
 	AudioServer.playback_speed_scale = 1.0
 	# Effekte des letzten Rennens wegräumen
-	for k in ["shots", "mines", "fxs", "walls", "bwaves", "megaw", "zaps"]:
+	for k in ["shots", "mines", "fxs", "walls", "bwaves", "zaps"]:
 		for e in get(k):
 			_free_fx_entry(e)
 	for k in ["quake", "quake2"]:
@@ -15241,6 +15085,13 @@ func _dg_flush() -> void:
 
 
 func _dg_tick(delta: float) -> void:
+	if OS.get_environment("FTDBG") != "":
+		# nur zum Testen: lange Bilder (Hänger) mit Zustand mitschreiben
+		var now = Time.get_ticks_usec()
+		var ft = (now - int(get_meta("ftl", now))) / 1000.0
+		set_meta("ftl", now)
+		if ft > float(OS.get_environment("FTDBG")):
+			print("FT %.0f ms state=%s t=%.2f warm=%.2f" % [ft, state, t_state, warm_t])
 	if OS.get_environment("BENCHBTN") != "" and OS.get_environment("AG_RELOADED") == "" and not has_meta("bb") and Engine.get_process_frames() > 20:
 		# nur zum Testen: wie der Knopf „Performance test“ in den Einstellungen
 		set_meta("bb", 1)
