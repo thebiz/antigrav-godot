@@ -4633,6 +4633,27 @@ func _party_live(dt: float) -> bool:
 				if ch is Node3D and ch.get_child_count() > 0:
 					var gp: Vector3 = (ch as Node3D).global_position
 					print("PTOP ", ch.get_child(0).name, " px=", cam.unproject_position(gp), " lat=", snappedf((gp - c).dot(f.rr), 0.01), " dz=", snappedf((gp - c).dot(f.fw), 0.01))
+	if OS.get_environment("RENFACE") != "" and party.has("ren") and is_instance_valid(party.ren):
+		# nur zum Testen: Nahaufnahme von Rens Gesicht (Kopf-Knochen), Abstand aus RENFACE
+		var rsk: Skeleton3D = (party.ren as Node).find_children("*", "Skeleton3D", true, false)[0]
+		var hb = rsk.find_bone("Head")
+		if hb < 0:
+			for bi in rsk.get_bone_count():
+				if rsk.get_bone_name(bi).to_lower().contains("head"):
+					hb = bi
+					break
+		if not has_meta("rfp"):
+			set_meta("rfp", 1)
+			print("RENFACE bone=", hb, " ", rsk.get_bone_name(maxi(hb, 0)), " names=", Array(range(mini(rsk.get_bone_count(), 70))).map(func(i): return rsk.get_bone_name(i)))
+		var hp: Vector3 = rsk.global_transform * rsk.get_bone_global_pose(hb).origin
+		var hg: Transform3D = rsk.global_transform * rsk.get_bone_global_pose(hb)
+		var rfa = OS.get_environment("RENFACE").split(",")
+		var ang = deg_to_rad(float(rfa[1])) if rfa.size() > 1 else 0.0
+		var fdir: Vector3 = (-f.rr * cos(ang) + f.fw * sin(ang)).normalized()
+		cam.global_position = hp + fdir * float(rfa[0]) + f.uu * 0.02
+		cam.look_at(hp + f.uu * 0.07, Vector3.UP)
+		cam.fov = 35.0
+		return true
 	if OS.get_environment("PARTYCAM") != "":
 		cam.global_position = c - f.rr * 1.1 + f.fw * 0.05 + f.uu * 0.25
 		cam.look_at(c + f.uu * 0.3, Vector3.UP)
