@@ -952,7 +952,8 @@ func _apply_cfg() -> void:
 	moon.shadow_enabled = q >= 1
 	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if q >= 2 else DirectionalLight3D.SHADOW_ORTHOGONAL
 	moon.directional_shadow_max_distance = 35.0 if q >= 2 else 18.0
-	get_viewport().msaa_3d = Viewport.MSAA_4X if q >= 2 else Viewport.MSAA_DISABLED
+	# High: 2× statt 4× – laut Leistungstest auf dem Handy kostete 4× allein rund 11 ms pro Bild
+	get_viewport().msaa_3d = Viewport.MSAA_2X if q >= 2 else Viewport.MSAA_DISABLED
 	get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 1 else Viewport.SCREEN_SPACE_AA_DISABLED
 	get_viewport().scaling_3d_scale = [0.7, 0.8, 1.0][q] * float(cfg.res)
 	var GK = _glow_k()
@@ -6492,7 +6493,7 @@ func _menu() -> void:
 			rr.add_child(b)
 			grp[3].append(b)
 	# Leistungstest: misst 30 Sekunden lang, was auf diesem Handy wie viel Rechenzeit kostet
-	var bbn = _btn("Performance test (30 s)")
+	var bbn = _btn("Performance test (50 s)")
 	bbn.add_theme_font_size_override("font_size", 30)
 	bbn.pressed.connect(func():
 		bench_req = true
@@ -11467,7 +11468,7 @@ func _go_back() -> void:
 # ---------------------------------------------------------------- Leistungstest: feste Szene, jeder Effekt einmal aus
 # Gleiche Stelle, gleiche Kamera – nur ein Schalter ändert sich je Abschnitt. So sieht man genau, was die Grafikkarte kostet.
 var bench = {}
-const BENCH = [["base", "Everything on (your settings)"], ["msaa", "Edge smoothing (MSAA) off"], ["res75", "Resolution 75 %"], ["fsr", "Resolution 75 % + FSR sharpening"],
+const BENCH = [["base", "Everything on (your settings)"], ["msaa4", "Edge smoothing MSAA 4× (old)"], ["msaa", "Edge smoothing (MSAA) off"], ["fxaa", "MSAA off, FXAA instead"], ["res75", "Resolution 75 %"], ["fsr", "Resolution 75 % + FSR sharpening"],
 	["shadow", "Moon shadows off"], ["glow", "Glow off"], ["post", "Screen filter off"], ["haze", "Heat shimmer off"], ["nlight", "Neon reflections off"],
 	["lamps", "Track lamps off"], ["jets", "Plasma jets off"], ["city", "Holograms/signs/cars off"], ["sky", "Sky shader off"], ["wet", "Wet road off/on"], ["base2", "Everything on again"]]
 
@@ -11508,6 +11509,11 @@ func _bench_next() -> void:
 	match k:
 		"msaa":
 			vp.msaa_3d = Viewport.MSAA_DISABLED
+		"msaa4":
+			vp.msaa_3d = Viewport.MSAA_4X
+		"fxaa":
+			vp.msaa_3d = Viewport.MSAA_DISABLED
+			vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA
 		"res75":
 			vp.scaling_3d_scale = vp.scaling_3d_scale * 0.75
 		"fsr":
@@ -11578,8 +11584,8 @@ func _bench_step(dt: float) -> void:
 func _bench_end() -> void:
 	var t = "AntiGrav 3D performance test\n"
 	t += "Device: %s · %s · Godot %s\n" % [OS.get_model_name(), RenderingServer.get_video_adapter_name(), Engine.get_version_info().string]
-	t += "Settings: gfx %s · res %d %% · 3D scale %.2f · fps cap %s · refresh %d Hz\n\n" % [["Low", "Medium", "High"][int(cfg.gfx)], int(float(cfg.res) * 100),
-		get_viewport().scaling_3d_scale, "60" if int(cfg.cap) == 1 else "max", maxi(0, int(DisplayServer.screen_get_refresh_rate()))]
+	t += "Settings: gfx %s · res %d %% · 3D scale %.2f · MSAA %s · fps cap %s · refresh %d Hz\n\n" % [["Low", "Medium", "High"][int(cfg.gfx)], int(float(cfg.res) * 100),
+		get_viewport().scaling_3d_scale, ["off", "2×", "4×", "8×"][clampi(int(get_viewport().msaa_3d), 0, 3)], "60" if int(cfg.cap) == 1 else "max", maxi(0, int(DisplayServer.screen_get_refresh_rate()))]
 	t += "GPU ms · frame ms · test\n"
 	var b0 = bench.res[0][1] if not bench.res.is_empty() else 0.0
 	for r in bench.res:
@@ -15248,7 +15254,7 @@ func _dg_tick(delta: float) -> void:
 		bench_req = true
 		_reload()
 	if OS.get_environment("BENCHBTN") != "" and Engine.get_process_frames() % 30 == 0:
-		print("BENCHST f=", Engine.get_process_frames(), " state=", state, " warm_t=", warm_t, " bench_req=", bench_req, " reloaded=", OS.get_environment("AG_RELOADED"))
+		print("BENCHST f=", Engine.get_process_frames(), " state=", state, " warm_t=", warm_t, " bench_req=", bench_req, " reloaded=", OS.get_environment("AG_RELOADED"), " step=", bench.get("i", -9), " msaa=", get_viewport().msaa_3d, " ssaa=", get_viewport().screen_space_aa)
 	if OS.get_environment("SETOPEN") != "":
 		# nur zum Testen: Einstellungen öffnen und ganz nach unten scrollen
 		var fn = Engine.get_process_frames()
