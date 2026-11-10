@@ -4651,7 +4651,7 @@ func _party_live(dt: float) -> bool:
 		var ang = deg_to_rad(float(rfa[1])) if rfa.size() > 1 else 0.0
 		var fdir: Vector3 = (-f.rr * cos(ang) + f.fw * sin(ang)).normalized()
 		cam.global_position = hp + fdir * float(rfa[0]) + f.uu * 0.02
-		cam.look_at(hp + f.uu * 0.07, Vector3.UP)
+		cam.look_at(hp + f.uu * 0.07 - f.uu * float(rfa[2] if rfa.size() > 2 else "0"), Vector3.UP)
 		cam.fov = 35.0
 		return true
 	if OS.get_environment("PARTYCAM") != "":
