@@ -7093,6 +7093,17 @@ func _big(t: String, c: Color) -> void:
 
 var fxr = {}
 var flash_rect: ColorRect
+var fl_frame = -1
+
+
+# Blitz abklingen lassen – höchstens einmal pro Bild, egal wer es aufruft
+func _flash_fade(amt: float) -> void:
+	var fn = Engine.get_process_frames()
+	if fn == fl_frame:
+		return
+	fl_frame = fn
+	if flash_rect != null and flash_rect.color.a > 0.0:
+		flash_rect.color.a = maxf(0.0, flash_rect.color.a - amt)
 
 
 func _flash(c: Color, a: float) -> void:
@@ -10504,8 +10515,7 @@ func _rp_cam(dt: float) -> bool:
 		ro = S0 + f.fw * 6.5 + f.uu * 1.0 + f.rr * 0.9
 		ta = S0 + f.uu * 0.15
 	shake = maxf(0.0, shake - dt * 1.8)
-	if flash_rect != null and flash_rect.color.a > 0.0:
-		flash_rect.color.a = maxf(0.0, flash_rect.color.a - dt * 2.2)
+	_flash_fade(dt * 2.2)
 	cam.global_position = ro
 	cam.look_at(ta, up)
 	cam.fov = 52.0 if cm != "side" else 38.0
@@ -10810,8 +10820,7 @@ func _kc_free_d(z: float, dir: float, base: float) -> float:
 
 func _kc_cam() -> bool:
 	# Blitz und Überbelichtung in der Kill-Cam schnell abklingen lassen (vorher blieb das Bild beim Einschlag weiß stehen)
-	if flash_rect != null and flash_rect.color.a > 0.0:
-		flash_rect.color.a = maxf(0.0, flash_rect.color.a - 0.06)
+	_flash_fade(0.06)
 	expo_v = minf(expo_v, 0.3)
 	# Kill-Cam je nach Waffe: Rakete = Kamera fliegt auf der Rakete mit; Schockwelle = reitet auf der Welle;
 	# Mine = flach auf der Fahrbahn neben der Mine; Kraftfeld & Rest = von hinten. Nach dem Knall: kurzer Rundflug über den Trümmern.
@@ -10993,8 +11002,7 @@ func _kc_cam() -> bool:
 	if OS.get_environment("KCDBG") != "":
 		var cf: Vector3 = -cam.global_transform.basis.z
 		print("KCV rel=", snappedf(rel, 0.01), " alive=", alive, " camfw·toVictim=", snappedf(cf.dot((V - ro).normalized()), 0.02), " camfw·trackfw=", snappedf(cf.dot(f.fw), 0.02), " camz-vz=", snappedf((ro - V).dot(f.fw), 0.1), " shots=", fr.get("w", []).size())
-	if flash_rect != null and flash_rect.color.a > 0.0:
-		flash_rect.color.a = maxf(0.0, flash_rect.color.a - 0.05)
+	_flash_fade(0.05)
 	return true
 
 
@@ -11828,6 +11836,12 @@ func _lap_pos(z: float) -> void:
 
 func _process(delta: float) -> void:
 	var dt = minf(delta, 0.05)
+	# Blitz und Explosions-Helligkeit klingen in JEDEM Zustand ab (vorher nur in einzelnen Kameras –
+	# beim Rennende blieb das Bild sonst überstrahlt hängen, bis in die Siegerfeier)
+	_flash_fade(dt * 2.2)
+	expo_v = maxf(0.0, expo_v - dt * 2.2)
+	if wenv != null and wenv.tonemap_exposure != 1.0 + expo_v:
+		wenv.tonemap_exposure = 1.0 + expo_v
 	if flash_rect != null and flash_rect.visible and flash_rect.color.a <= 0.003:
 		flash_rect.visible = false   # unsichtbare Vollbild-Fläche nicht jedes Bild zeichnen
 	t_state += dt
@@ -12694,8 +12708,7 @@ func _lab_step(dt: float) -> void:
 	var ro: Vector3 = tg + off * lab.dist
 	ro.y = maxf(ro.y, tg.y - 0.5)
 	shake = maxf(0.0, shake - dt * 1.8)
-	if flash_rect != null and flash_rect.color.a > 0.0:
-		flash_rect.color.a = maxf(0.0, flash_rect.color.a - dt * 2.2)
+	_flash_fade(dt * 2.2)
 	if shake > 0.0:
 		var tt2 = Time.get_ticks_msec() / 1000.0
 		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * 0.09
@@ -13144,9 +13157,6 @@ func _tunnel(dt: float) -> void:
 	_blimp_live(get_process_delta_time())
 	_starter_live()
 	# Explosions-Helligkeitsstoß abklingen lassen
-	expo_v = maxf(0.0, expo_v - dt * 2.2)
-	if wenv.tonemap_exposure != 1.0 + expo_v:
-		wenv.tonemap_exposure = 1.0 + expo_v
 	# im Tunnel sieht man den Mond nicht: Schattenberechnung sparen
 	# (nur bei Änderung setzen – jedes Setzen ordnet die Schatten neu zu)
 	var sh_on = int(cfg.gfx) >= 1 and tun_k < 0.6 and float(fx.env.moon) > 0.01 and not bench.get("nosh", false)
@@ -13390,8 +13400,7 @@ func _camera(dt: float) -> void:
 		ta = (S0 + f.fw * 0.25).lerp(ta, ww)
 		uc = Y.lerp(uc, ww).normalized()
 	shake = maxf(0.0, shake - dt * 1.8)
-	if flash_rect != null and flash_rect.color.a > 0.0:
-		flash_rect.color.a = maxf(0.0, flash_rect.color.a - dt * 2.2)
+	_flash_fade(dt * 2.2)
 	if shake > 0.0:
 		var tt2 = Time.get_ticks_msec() / 1000.0
 		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * 0.09
@@ -13791,6 +13800,11 @@ func _fin_flow(place: int, out := false) -> void:
 					who = i
 		who = maxi(who, 1)
 	fin = {"t": 0.0, "win": win, "who": who, "fly": win and not ships[0].out, "phase": 0}
+	if OS.get_environment("FINFLASH") != "":
+		# nur zum Testen: Rennende direkt nach einer Explosion, mit dem längsten Ergebnistext
+		hud.res.text = "1st  ·  LAST ONE STANDING\n0:40.41"
+		_flash(Color(1.0, 0.9, 0.8), 1.0)
+		expo_v = 1.5
 	hud.layer.visible = false
 
 
@@ -13815,6 +13829,14 @@ func _fin_update(dt: float) -> void:
 		l.set_anchors_preset(Control.PRESET_TOP_WIDE)
 		l.offset_top = 260
 		l.modulate.a = 0.0
+		# Schriftgröße so wählen, dass die längste Zeile in die Breite passt (bei 84 lief „LAST ONE STANDING“ über den Rand)
+		var vw: float = get_viewport().get_visible_rect().size.x * 0.9
+		var fnt: Font = l.get_theme_font("font")
+		var fs = 84
+		for ln in l.text.split("\n"):
+			while fs > 30 and fnt.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 28 > vw:
+				fs -= 2
+		l.add_theme_font_size_override("font_size", fs)
 		cl.add_child(l)
 		create_tween().tween_property(l, "modulate:a", 1.0, 0.4)
 		fin.lbl = cl
