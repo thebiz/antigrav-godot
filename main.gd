@@ -952,8 +952,8 @@ func _apply_cfg() -> void:
 	moon.shadow_enabled = q >= 1
 	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if q >= 2 else DirectionalLight3D.SHADOW_ORTHOGONAL
 	moon.directional_shadow_max_distance = 35.0 if q >= 2 else 18.0
-	# High: 2× statt 4× – laut Leistungstest auf dem Handy kostete 4× allein rund 11 ms pro Bild
-	get_viewport().msaa_3d = Viewport.MSAA_2X if q >= 2 else Viewport.MSAA_DISABLED
+	# keine MSAA-Kantenglättung: laut Leistungstest auf dem Handy kostete 2× rund 4 ms, 4× rund 11 ms pro Bild (John: lieber ohne)
+	get_viewport().msaa_3d = Viewport.MSAA_DISABLED
 	get_viewport().screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 1 else Viewport.SCREEN_SPACE_AA_DISABLED
 	get_viewport().scaling_3d_scale = [0.7, 0.8, 1.0][q] * float(cfg.res)
 	var GK = _glow_k()
@@ -11468,7 +11468,7 @@ func _go_back() -> void:
 # ---------------------------------------------------------------- Leistungstest: feste Szene, jeder Effekt einmal aus
 # Gleiche Stelle, gleiche Kamera – nur ein Schalter ändert sich je Abschnitt. So sieht man genau, was die Grafikkarte kostet.
 var bench = {}
-const BENCH = [["base", "Everything on (your settings)"], ["msaa4", "Edge smoothing MSAA 4× (old)"], ["msaa", "Edge smoothing (MSAA) off"], ["fxaa", "MSAA off, FXAA instead"], ["res75", "Resolution 75 %"], ["fsr", "Resolution 75 % + FSR sharpening"],
+const BENCH = [["base", "Everything on (your settings)"], ["msaa2", "Edge smoothing MSAA 2×"], ["msaa4", "Edge smoothing MSAA 4×"], ["fxaa", "Edge smoothing FXAA"], ["res75", "Resolution 75 %"], ["fsr", "Resolution 75 % + FSR sharpening"],
 	["shadow", "Moon shadows off"], ["glow", "Glow off"], ["post", "Screen filter off"], ["haze", "Heat shimmer off"], ["nlight", "Neon reflections off"],
 	["lamps", "Track lamps off"], ["jets", "Plasma jets off"], ["city", "Holograms/signs/cars off"], ["sky", "Sky shader off"], ["wet", "Wet road off/on"], ["base2", "Everything on again"]]
 
@@ -11507,8 +11507,8 @@ func _bench_next() -> void:
 	var k: String = BENCH[bench.i][0]
 	var vp = get_viewport()
 	match k:
-		"msaa":
-			vp.msaa_3d = Viewport.MSAA_DISABLED
+		"msaa2":
+			vp.msaa_3d = Viewport.MSAA_2X
 		"msaa4":
 			vp.msaa_3d = Viewport.MSAA_4X
 		"fxaa":
