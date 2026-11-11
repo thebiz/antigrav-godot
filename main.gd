@@ -3522,7 +3522,7 @@ func _shatter(o: Dictionary, sd := -1) -> void:
 		var tmp = order[k]
 		order[k] = order[r]
 		order[r] = tmp
-	var nch = mini(rn.randi_range(5, 9), pcs.size())
+	var nch = mini(rn.randi_range(7, 12), pcs.size())
 	var heads = order.slice(0, nch)
 	var groups = []
 	for h in heads:
@@ -3598,12 +3598,139 @@ func _shatter(o: Dictionary, sd := -1) -> void:
 			smk.emitting = true
 			ch.add_child(smk)
 	holder.queue_free()
+	_crash_site(o, bp, f, rn)
 	# Funkenregen und glühende Splitter aus der Mitte
 	_burst(bp + f.uu * 0.3, fxr.spark, 60, 1.2, 4.0, 14.0, 180.0, Vector3(0, -10, 0), 0.5, 0.6, 1.2,
 		_ramp([[0.0, Color(9, 6, 2.5, 1)], [0.6, Color(4, 1.2, 0.2, 1)], [1.0, Color(1, 0.2, 0.05, 0)]]), null, true, false, 0.3)
 
 
+# ---------------------------------------------------------------- Absturzstelle
+# Bleibt bis zum Rennende: verkohlter Brandfleck auf der Fahrbahn (an der Bande auch dort), dünner Rauch,
+# dazu viele kleine Blechsplitter – ein Teil davon glüht noch und flackert. Man sieht in der nächsten Runde, wo es jemanden erwischt hat.
+const SCORCH_CODE = """
+shader_type spatial;
+render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled;
+uniform float seed=0.;
+uniform float heat=1.;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7))+seed)*43758.5453);}
+float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+void fragment(){
+	vec2 q=(UV-.5)*2.;
+	float nn=n(UV*6.)*.6+n(UV*15.)*.4;
+	float d=length(q)+(nn-.5)*.55;
+	float a=smoothstep(1.,.3,d);
+	// Asche-Rand (graubraun) um einen schwarz verkohlten Kern, darin glühende Risse, die langsam abkühlen
+	float core=smoothstep(.75,.2,d);
+	vec3 col=mix(vec3(.11,.095,.085),vec3(.01,.008,.007),core);
+	float cr=smoothstep(.06,.0,abs(n(UV*7.+seed*.1)-.5))*smoothstep(.85,.15,d);
+	float sp=smoothstep(.8,.95,n(UV*24.+seed))*core;
+	float fl=.6+.4*sin(TIME*2.3+nn*17.);
+	col+=vec3(2.8,.85,.18)*(cr*.9+sp)*heat*fl;
+	ALBEDO=col;
+	ALPHA=a*(.85+.15*nn);
+}
+"""
+const EMBER_CODE = """
+shader_type spatial;
+render_mode cull_disabled,shadows_disabled;
+uniform float ph=0.;
+void fragment(){
+	float fl=.55+.45*sin(TIME*(4.+ph)+ph*7.)*sin(TIME*1.7+ph);
+	ALBEDO=vec3(.06,.04,.03);
+	ROUGHNESS=.9;
+	EMISSION=vec3(1.,.36,.08)*(.6+1.6*fl);
+}
+"""
+var crash_m = {}
+var scorch = []   # Brandflecken: kühlen langsam ab (glühen danach noch schwach)
+
+
+func _crash_site(o: Dictionary, bp: Vector3, f: Dictionary, rn: RandomNumberGenerator) -> void:
+	if crash_m.is_empty():
+		crash_m.char = StandardMaterial3D.new()
+		(crash_m.char as StandardMaterial3D).albedo_color = Color(0.07, 0.065, 0.06)
+		(crash_m.char as StandardMaterial3D).roughness = 0.85
+		(crash_m.char as StandardMaterial3D).metallic = 0.4
+		crash_m.ember = _shader_mat(EMBER_CODE)
+		var b1 = BoxMesh.new()
+		b1.size = Vector3(0.16, 0.02, 0.1)
+		var b2 = PrismMesh.new()
+		b2.size = Vector3(0.12, 0.08, 0.05)
+		var b3 = BoxMesh.new()
+		b3.size = Vector3(0.07, 0.05, 0.22)
+		crash_m.shapes = [b1, b2, b3]
+	var lat0: float = clampf(o.lat, -T.TW + 0.3, T.TW - 0.3)
+	if OS.get_environment("CSDBG") != "":
+		print("CRASHSITE z=", o.z, " lz=", T.lz(o.z), " lat=", o.lat)
+	# Brandfleck auf der Fahrbahn, länglich in Fahrtrichtung
+	var sm = _shader_mat(SCORCH_CODE)
+	sm.set_shader_parameter("seed", rn.randf() * 100.0)
+	scorch.append({"m": sm, "t": 0.0, "n": null})
+	var pm = PlaneMesh.new()
+	pm.size = Vector2(1.5, 2.6)
+	var sc = MeshInstance3D.new()
+	sc.mesh = pm
+	sc.material_override = sm
+	sc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	sc.set_meta("rfx", true)
+	sc.set_meta("deb", true)
+	add_child(sc)
+	var fz = T.frame(o.z + 0.6)
+	sc.global_transform = Transform3D(Basis(fz.rr, fz.uu, -fz.fw).rotated(fz.uu, rn.randf_range(-0.25, 0.25)), fz.c + fz.rr * lat0 + fz.uu * 0.012)
+	# nah an der Bande: Ruß auch an der Wand
+	if absf(o.lat) > T.TW - 0.75:
+		var sw = sm.duplicate()
+		var wm = MeshInstance3D.new()
+		var qm = QuadMesh.new()
+		qm.size = Vector2(2.2, 1.0)
+		wm.mesh = qm
+		wm.material_override = sw
+		wm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		wm.set_meta("rfx", true)
+		wm.set_meta("deb", true)
+		add_child(wm)
+		var sd = signf(o.lat)
+		wm.global_transform = Transform3D(Basis(fz.fw * sd, fz.uu, -fz.rr * sd), fz.c + fz.rr * (sd * (T.TW + 0.02)) + fz.uu * 0.35)
+	# dünner Rauch, der noch lange aus dem Brandfleck steigt
+	var smk = _dmg_emitter(fxr.smoke, 8, 3.2, 0.2, 0.5, 15.0, Vector3(0, 0.5, 0), 0.35, 0.8,
+		_ramp([[0.0, Color(0.14, 0.13, 0.13, 0)], [0.15, Color(0.1, 0.1, 0.1, 0.45)], [1.0, Color(0.05, 0.05, 0.06, 0)]], false),
+		_curve([[0.0, 0.4], [1.0, 2.2]]), false, Vector3(0.35, 0.02, 0.5), 0.0)
+	smk.emitting = true
+	smk.set_meta("rfx", true)
+	smk.set_meta("deb", true)
+	add_child(smk)
+	smk.global_position = fz.c + fz.rr * lat0 + fz.uu * 0.05
+	# Splitter: fliegen mit auseinander und bleiben liegen, jeder fünfte glüht
+	var shapes: Array = crash_m.shapes
+	for k in range(18):
+		var mi = MeshInstance3D.new()
+		mi.mesh = shapes[k % shapes.size()]
+		var glow = k % 4 == 0
+		if glow:
+			var em: ShaderMaterial = (crash_m.ember as ShaderMaterial).duplicate()
+			em.set_shader_parameter("ph", rn.randf() * 6.0)
+			mi.material_override = em
+		else:
+			mi.material_override = crash_m.char
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ch = Node3D.new()
+		ch.set_meta("rfx", true)
+		ch.set_meta("deb", true)
+		add_child(ch)
+		ch.add_child(mi)
+		var s3 = rn.randf_range(0.6, 1.5)
+		mi.scale = Vector3.ONE * s3
+		var a = rn.randf() * TAU
+		debris.append({"n": ch, "z": o.z, "lat": o.lat, "h": rn.randf_range(0.2, 0.5),
+			"vz": o.spd * rn.randf_range(0.3, 0.9) + cos(a) * rn.randf_range(2.0, 9.0), "vl": sin(a) * rn.randf_range(2.0, 8.0),
+			"vh": rn.randf_range(3.0, 9.0), "rb": Basis(), "av": Vector3(rn.randf_range(-1, 1), rn.randf_range(-1, 1), rn.randf_range(-1, 1)).normalized() * rn.randf_range(6.0, 16.0),
+			"r": 0.06 * s3, "t": 0.0, "m": null, "sp": 0.0, "hit": false, "kt": 0.0, "wreck": false, "small": true})
+
+
 func _debris_update(dt: float) -> void:
+	for sc in scorch:
+		sc.t += dt
+		(sc.m as ShaderMaterial).set_shader_parameter("heat", maxf(0.3, 1.0 - float(sc.t) / 25.0))
 	if debris.is_empty():
 		return
 	for i in range(debris.size() - 1, -1, -1):
@@ -3654,8 +3781,9 @@ func _debris_update(dt: float) -> void:
 		var B = Basis(-f.rr, f.uu, f.fw)
 		var sc = 1.0   # Trümmer bleiben bis zum Rennende liegen
 		nd.global_transform = Transform3D((B * (d.rb as Basis)).orthonormalized().scaled(Vector3.ONE * maxf(sc, 0.001)), f.c + f.rr * d.lat + f.uu * d.h)
-		(d.m as StandardMaterial3D).emission_energy_multiplier = maxf(0.12 if d.get("wreck", false) else 0.0, 0.7 - d.t * 0.28)
-		if state == "race" or state == "done":
+		if d.m != null:
+			(d.m as StandardMaterial3D).emission_energy_multiplier = maxf(0.12 if d.get("wreck", false) else 0.0, 0.7 - d.t * 0.28)
+		if (state == "race" or state == "done") and not d.get("small", false):
 			_debris_hits(d, dt)
 
 
@@ -3696,6 +3824,10 @@ func _debris_hits(d: Dictionary, dt: float) -> void:
 
 
 func _debris_sparks(d: Dictionary, n: int) -> void:
+	if d.get("small", false):
+		n = 2 if randf() < 0.4 else 0   # kleine Splitter: nur ab und zu ein Fünkchen
+		if n == 0:
+			return
 	if not is_instance_valid(d.n) or cam == null or (d.n as Node3D).global_position.distance_squared_to(cam.global_position) > 2500.0:
 		return
 	_burst((d.n as Node3D).global_position, fxr.spark, n, 0.45, 1.5, 5.0, 60.0, Vector3(0, -9, 0), 0.5, 0.4, 0.9,
@@ -4580,10 +4712,34 @@ func _party_live(dt: float) -> bool:
 					var up0: Vector3 = (np0 - gr.origin).normalized()
 					var fw0: Vector3 = (rb0.z - up0 * rb0.z.dot(up0)).normalized()
 					var wb0 = Basis(up0.cross(fw0).normalized(), up0, fw0)
-					var want = Transform3D(wb0.scaled(Vector3.ONE * (0.15 / 97.0)), np0 - up0 * 0.12 + fw0 * 0.02)
+					# Kranz-Modell: geschlossener Ring (97 breit, 71 tief), hinten hoch (y 66, z −35), vorn tief auf der Brust.
+					# Breite nach dem Schulterabstand (die Jacke hat dicke Schulterpolster, darum etwas breiter); hinten liegt er im Nacken
+					# außen am Kragen, vorn auf der Brust – vorher war er so klein, dass er im Oberkörper steckte.
+					var la = sk.find_bone("mixamorig_LeftArm")
+					var ra = sk.find_bone("mixamorig_RightArm")
+					var dsh = (sk.global_transform * sk.get_bone_global_rest(la).origin).distance_to(sk.global_transform * sk.get_bone_global_rest(ra).origin)
+					var wsc = dsh * float(OS.get_environment("WRS") if OS.get_environment("WRS") != "" else "1.3") / 97.0
+					# zusätzlich nach vorn kippen: vorn hängt er tiefer auf der Brust, hinten liegt er im Nacken
+					var wtl = deg_to_rad(float(OS.get_environment("WRT") if OS.get_environment("WRT") != "" else "-8"))
+					var wbs: Basis = (Basis(wb0.x, wtl) * wb0).scaled(Vector3.ONE * wsc)
+					var back: Vector3 = np0 - up0 * dsh * float(OS.get_environment("WRD") if OS.get_environment("WRD") != "" else "0.0") - fw0 * dsh * float(OS.get_environment("WRB") if OS.get_environment("WRB") != "" else "0.3")
+					var want = Transform3D(wbs, back - wbs * Vector3(0, 66, -35))
 					party.wofs = gr.affine_inverse() * want
+					if OS.get_environment("WRDBG") != "":
+						for lp in [Vector3(0, 66, -35), Vector3(0, 0, 35), Vector3(48, 33, 0), Vector3(0, 33, 0)]:
+							var wp: Vector3 = want * lp
+							print("WRDBG ", lp, " up=", snappedf((wp - np0).dot(up0) / dsh, 0.01), " fw=", snappedf((wp - np0).dot(fw0) / dsh, 0.01), " side=", snappedf((wp - np0).dot(wb0.x) / dsh, 0.01))
+						var tf: Vector3 = sk.global_transform * sk.get_bone_global_rest(sk.find_bone("mixamorig_LeftToe_End")).origin - sk.global_transform * sk.get_bone_global_rest(sk.find_bone("mixamorig_LeftFoot")).origin
+						print("WRDBG toe·fw0=", snappedf(tf.normalized().dot(fw0), 0.01))
+						print("WRDBG head up=", snappedf((sk.global_transform * sk.get_bone_global_rest(sk.find_bone("mixamorig_Head")).origin - np0).dot(up0) / dsh, 0.01), " spine2 up=", snappedf((gr.origin - np0).dot(up0) / dsh, 0.01), " ren fwd vs rr ", rb0.z)
 				var gp: Transform3D = sk.global_transform * sk.get_bone_global_pose(cb)
 				(party.wreath as Node3D).global_transform = gp * (party.wofs as Transform3D)
+				if OS.get_environment("WRDBG") != "" and not party.has("wrp"):
+					party.wrp = 1
+					for mi in (party.wreath as Node).find_children("*", "MeshInstance3D", true, false):
+						var ab: AABB = (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()
+						var npn: Vector3 = sk.global_transform * sk.get_bone_global_pose(nb).origin
+						print("WRDBG live aabb center-neck=", ab.get_center() - npn, " size=", ab.size, " vis=", (mi as MeshInstance3D).is_visible_in_tree(), " ren pos-neck=", rn.global_position - npn)
 	# Konfettikanonen: zuerst alle drei, dann immer wieder einzeln
 	party.ct = float(party.ct) - dt
 	if party.ct <= 0.0:
@@ -7733,6 +7889,29 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	_snd("rak", -2.0, 1.0, (from.node as Node3D).global_position if from.idx != 0 else null)
 
 
+# Spiral-Raketen (Super: 2, Mega: 3): fliegen als Zopf umeinander gedreht, getroffen wird über die gemeinsame Bahn.
+# Lage der k-ten Rakete von n um die Flugbahn – Radius wächst kurz nach dem Start auf, dann dreht der Zopf
+func _braid_off(f: Dictionary, n: int, k: int, t: float) -> Vector3:
+	if n <= 1:
+		return Vector3.ZERO
+	var r = 0.24 * clampf(t / 0.18, 0.0, 1.0)
+	var a = t * 13.0 + TAU * float(k) / float(n)
+	return f.rr * (cos(a) * r) + f.uu * (sin(a) * r + 0.1)
+
+
+func _braid(sh: Dictionary, n: int) -> void:
+	sh.br = n
+	sh.ex = []
+	var src: MeshInstance3D = sh.n
+	for k in range(1, n):
+		var mi = MeshInstance3D.new()
+		mi.mesh = src.mesh
+		mi.material_override = src.material_override
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+		sh.ex.append(mi)
+
+
 # Rakete geht hoch: normal ein schwarzes Loch, Super-Rakete (Streubombe) zerplatzt in fünf kleine über die ganze Breite
 func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
 	if not sh.get("cl", false):
@@ -7979,10 +8158,12 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 	match w:
 		"rak":
 			_add_shot(g, false, false, 1.0, sup)
+			if sup:
+				_braid(shots[shots.size() - 1], 2)   # Super: zwei Raketen im Zopf
 		"lenk":
 			_add_shot(g, false, true, 1.0, false, sup)
 			if sup:
-				_add_shot(g, false, true, -1.0, false, true)   # zweite Lenkrakete nach hinten zum Verfolger
+				_braid(shots[shots.size() - 1], 2)
 		"mine":
 			_drop_mines(g, sup)
 		"orbs":
@@ -8030,28 +8211,12 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 	_flash(Color(1.0, 0.45, 0.95), 0.3)
 	shake = maxf(shake, 0.8)
 	match w:
-		"rak":
-			# drei Raketen im Fächer
-			var grp = {}
-			for d in [-0.16, 0.0, 0.16]:
-				_add_shot(g, false, false, 1.0)
-				shots[shots.size() - 1].dl = tan(g.psi) + d
-				shots[shots.size() - 1].grp = grp   # jeder Gegner wird von der Salve nur einmal getroffen
-				shots[shots.size() - 1].mega = true
-		"lenk":
-			# eine Lenkrakete für jeden Gegner vor dir (bis zu drei)
-			var n = 0
-			var grp = {}
-			for o in ships:
-				if o.idx != g.idx and not o.out and o.z > g.z and o.z - g.z < 220.0 and n < 3:
-					_add_shot(g, false, true, 1.0)
-					shots[shots.size() - 1].tg = o
-					shots[shots.size() - 1].grp = grp
-					shots[shots.size() - 1].only = true   # trifft nur sein eigenes Ziel
-					shots[shots.size() - 1].mega = true
-					n += 1
-			if n == 0:
-				_add_shot(g, false, true, 1.0)
+		"rak", "lenk":
+			# drei Raketen im Zopf, die dem Gegner vor dir hinterherjagen (Lenkrakete: dem eingerasteten Ziel)
+			_add_shot(g, false, true, 1.0, false, true)
+			var ms: Dictionary = shots[shots.size() - 1]
+			ms.mega = true
+			_braid(ms, 3)
 		"mine":
 			# zwei Minenteppiche hintereinander über die ganze Breite
 			_drop_mines(g, true)
@@ -9535,12 +9700,21 @@ func _weapons(dt: float, racing: bool) -> void:
 					_shot_boom(sh, o.z, sh.lat, -1)
 					dead = true
 					break
+		if dead and OS.get_environment("RKW") != "":
+			print("SHOTDEAD t=", snappedf(sh.t, 0.01), " z=", snappedf(sh.z, 0.1), " lat=", snappedf(sh.lat, 0.01), " hit=", hit.idx if hit != null else -1, " tg=", sh.tg.idx if sh.tg != null else -1, " mega=", sh.get("mega", false), " br=", sh.get("br", 1))
 		if dead:
 			sh.n.queue_free()
+			for e in sh.get("ex", []):
+				(e as Node).queue_free()
 			shots.remove_at(i)
 		else:
 			var f = T.frame(sh.z)
-			sh.n.global_transform = Transform3D(Basis(f.rr, f.fw, -f.uu), f.c + f.rr * sh.lat + f.uu * 0.25)
+			var bn: int = sh.get("br", 1)
+			var bp: Vector3 = f.c + f.rr * sh.lat + f.uu * 0.25
+			var bb = Basis(f.rr, f.fw, -f.uu)
+			sh.n.global_transform = Transform3D(bb, bp + _braid_off(f, bn, 0, sh.t))
+			for k in range(1, bn):
+				(sh.ex[k - 1] as Node3D).global_transform = Transform3D(bb, bp + _braid_off(f, bn, k, sh.t))
 	# Minen
 	for i in range(mines.size() - 1, -1, -1):
 		var m = mines[i]
@@ -9902,7 +10076,8 @@ func _record(dt: float) -> void:
 		sh.append([o.z, o.lat, o.h, o.psi, o.roll, o.boost, o.spd, 0 if o.out else 1, o.shield])
 	var w = []
 	for x in shots:
-		w.append([x.z, x.lat, int(x.own), float(x.dir)])
+		for k in range(int(x.get("br", 1))):
+			w.append([x.z, x.lat, int(x.own), float(x.dir), int(x.get("br", 1)), k, float(x.t)])
 	var m = []
 	for x in mines:
 		m.append([x.z, x.lat])
@@ -9989,6 +10164,8 @@ func _replay_start() -> void:
 	walls.clear()
 	for x in shots:
 		x.n.queue_free()
+		for e in x.get("ex", []):
+			(e as Node).queue_free()
 	shots.clear()
 	for x in mines:
 		x.n.queue_free()
@@ -10098,7 +10275,8 @@ func _replay(dt: float) -> void:
 		return _glow_node(cap, Color(1.0, 0.6, 0.2), 8.0))
 	for i in range(f0.w.size()):
 		var fr = T.frame(f0.w[i][0])
-		ps[i].global_transform = Transform3D(Basis(fr.rr, fr.fw, -fr.uu), fr.c + fr.rr * f0.w[i][1] + fr.uu * 0.25)
+		var wo: Vector3 = _braid_off(fr, int(f0.w[i][4]), int(f0.w[i][5]), float(f0.w[i][6])) if (f0.w[i] as Array).size() >= 7 else Vector3.ZERO
+		ps[i].global_transform = Transform3D(Basis(fr.rr, fr.fw, -fr.uu), fr.c + fr.rr * f0.w[i][1] + fr.uu * 0.25 + wo)
 	var pm = _pool("mines", f0.m.size(), func():
 		return _glow_node(_lowsphere(0.12, 12, 6), Color(1, 0.15, 0.1), 6.0))
 	for i in range(f0.m.size()):
@@ -10503,7 +10681,7 @@ func _kc_check() -> void:
 		kc_pending = {}
 		return
 	# Kill-Cam abgeschaltet (Standard): nur das K.o.-Comic, kein Replay
-	if int(cfg.get("kcam", 0)) != 1 and not shot_s.contains("rkctest"):
+	if int(cfg.get("kcam", 0)) != 1 and (not shot_s.contains("rkctest") or OS.get_environment("KCOFF") != ""):
 		var vk: int = int(kc_pending.get("idx", -1))
 		kc_pending = {}
 		if int(cfg.get("comic", 1)) == 1 and vk >= 1 and vk <= 3:
@@ -12758,6 +12936,13 @@ func _shot() -> void:
 				lk_k = 1.0
 				if OS.get_environment("RKQ") == "fwd":
 					ships[0].wpn = "beben"
+				if OS.get_environment("RKW") != "":
+					# nur zum Testen: Waffe und Stufe (z. B. „rak,sup“ oder „lenk,mega“)
+					var rw = OS.get_environment("RKW").split(",")
+					ships[0].wpn = rw[0]
+					ships[0].sup = rw.size() > 1 and rw[1] != ""
+					ships[0].mega = rw.size() > 1 and rw[1] == "mega"
+					ships[1].en = 1.0
 				if OS.get_environment("RKQ") == "back":
 					ships[1].z = ships[0].z - float(OS.get_environment("RKD") if OS.get_environment("RKD") != "" else "14")
 					quake2 = _quake_make(ships[0].z - 3.0, -1.0, quake2)
@@ -13218,6 +13403,20 @@ func _camera(dt: float) -> void:
 		cam.look_at(bp - Vector3(0, 14, 0), Vector3.UP)
 		cam.fov = 60.0
 		return
+	if OS.get_environment("CSAT") != "" and state == "race" and race_t > 1.0 and not has_meta("csat"):
+		set_meta("csat", 1)
+		var ca = OS.get_environment("CSAT").split(",")
+		var rnc = RandomNumberGenerator.new()
+		rnc.seed = 7
+		var fo = {"z": float(ca[0]), "lat": float(ca[1]), "spd": 20.0}
+		var fcz = T.frame(fo.z)
+		_crash_site(fo, fcz.c + fcz.rr * fo.lat, fcz, rnc)
+	if OS.get_environment("CSDBG") != "" and Engine.get_process_frames() % 60 == 0:
+		var nsm = 0
+		for d in debris:
+			if d.get("small", false):
+				nsm += 1
+		print("CSDBG f=", Engine.get_process_frames(), " debris=", debris.size(), " small=", nsm, " first=", (debris[0].z if not debris.is_empty() else -1), ",", (debris[0].lat if not debris.is_empty() else 0))
 	if OS.get_environment("VIEWCAM") != "":
 		# nur zum Testen: freie Kamera „z,seitlich,Höhe,Drehung(Grad)“ – schaut längs der Strecke, gedreht um die Hochachse
 		var vp = OS.get_environment("VIEWCAM").split(",")
@@ -14687,7 +14886,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
-	"last_c", "tun_k", "cm", "debris", "col_pairs"]
+	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
