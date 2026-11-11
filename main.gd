@@ -57,7 +57,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "view": 0}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "view": 0, "vmode": 0}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -600,6 +600,7 @@ uniform float gl=0.;
 uniform float asp=.46;
 uniform float shp=.6;
 uniform float grn=.035;
+uniform int vm=0;   // Cockpit-Sicht: 0 normal, 1 Infrarot, 2 Gitter
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 // Filmkorn-Zufall ohne sin(): bleibt auch bei großen Pixelzahlen gleichmäßig (sin großer Werte wird auf Handy-GPUs ungenau → Muster)
 float hg(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
@@ -660,6 +661,30 @@ void fragment(){
 	col+=(c0-bl)*shp*(1.-min(1.,mb*30.));   // im Verwischten nicht nachschärfen
 	col=max(col,vec3(0.));
 	col+=(hg(floor(SCREEN_UV/px)+floor(fract(TIME*7.3)*91.)*17.)-.5)*grn*(.5+.5*(1.-clamp(dot(col,vec3(.33)),0.,1.)));
+	// Cockpit-Sichten
+	if(vm==1){
+		// Infrarot: Helligkeit wird zu Wärme – kalt = dunkelblau, warm = rot, heiß (Antriebe, Explosionen) = gelb bis weiß
+		float L=clamp(dot(col,vec3(.3,.55,.15))*1.2,0.,1.);
+		L=pow(L,.75);
+		vec3 th=vec3(.02,.02,.14)+vec3(.25,0.,.5)*smoothstep(.05,.35,L);
+		th=mix(th,vec3(.95,.12,.18),smoothstep(.3,.6,L));
+		th=mix(th,vec3(1.,.75,.1),smoothstep(.6,.85,L));
+		th=mix(th,vec3(1.,1.,.9),smoothstep(.88,1.,L));
+		th*=.92+.08*sin(SCREEN_UV.y/px.y*1.6+TIME*30.);   // feine Abtastzeilen
+		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.05;
+	}else if(vm==2){
+		// Gitter: nur Kanten bleiben, als grüne Leuchtlinien; was hell glüht (Schiffe, Antriebe, Geschosse), wird rot
+		vec2 d=px*1.5;
+		float a1=dot(texture(scr,uv+vec2(d.x,0.)).rgb,vec3(.33));float a2=dot(texture(scr,uv-vec2(d.x,0.)).rgb,vec3(.33));
+		float a3=dot(texture(scr,uv+vec2(0.,d.y)).rgb,vec3(.33));float a4=dot(texture(scr,uv-vec2(0.,d.y)).rgb,vec3(.33));
+		float ed=clamp((abs(a1-a2)+abs(a3-a4))*3.2,0.,1.);
+		float L=dot(c0,vec3(.3,.55,.15));
+		vec3 gcol=vec3(.15,1.,.55)*ed*1.3+vec3(1.,.12,.2)*smoothstep(.72,.95,L)*.9;
+		// leichtes Raster über allem, wie ein Messgitter
+		vec2 gq=fract(SCREEN_UV/px/48.);
+		gcol+=vec3(0.,.12,.07)*(step(gq.x,.03)+step(gq.y,.03));
+		col=gcol;
+	}
 	// Vignette bei Tempo
 	col*=1.-spd*.25*smoothstep(.3,.9,length(cd*vec2(asp,1.))*1.4);
 	COLOR=vec4(col,1.);
@@ -688,6 +713,9 @@ func _post_update(dt: float) -> void:
 		sp = clampf(clampf((sv - 0.35) / 0.65, 0.0, 1.0) * 0.32 + maxf(0.0, sv - 1.0) * 0.5 + float(g.boost) * 0.3 + (0.25 if float(g.get("turbo", 0.0)) > 0.0 else 0.0), 0.0, 1.0)
 	if OS.get_environment("SPDK") != "":
 		sp *= float(OS.get_environment("SPDK"))   # nur zum Testen: Tempo-Effekte stärker/schwächer/aus
+	if OS.get_environment("VMODE") != "":
+		cfg.vmode = int(OS.get_environment("VMODE"))   # nur zum Testen
+	_sp(post, "vm", int(cfg.get("vmode", 0)) if _ck_on() else 0)
 	if fwd_cam:
 		post_spd += (sp - post_spd) * (1.0 - exp(-dt / 0.25))
 	else:
@@ -7080,6 +7108,12 @@ func _input(ev: InputEvent) -> void:
 			if hud.has("viewbtn") and (hud.viewbtn as Control).visible and (hud.viewbtn as Control).get_global_rect().grow(16).has_point(ev.position):
 				cfg.view = 1 - int(cfg.view)
 				_save_cfg()
+				return
+			if state in ["race", "count"] and _ck_on() and _ck_core_hit(ev.position):
+				cfg.vmode = (int(cfg.get("vmode", 0)) + 1) % VM_NAMES.size()
+				_save_cfg()
+				ckh.vt = 0.0
+				ckh.gl = 0.9   # kurze Bildstörung beim Umschalten
 				return
 			if state == "race" and fire_rect.has_point(ev.position):
 				fire_req = true
@@ -13644,6 +13678,9 @@ const CK_FOV = 62.0
 const CK_HS = 0.9                           # Größe der Hände relativ zur Bildschirmbreite
 const CK_ROLLK = 1.25                       # Schiffs-Schräglage → Lenkausschlag der Hände (voll eingelenkt ≈ 0,8 → 1)
 const CK_CORE = Vector2(426.0, 185.0)      # Mitte des Hologramm-Kerns im Hände-Bild (Pixel)
+const CK_TIP = 216.0                        # Spitze des Dreiecks im Hände-Bild (y)
+const CK_STRIP = Vector3(372.0, 482.0, 167.0)   # magenta Lichtstreifen im Armaturenbrett: x von, x bis, y (Gleiter-Bild)
+const VM_NAMES = ["NORMAL VISION", "INFRARED", "GRID VISION"]
 var ck = {}
 var ck_hid = false
 var ck_rot = 0.0
@@ -13687,6 +13724,26 @@ func _ck_build(cl: CanvasLayer) -> void:
 	body.stretch_mode = TextureRect.STRETCH_SCALE
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(body)
+	var pgt = GradientTexture2D.new()
+	pgt.fill = GradientTexture2D.FILL_RADIAL
+	pgt.fill_from = Vector2(0.5, 0.5)
+	pgt.fill_to = Vector2(1.0, 0.5)
+	pgt.width = 64
+	pgt.height = 64
+	var pgr = Gradient.new()
+	pgr.set_color(0, Color(1.0, 0.85, 1.0, 1.0))
+	pgr.set_color(1, Color(1.0, 0.2, 0.85, 0.0))
+	pgr.add_point(0.35, Color(1.0, 0.4, 0.95, 0.7))
+	pgt.gradient = pgr
+	var ptr = TextureRect.new()   # heller Fleck auf dem Lichtstreifen, genau unter der Dreiecksspitze
+	ptr.texture = pgt
+	ptr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ptr.stretch_mode = TextureRect.STRETCH_SCALE
+	ptr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pm = CanvasItemMaterial.new()
+	pm.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	ptr.material = pm
+	root.add_child(ptr)
 	var hdc = Control.new()
 	hdc.set_anchors_preset(Control.PRESET_FULL_RECT)
 	hdc.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -13719,7 +13776,8 @@ func _ck_build(cl: CanvasLayer) -> void:
 	gm.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	glow.material = gm
 	hands.add_child(glow)
-	ck = {"root": root, "body": body, "hands": hands, "glow": glow, "floor": floor_r, "hud": hdc}
+	root.move_child(ptr, -1)   # Zeiger-Licht über den Händen, sonst verschluckt es der Hologramm-Ring
+	ck = {"root": root, "body": body, "hands": hands, "glow": glow, "floor": floor_r, "hud": hdc, "ptr": ptr}
 
 
 func _ck_on() -> bool:
@@ -13774,8 +13832,16 @@ func _ck_update(dt: float) -> void:
 		var tj = Time.get_ticks_msec() / 1000.0
 		jit = Vector2(sin(tj * 57.0), sin(tj * 43.0 + 1.0)) * shake * 9.0 * sc
 	ck.hands.size = hs
-	ck.hands.position = Vector2(ck_rot * 14.0 * sc, by - hs.y + absf(ck_rot) * 6.0 * sc) + jit
-	ck.hands.position.x += vp.x * (1.0 - CK_HS) * 0.5
+	# so tief, dass die Dreiecksspitze knapp über dem magenta Lichtstreifen im Armaturenbrett steht
+	var tip_y = ck.body.position.y + (CK_STRIP.z - 7.0) * sc
+	ck.hands.position = Vector2(vp.x * (1.0 - CK_HS) * 0.5 + ck_rot * 6.0 * sc, tip_y - CK_TIP * sc * CK_HS + absf(ck_rot) * 3.0 * sc) + jit
+	# Zeiger: das Dreieck zeigt beim Lenken auf eine Stelle des Streifens, dort leuchtet er auf
+	var px = clampf(ck.hands.position.x + CK_CORE.x * sc * CK_HS - sin(deg_to_rad(18.0) * ck_rot) * 170.0 * sc, (CK_STRIP.x + 8.0) * sc, (CK_STRIP.y - 8.0) * sc)
+	var pw = 80.0 * sc
+	var ph = 30.0 * sc
+	ck.ptr.size = Vector2(pw, ph)
+	ck.ptr.position = Vector2(px - pw * 0.5, ck.body.position.y + CK_STRIP.z * sc - ph * 0.5)
+	ck.ptr.modulate = Color(1.6, 1.3, 1.6, 0.85 + 0.15 * sin(Time.get_ticks_msec() / 1000.0 * 6.0))
 	ck.hands.pivot_offset = CK_CORE * sc * CK_HS
 	ck.hands.rotation = deg_to_rad(18.0) * ck_rot
 	# Kern: pulsiert schneller und heller mit dem Tempo, beim Boost kräftig
@@ -13799,7 +13865,14 @@ func _ck_update(dt: float) -> void:
 
 # Head-up-Display im Cockpit: schwebende Neon-Linien vor dir (Zielkreis mit Tempo, Horizont-Striche, Waffe groß darüber,
 # Zielrahmen um Gegner vor dir, Pfeile für Gegner dicht hinter dir). Flimmert leicht, wackelt bei Treffern, schwimmt beim Lenken nach.
-var ckh = {"w": "", "wt": 9.0, "sw": Vector2.ZERO, "gl": 0.0}
+var ckh = {"w": "", "wt": 9.0, "sw": Vector2.ZERO, "gl": 0.0, "vt": 9.0}
+
+
+func _ck_core_hit(p: Vector2) -> bool:
+	if ck.is_empty() or not is_instance_valid(ck.glow) or not (ck.root as Control).visible:
+		return false
+	var gr: Rect2 = (ck.glow as Control).get_global_rect()
+	return p.distance_to(gr.get_center()) < gr.size.x * 0.55
 
 
 func ck_hud_tick(dt: float, g: Dictionary) -> void:
@@ -13809,6 +13882,7 @@ func ck_hud_tick(dt: float, g: Dictionary) -> void:
 			ckh.wt = 0.0   # gerade eingesammelt: Symbol springt groß auf
 		ckh.w = w
 	ckh.wt = float(ckh.wt) + dt
+	ckh.vt = float(ckh.vt) + dt
 	# Nachschwimmen: das Bild hängt beim Lenken kurz hinterher
 	var sw_t = Vector2(-ck_rot * 26.0, absf(ck_rot) * 6.0)
 	ckh.sw = (ckh.sw as Vector2).lerp(sw_t, 1.0 - exp(-dt / 0.18))
@@ -13964,6 +14038,14 @@ func _ck_hud_draw(c: Control) -> void:
 				var lf2 = int(11.0 * u)
 				var lw2 = font.get_string_size(lab2, HORIZONTAL_ALIGNMENT_LEFT, -1, lf2).x
 				_ht(c, font, q2 + Vector2(-lw2 * 0.5, 20.0 * u), lab2, HORIZONTAL_ALIGNMENT_LEFT, -1, lf2, Color(pc, al2 * 0.9))
+	# --- Sicht gewechselt: Name kurz groß einblenden
+	if float(ckh.vt) < 1.4:
+		var vn = VM_NAMES[int(cfg.get("vmode", 0)) % VM_NAMES.size()]
+		var va = clampf(1.4 - float(ckh.vt), 0.0, 1.0) * fl
+		var vf = int(24.0 * u)
+		var vwd = font.get_string_size(vn, HORIZONTAL_ALIGNMENT_LEFT, -1, vf).x
+		var vcol = [CY, Color(1.0, 0.55, 0.15), Color(0.2, 1.0, 0.55)][int(cfg.get("vmode", 0)) % 3]
+		_ht(c, font, C + Vector2(-vwd * 0.5, -170.0 * u), vn, HORIZONTAL_ALIGNMENT_LEFT, -1, vf, Color(vcol, va))
 	# --- feine Zeilen über allem, wie bei einer Projektion
 	var sl = int(vp.y * 0.18 / (6.0 * u))
 	for k in range(sl):
