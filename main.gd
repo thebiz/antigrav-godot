@@ -606,14 +606,22 @@ void fragment(){
 		float band=floor(uv.y*46.+floor(TIME*24.)*3.1);
 		uv.x+=(h21(vec2(band,floor(TIME*30.)))-.5)*.05*gl*step(.55,h21(vec2(band,1.7)));
 	}
-	// Geschwindigkeit: radiale Zoom-Unschärfe mit Farbversatz zu den Rändern
-	vec2 cd=uv-vec2(.5,.47);float e=smoothstep(.12,.75,length(cd*vec2(asp,1.)));
-	float ca=.004*spd*e+.006*gl+.01*abs(gs);
+	// Geschwindigkeit: Bewegungsunschärfe entlang der Fluchtlinien – Bildmitte (Schiff, Strecke voraus) bleibt scharf,
+	// zum Rand hin wird immer stärker verwischt. e = 0 in der Mitte … 1 am Bildrand (Hoch- und Querformat gleich).
+	vec2 cd=uv-vec2(.5,.47);float e=smoothstep(.4,.98,length(cd*vec2(2.,1.6)));
+	float mb=spd*e*.11;
+	float ca=.006*gl+.01*abs(gs);
 	vec3 col=vec3(0.);
 	vec3 c0=texture(scr,uv).rgb;
 	// nur wo wirklich verwischt wird, mehrfach lesen (spart auf dem Handy viel)
-	if(spd*e<.02&&ca<.0004){col=c0;}
-	else{for(int i=0;i<6;i++){float f=1.-float(i)*.0147*spd*e;vec2 q=vec2(.5,.47)+cd*f;
+	if(mb<.003&&ca<.0004){col=c0;}
+	else if(ca<.0004){
+		// 7 Proben Richtung Fluchtpunkt, pro Pixel leicht versetzt (keine Stufen); außen rötlich, innen bläulich gewichtet → Farbsaum ohne Mehrkosten
+		float j=hg(floor(SCREEN_UV/SCREEN_PIXEL_SIZE))*.7;vec3 ws=vec3(0.);
+		for(int i=0;i<7;i++){float k=(float(i)+j)/7.;vec3 w=vec3(.55+k*.9,1.,1.45-k*.9);
+			col+=texture(scr,vec2(.5,.47)+cd*(1.-mb*k)).rgb*w;ws+=w;}
+		col/=ws;}
+	else{ca+=.004*spd*e;for(int i=0;i<6;i++){float f=1.-float(i)*.2*mb;vec2 q=vec2(.5,.47)+cd*f;
 		col+=vec3(texture(scr,q-cd*ca).r,texture(scr,q).g,texture(scr,q+cd*ca).b);}
 	col/=6.;}
 	// schwarzer Kern und leuchtender Ring der Bombe
@@ -623,16 +631,18 @@ void fragment(){
 		col+=grc*exp(-pow(abs((r-.075*gp)*55./grw),2.))*gp*1.6*grb;
 		if(gr>=0.)col+=vec3(.6,.45,1.)*exp(-pow(abs((r-gr)*30.),2.))*gk*.8;
 	}
-	// Speed-Linien: helle Streifen fliegen von der Mitte nach außen
-	if(spd*e>.001){
-		float an=atan(cd.y,cd.x*asp);float lane=floor(an*70.);float hl=h21(vec2(lane,3.));
-		float ph=fract(length(cd)*2.2-TIME*(2.5+hl*3.)+hl);
-		col+=vec3(.75,.88,1.)*step(.93,hl)*smoothstep(.0,.15,ph)*smoothstep(.5,.1,ph)*spd*e*.45;
+	// Speed-Linien: feine helle Striche schießen am Bildrand nach außen – bei normalem Tempo wenige und zart, bei Boost viele und kräftig
+	if(spd*e>.004){
+		float an=atan(cd.y,cd.x*asp);float lane=floor(an*90.);float hl=h21(vec2(lane,3.));
+		float fa=fract(an*90.);float thin=smoothstep(0.,.3,fa)*smoothstep(1.,.7,fa);
+		float ph=fract(length(cd*vec2(asp,1.))*1.7-TIME*(2.2+hl*2.6)*(.6+spd)+hl*7.);
+		float lw=.2+.45*spd;   // Strichlänge wächst mit dem Tempo
+		col+=vec3(.72,.88,1.)*step(1.-.035-.13*spd,hl)*thin*smoothstep(.0,.06,ph)*smoothstep(lw,lw*.25,ph)*e*e*(.25+.75*spd);
 	}
 	// knackig: Kanten schärfen, feines Filmkorn
 	vec2 px=SCREEN_PIXEL_SIZE;
 	vec3 bl=(texture(scr,uv+px*vec2(1.,.5)).rgb+texture(scr,uv-px*vec2(1.,.5)).rgb)*.5;
-	col+=(c0-bl)*shp;
+	col+=(c0-bl)*shp*(1.-min(1.,mb*30.));   // im Verwischten nicht nachschärfen
 	col=max(col,vec3(0.));
 	col+=(hg(floor(SCREEN_UV/px)+floor(fract(TIME*7.3)*91.)*17.)-.5)*grn*(.5+.5*(1.-clamp(dot(col,vec3(.33)),0.,1.)));
 	// Vignette bei Tempo
@@ -655,7 +665,13 @@ func _post_update(dt: float) -> void:
 	var q = int(cfg.gfx)
 	var sp = 0.0
 	if state == "race" or state == "done":
-		sp = clampf((g.spd / BASE_DEF - 1.1) * 0.35 + g.boost * 0.55 + (0.4 if g.turbo > 0.0 else 0.0), 0.0, 1.0)
+		# Tempo-Gefühl: schon bei normaler Fahrt ein Grundmaß (0,36); Boost und Turbo legen bis 1 drauf; wer ausgebremst wird, verliert es
+		var sv: float = g.spd / BASE_DEF
+		sp = clampf(clampf((sv - 0.35) / 0.65, 0.0, 1.0) * 0.36 + maxf(0.0, sv - 1.0) * 0.45 + g.boost * 0.2 + (0.25 if g.turbo > 0.0 else 0.0), 0.0, 1.0)
+	if state == "done":
+		sp *= 0.4   # nach dem Ziel (Ergebnistafel) ruhiger
+	if OS.get_environment("SPDK") != "":
+		sp *= float(OS.get_environment("SPDK"))   # nur zum Testen: Tempo-Effekte stärker/schwächer/aus
 	post_spd += (sp - post_spd) * (1.0 - exp(-dt / 0.25))
 	_sp(post, "spd", post_spd * (1.0 if q >= 1 else 0.0) if post_spd > 0.002 else 0.0)
 	gl_v = maxf(0.0, gl_v - dt * 1.4)
@@ -1348,6 +1364,16 @@ func _box(key: String, z: float, lat: float, h: float, hx: float, hy: float, hz:
 		_quad(st, o - u - w, o + u - w, o + u + w, o - u + w, n.normalized(), Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1))
 
 
+# kurze Marke (ein einzelnes Viereck) zwischen z0 und z1 – für Pfosten und Striche, die zu Hunderten an der Strecke stehen
+func _mark(key: String, z0: float, z1: float, la: float, lb: float, ha: float, hb: float) -> void:
+	if T.gap(z0) or T.gap(z1):
+		return
+	st_z = z0
+	var f0 = T.frame(z0)
+	var f1 = T.frame(z1)
+	_quad(_st(key), f0.c + f0.rr * la + f0.uu * ha, f0.c + f0.rr * lb + f0.uu * hb, f1.c + f1.rr * lb + f1.uu * hb, f1.c + f1.rr * la + f1.uu * ha, f0.uu)
+
+
 # Leuchtstreifen auf/an der Strecke: von lat a nach b, Höhe h, entlang z0…z1
 func _strip(key: String, z0: float, z1: float, la: float, lb: float, ha: float, hb: float) -> void:
 	# kurze Streifen (Felder, Startlinie) bleiben am Stück in einem Abschnitt – ihre Texturkoordinaten zählen die Vierecke
@@ -1443,6 +1469,22 @@ func _build_track() -> void:
 	while zz < 720.0:
 		_strip("line", zz, zz + 1.5, -0.012, 0.012, 0.005, 0.005)
 		zz += 3.33
+	# Tempo-Marken: dicht am Schiff huscht ständig etwas vorbei – Leuchtpfosten an der Bande (alle 2), Randstriche auf der
+	# Fahrbahn (alle 2, versetzt), Spurstriche und kleine Lampen auf der Bande (alle 6). Im Dschungel gibt es keine Bande.
+	if not _jungle():
+		var zp = 21.0
+		var pk = 0
+		while zp < 719.0:
+			for sd in [-1.0, 1.0]:
+				var pm = "postL" if sd < 0 else "postR"
+				_mark(pm, zp, zp + 0.09, sd * (TW - 0.014), sd * (TW - 0.014), 0.05, 0.25)
+				_mark("line", zp + 1.0, zp + 1.6, sd * (TW - 0.5), sd * (TW - 0.38), 0.005, 0.005)
+				if pk % 3 == 1:
+					_box(pm, zp + 1.0, sd * (TW + 0.06), 0.495, 0.03, 0.035, 0.1)
+				if pk % 2 == 0:
+					_mark("line", zp + 0.3, zp + 1.3, sd * TW * 0.5 - 0.012, sd * TW * 0.5 + 0.012, 0.005, 0.005)
+			zp += 2.0
+			pk += 1
 	# Startlinie
 	_strip("start", 19.5, 20.5, -TW, TW, 0.007, 0.007)
 	# Boost-Felder
@@ -1615,6 +1657,8 @@ void fragment(){
 	mats["ringC"] = _neon(CY, 7.0 if not _jungle() else 1.2)
 	mats["ringM"] = _neon(MG, 7.0 if not _jungle() else 1.2)
 	mats["line"] = _neon(Color(0.8, 0.85, 1.0), 0.6)
+	mats["postL"] = _neon(CY, 2.2)
+	mats["postR"] = _neon(MG, 2.2)
 	mats["tlight"] = _neon(Color(0.9, 0.95, 1.0), 4.0)
 	mats["board0"] = _neon(Color(0.8, 0.8, 0.85) if _noir() else Color(0.1, 0.4, 1.0), 2.2)
 	mats["board1"] = _neon(OR if _noir() else Color(1.0, 0.2, 0.5), 2.2)
@@ -4609,10 +4653,10 @@ func _party_end() -> void:
 		party_on = false
 		return
 	if is_instance_valid(party.n):
-		(party.n as Node).queue_free()
+		_qf(party.n)
 	for c in party.conf:
 		if is_instance_valid(c):
-			(c as Node).queue_free()
+			_qf(c)
 	party = {}
 	party_on = false
 	_wet_apply()
@@ -5071,7 +5115,7 @@ func _shield_hits_update(dt: float) -> void:
 		var a = 1.0 - h.t / 0.55
 		if a <= 0.0 or not is_instance_valid(h.n):
 			if is_instance_valid(h.n):
-				(h.n as Node).queue_free()
+				_qf(h.n)
 			shield_hits.remove_at(i)
 			continue
 		(h.m as ShaderMaterial).set_shader_parameter("a", a)
@@ -6911,8 +6955,8 @@ func _rp_rebuild_fx() -> void:
 		if (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D) and not keep.has(n) and not pools.has(n) and not tun_l.has(n) and not n.has_meta("keep"):
 			n.queue_free()
 	for e in zaps:
-		e.mi.queue_free()
-		e.l.queue_free()
+		_qf(e.mi)
+		_qf(e.l)
 	zaps.clear()
 	fxs.clear()
 	var F = rec
@@ -7400,6 +7444,19 @@ var live_bursts = 0
 var fx_age = 0.0
 var fx_rebuild = false
 var fx_gen = 0
+var race_gen = 0   # zählt die Neustarts ohne Neuladen („Race again“)
+
+
+# in d Sekunden ausführen – aber nur, wenn bis dahin kein neues Rennen begonnen hat (sonst landete z. B. eine
+# verzögerte Mine oder die Namenseingabe vom alten Rennen im neuen)
+func _after(d: float, f: Callable) -> void:
+	if d <= 0.0:
+		f.call()
+		return
+	var gen = fx_gen
+	get_tree().create_timer(d).timeout.connect(func():
+		if gen == fx_gen:
+			f.call())
 
 
 # später ausführen – oder sofort, wenn der Effekt schon älter ist als die Verzögerung
@@ -7688,7 +7745,7 @@ void fragment(){
 		if u >= 1.0 and uw >= 1.0:
 			for k in ["core", "ring", "l", "sw", "sph"]:
 				if e.has(k):
-					e[k].queue_free()
+					_qf(e[k])
 			return true
 	# Ring zeigt zur Kamera (nur solange er sichtbar ist; nicht, wenn die Kamera genau darüber steht)
 	if not e.snap:
@@ -7920,7 +7977,7 @@ func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
 	for i in range(5):
 		var la = lerpf(-T.TW * 0.8, T.TW * 0.8, i / 4.0)
 		var zz = z + 1.0 + randf() * 2.5
-		get_tree().create_timer(0.05 * i + 0.01).timeout.connect(func(): _gbomb(zz, la, sh.own, -1, 0.5, true))
+		_after(0.05 * i + 0.01, func(): _gbomb(zz, la, sh.own, -1, 0.5, true))
 	_snd("boom", 0.0, 1.3)
 
 
@@ -7934,10 +7991,10 @@ func _drop_mines(o: Dictionary, sup := false) -> void:
 	if sup:
 		for k in range(9):
 			var la = lerpf(-T.TW + 0.35, T.TW - 0.35, k / 8.0)
-			get_tree().create_timer(k * 0.05).timeout.connect(func(): _drop_one(o, k, la, 0.6 * (k % 2), gid))
+			_after(k * 0.05, func(): _drop_one(o, k, la, 0.6 * (k % 2), gid))
 		return
 	for k in range(3):
-		get_tree().create_timer(k * 0.14).timeout.connect(func(): _drop_one(o, k, 999.0, 0.0, gid))
+		_after(k * 0.14, func(): _drop_one(o, k, 999.0, 0.0, gid))
 
 
 func _drop_one(o: Dictionary, k: int, lat_o := 999.0, back := 0.0, gid := 0) -> void:
@@ -8220,7 +8277,7 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 		"mine":
 			# zwei Minenteppiche hintereinander über die ganze Breite
 			_drop_mines(g, true)
-			get_tree().create_timer(0.35).timeout.connect(func(): _drop_mines(g, true))
+			_after(0.35, func(): _drop_mines(g, true))
 		"schild":
 			# 10 s unzerstörbarer Schild und 30 % Energie
 			g.shield = 10.0
@@ -8237,12 +8294,14 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 			g.shield = maxf(g.shield, 4.5)
 			g.mshield = 4.5
 			_backwave(g)
-			get_tree().create_timer(0.8).timeout.connect(func(): _backwave(g))
+			_after(0.8, func():
+				if state == "race" and not g.out:
+					_backwave(g))
 			_snd("boost", 2.0, 0.85)
 		"beben":
 			# Super-Quake in beide Richtungen, dazu eine zweite Welle nach vorn
 			_fire_w(g, "beben", true)
-			get_tree().create_timer(0.8).timeout.connect(func():
+			_after(0.8, func():
 				if state == "race":
 					quake = _quake_make(g.z + 3.0, 1.0, quake)
 					quake.sup = true
@@ -8278,7 +8337,7 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 func _quake_make(z: float, dir: float, old) -> Dictionary:
 	_fx_res()
 	if old != null:
-		old.n.queue_free()
+		_qf(old.n)
 	var crest = Node3D.new()
 	add_child(crest)
 	# Funken und Brocken spritzen vom Kamm, so lange die Welle rollt
@@ -8353,7 +8412,7 @@ func _quake_step(q, dt: float) -> Variant:
 	_rset("qs" + sfx, qs)
 	shake = maxf(shake, 0.35 * clampf(1.0 - absf(q.z - g.z) / 40.0, 0.0, 1.0) * float(QX.shake))
 	if dist > qmax or q.age > (40.0 if q.get("full", false) else 16.0) * qd:
-		q.n.queue_free()
+		_qf(q.n)
 		_rset("qs" + sfx, 0.0)
 		return null
 	return q
@@ -8374,7 +8433,7 @@ func _backwave(o: Dictionary) -> void:
 func _bwaves_clear() -> void:
 	for w in bwaves:
 		if is_instance_valid(w.n):
-			w.n.queue_free()
+			_qf(w.n)
 	bwaves.clear()
 
 
@@ -8399,7 +8458,7 @@ func _bwaves_update(dt: float) -> void:
 		(mi.material_override as ShaderMaterial).set_shader_parameter("a", a)
 		(mi.get_meta("l") as OmniLight3D).light_energy = 3.0 * a
 		if w.age > 1.8:
-			mi.queue_free()
+			_qf(mi)
 			bwaves.remove_at(i)
 
 
@@ -9703,9 +9762,9 @@ func _weapons(dt: float, racing: bool) -> void:
 		if dead and OS.get_environment("RKW") != "":
 			print("SHOTDEAD t=", snappedf(sh.t, 0.01), " z=", snappedf(sh.z, 0.1), " lat=", snappedf(sh.lat, 0.01), " hit=", hit.idx if hit != null else -1, " tg=", sh.tg.idx if sh.tg != null else -1, " mega=", sh.get("mega", false), " br=", sh.get("br", 1))
 		if dead:
-			sh.n.queue_free()
+			_qf(sh.n)
 			for e in sh.get("ex", []):
-				(e as Node).queue_free()
+				_qf(e)
 			shots.remove_at(i)
 		else:
 			var f = T.frame(sh.z)
@@ -9745,7 +9804,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		if boom or m.t > float(fx.mine.life):
 			if boom:
 				_explode(m.z, m.lat, false, float(fx.mine.boom))
-			m.n.queue_free()
+			_qf(m.n)
 			mines.remove_at(i)
 	# Wall: Gegner, die durchfliegen, werden 1 s gebremst und verlieren 10 %
 	for i in range(walls.size() - 1, -1, -1):
@@ -9768,7 +9827,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		_wall_pose(w.n, w.z, w.age, w.hf)
 		_wall_fig(w)
 		if w.age > 5.3 * float(fx.wall.dur):
-			w.n.queue_free()
+			_qf(w.n)
 			if w.has("fig"):
 				(w.fig.n as Node3D).visible = false
 				w.fig.busy = false
@@ -9958,8 +10017,8 @@ func _zap_update(dt: float) -> void:
 		var nd: Node3D = e.o.node
 		var life = 2.5
 		if e.t > life or not nd.visible:
-			e.mi.queue_free()
-			e.l.queue_free()
+			_qf(e.mi)
+			_qf(e.l)
 			zaps.remove_at(i)
 			continue
 		var fade = clampf((life - e.t) / 0.8, 0.0, 1.0)
@@ -10022,7 +10081,7 @@ func _fx_update(dt: float) -> void:
 			# Druckwelle in der Kill-Cam schwächer – in Zeitlupe stand sie sonst als grellweißer Ring vor der Kamera
 			e.rm.set_shader_parameter("rk", float(fx.boom.ring) * (0.3 if state == "kill" else 1.0))
 			if u >= 1.0:
-				e.ring.queue_free()
+				_qf(e.ring)
 				e.ring = null
 		# Licht: greller Blitz, dann langes oranges Nachglühen
 		var lt2: OmniLight3D = e.l
@@ -10033,7 +10092,7 @@ func _fx_update(dt: float) -> void:
 		lt2.light_color = _hs(Color(1.0, 0.92, 0.8).lerp(Color(1.0, 0.4, 0.08), clampf(tl * 2.2, 0.0, 1.0)), e.get("hu", 0.0))
 		lt2.omni_range = e.rg * (0.7 + 0.5 * exp(-tl * 3.0))
 		if tl >= 2.2:
-			lt2.queue_free()
+			_qf(lt2)
 			fxs.remove_at(i)
 	_zap_update(dt)
 	big_t -= dt
@@ -10122,18 +10181,18 @@ func _replay_start() -> void:
 	for e in fxs:
 		for k in ["ring", "l", "core", "sw", "sph"]:
 			if e.has(k) and e[k] != null and is_instance_valid(e[k]):
-				e[k].queue_free()
+				_qf(e[k])
 	fxs.clear()
 	for e in zaps:
-		e.mi.queue_free()
-		e.l.queue_free()
+		_qf(e.mi)
+		_qf(e.l)
 	zaps.clear()
 	_bwaves_clear()
 	if quake != null:
-		quake.n.queue_free()
+		_qf(quake.n)
 		quake = null
 	if quake2 != null:
-		quake2.n.queue_free()
+		_qf(quake2.n)
 		quake2 = null
 	fx_gen += 1
 	# was gerade gelöscht wird, nicht als „gehört zur Szene“ merken
@@ -10160,15 +10219,15 @@ func _replay_start() -> void:
 	hud.pg.visible = false
 	hud.plbox.visible = false
 	for x in walls:
-		x.n.queue_free()
+		_qf(x.n)
 	walls.clear()
 	for x in shots:
-		x.n.queue_free()
+		_qf(x.n)
 		for e in x.get("ex", []):
-			(e as Node).queue_free()
+			_qf(e)
 	shots.clear()
 	for x in mines:
-		x.n.queue_free()
+		_qf(x.n)
 	mines.clear()
 
 
@@ -10184,7 +10243,7 @@ func _replay_end() -> void:
 		return
 	for k in ["shots", "mines", "walls", "swalls"]:
 		for n in rp.get(k, []):
-			n.queue_free()
+			_qf(n)
 	# eingefrorene Partikel (Pause/Spulen) wieder laufen lassen
 	for n in get_children():
 		if n is GPUParticles3D:
@@ -10326,7 +10385,8 @@ func _rp_photo() -> void:
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
 	var img = get_viewport().get_texture().get_image()
-	hud.layer.visible = true
+	if hud.has("layer") and is_instance_valid(hud.layer):
+		hud.layer.visible = true
 	if img == null:
 		return
 	var ok = false
@@ -10337,8 +10397,12 @@ func _rp_photo() -> void:
 		ok = img.save_png("user://photos/antigrav_%d.png" % int(Time.get_unix_time_from_system())) == OK
 	_flash(Color(1, 1, 1), 0.5)
 	_snd("pick", -6.0, 1.6)
+	if not hud.has("rpphoto") or not is_instance_valid(hud.rpphoto):
+		return   # Replay inzwischen verlassen
 	hud.rpphoto.text = "SAVED ✓" if ok else "ERROR"
-	get_tree().create_timer(1.5).timeout.connect(func(): hud.rpphoto.text = "PHOTO")
+	get_tree().create_timer(1.5).timeout.connect(func():
+		if hud.has("rpphoto") and is_instance_valid(hud.rpphoto):
+			hud.rpphoto.text = "PHOTO")
 
 
 # wem die Kamera folgt: im Replay der gewählte Fahrer, sonst du
@@ -10441,7 +10505,7 @@ func _vx_begin() -> void:
 	var fix = rp.get("fix", -1)
 	for k in ["shots", "mines", "walls", "swalls"]:
 		for n in rp.get(k, []):
-			n.queue_free()
+			_qf(n)
 	rp = {"t": 0.0, "i": 0, "ei": -1, "ci": maxi(0, fix), "ct": 0.0, "sp": null, "sk": 1.0, "fix": fix, "fyaw": 0.6, "fpitch": 0.45, "fdist": 7.0, "follow": 0}
 	hud.vxd.visible = false
 	hud.layer.visible = false
@@ -10644,8 +10708,8 @@ func _warm_step(delta: float) -> void:
 		if not warm_before.has(n) and n != warm_cover and not tun_l.has(n) and not nlights.has(n):
 			n.queue_free()
 	for e in zaps:
-		e.mi.queue_free()
-		e.l.queue_free()
+		_qf(e.mi)
+		_qf(e.l)
 	zaps.clear()
 	fxs.clear()
 	shots.clear()
@@ -10796,8 +10860,8 @@ func _kc_end() -> void:
 		if kc.zaps.has(e):
 			keep_z.append(e)
 		else:
-			e.mi.queue_free()
-			e.l.queue_free()
+			_qf(e.mi)
+			_qf(e.l)
 	zaps = keep_z
 	for n in get_children():
 		if not kc.before.has(n) and not tun_l.has(n) and not n.has_meta("keep") and (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D or n.has_meta("deb")):
@@ -11707,7 +11771,10 @@ func _records_end(finished: bool) -> void:
 		return
 	hud.res.text += "\nNEW RECORD!"
 	_snd("pick", 0.0, 1.5)
-	get_tree().create_timer(1.2).timeout.connect(func(): _name_entry(hits))
+	var rg = race_gen
+	get_tree().create_timer(1.2).timeout.connect(func():
+		if rg == race_gen:   # nicht mehr, wenn inzwischen „Race again“ getippt wurde
+			_name_entry(hits))
 
 
 func _name_entry(hits: Array) -> void:
@@ -12047,6 +12114,17 @@ func _process(delta: float) -> void:
 		g.boost = maxf(g.boost, 1.5)
 	g.shield = maxf(0.0, g.shield - dt)
 	g.mshield = maxf(0.0, float(g.get("mshield", 0.0)) - dt)
+	if OS.get_environment("SPDT") != "" and racing:
+		g.boost = float(OS.get_environment("SPDT"))   # nur zum Testen: fester Boost-Wert (Tempo-Effekte ansehen)
+	if OS.get_environment("BOT") != "" and Engine.get_process_frames() % 300 == 0:
+		var outs = 0
+		for o in ships:
+			outs += 1 if o.out else 0
+		print("BOT f=", Engine.get_process_frames(), " state=", state, " t=", snappedf(race_t, 0.1), " z=", snappedf(g.z, 1.0), " out=", outs, " en=", snappedf(g.en, 0.01), " shots=", shots.size(), " debris=", debris.size(), " kids=", get_child_count())
+	if OS.get_environment("BOTK") != "" and racing:
+		for i in range(1, ships.size()):
+			ships[i].en = minf(ships[i].en, float(OS.get_environment("BOTK")))   # nur zum Testen: Gegner fast kaputt → viele K.o. kurz hintereinander
+		g.en = 1.0
 	if OS.get_environment("BOT") != "" and racing and not g.out:
 		# nur zum Testen: Spieler fährt wie ein Gegner und schießt alles ab, was er aufsammelt
 		if not g.has("lane"):
@@ -13043,7 +13121,7 @@ func _shot() -> void:
 						print("AGAIN menu state=", state, " paused=", get_tree().paused)
 					else:
 						var ok = _soft_reset()
-						print("AGAIN soft=", ok)
+						print("AGAIN soft=", ok, " race0=", race0.size(), " ships0=", ships0.size(), " rpf=", rpf.size(), " vx=", vx.size(), " warm_t=", warm_t)
 						_start()
 				if shot_n == 64:
 					print("AGAIN after kids=", get_child_count(), " fx=", fxs.size(), " mines=", mines.size(), " out2=", ships[2].out, " vis2=", (ships[2].node as Node3D).visible, " z=", ships[0].z, " en2=", ships[2].en, " state=", state, " race_t=", race_t)
@@ -13125,6 +13203,8 @@ func _shot() -> void:
 					get_tree().quit())
 			if shot_n == 60 and shot_s.contains(",ko"):
 				_comic_start("ko", 1)
+			if shot_n == 95 and shot_s.contains(",ko2"):
+				_comic_start("ko", 2)   # zweiter K.o., während das erste Comic noch steht (so stürzte Build 185 ab)
 			if shot_n >= 2 and p.size() > 2 and p[2].begins_with("st"):
 				var v = float(p[2].substr(2))   # Start-Mädel testen: Zeit ab Countdown-Beginn
 				state = "count" if v < 3.0 else "race"
@@ -13481,9 +13561,20 @@ func _camera(dt: float) -> void:
 	if shake > 0.0:
 		var tt2 = Time.get_ticks_msec() / 1000.0
 		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * 0.09
+	# Tempo-Zittern: bei normaler Fahrt kaum spürbar, bei Boost deutlich (die Kamera vibriert, das Bild wackelt leicht mit)
+	if state == "race" and post_spd > 0.01:
+		var rum = (0.003 + 0.02 * maxf(0.0, post_spd - 0.36) / 0.64) * clampf(post_spd / 0.36, 0.0, 1.0)
+		var t3 = Time.get_ticks_msec() / 1000.0
+		var jr = (sin(t3 * 71.0) + sin(t3 * 113.0 + 1.3)) * 0.5
+		var ju = (sin(t3 * 83.0 + 0.7) + sin(t3 * 131.0 + 2.1)) * 0.5
+		ro += (f.rr * jr + f.uu * ju) * rum
+		ta += (f.rr * ju - f.uu * jr) * rum * 3.0
+	if OS.get_environment("SPDDBG") != "" and Engine.get_process_frames() % 20 == 0:
+		print("SPD state=", state, " spd=", snappedf(g.spd, 0.1), " boost=", snappedf(g.boost, 0.01), " post=", snappedf(post_spd, 0.01), " fov=", snappedf(52.0 * minf(1.42, 1.0 + 0.1 * minf(1.5, g.boost) + 0.3 * post_spd), 0.1), " shake_px~=", snappedf((ro - (S0 - fc * (2.6 + cam_d) + uc * (0.95 - 0.15 * cam_d) - f.uu * g.h * 0.5)).length() * 1000.0, 0.1), "mm")
 	cam.global_position = ro
 	cam.look_at(ta, uc)
-	cam.fov = 52.0 * (1.0 + 0.12 * minf(1.5, g.boost) + 0.1 * post_spd)
+	# Sichtfeld weitet sich mit dem Tempo: Stand 52°, normale Fahrt ~58°, Boost bis ~74°
+	cam.fov = 52.0 * minf(1.42, 1.0 + 0.1 * minf(1.5, g.boost) + 0.3 * post_spd)
 	cam.rotate_object_local(Vector3(0, 0, 1), -g.u * 0.05)   # leichtes Mitneigen beim Lenken
 
 
@@ -13578,15 +13669,15 @@ func _comic_build(kind: String) -> void:
 	var st = pn[ns - 1].t0 + 0.5
 	cm = {"kind": kind, "who": who, "t": 0.0, "layer": layer, "c": c, "pn": pn, "end": end if end > 0.0 else 6.0,
 		"skip": -1.0, "hit": -1, "stamp": stamp, "st": st, "hold": hold}
-	c.draw.connect(_comic_draw)
+	c.draw.connect(_comic_draw.bind(c))
 	# nur der erste Tipp zählt – vorher setzte jeder weitere Tipp das Ausblenden zurück, und der Comic tauchte wieder auf
 	c.gui_input.connect(func(ev):
-		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed and not cm.is_empty() and cm.t > 0.6 and cm.skip < 0.0:
+		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed and cm.has("c") and cm.t > 0.6 and cm.skip < 0.0:
 			cm.skip = cm.t)
 	if kind == "start":
 		var sb = _skip_btn()
 		sb.pressed.connect(func():
-			if not cm.is_empty() and cm.get("skip", 0.0) < 0.0:
+			if cm.has("c") and cm.get("skip", 0.0) < 0.0:
 				cm.skip = cm.t)
 		layer.add_child(sb)
 		cm.sb = sb
@@ -13603,7 +13694,7 @@ func _comic_update(dt: float) -> void:
 		if warm_t < 0.0:
 			_comic_build(cm.pending)
 		return
-	if not is_instance_valid(cm.c):
+	if not cm.has("c") or not is_instance_valid(cm.c):
 		cm = {}
 		return
 	cm.t += dt
@@ -13690,10 +13781,11 @@ func _cm_layout(kind: String, n: int, W: float, H: float) -> Array:
 	return out
 
 
-func _comic_draw() -> void:
-	if cm.is_empty():
+func _comic_draw(c: Control) -> void:
+	# Nur das Comic zeichnen, das gerade dran ist. Ein altes Bild, das im selben Moment noch einmal neu gezeichnet wird
+	# (zweiter K.o., während das erste Comic noch steht), fand hier früher kein „c“ mehr → Absturz in Build 185.
+	if not cm.has("c") or not is_instance_valid(c) or cm.c != c:
 		return
-	var c: Control = cm.c
 	var sz: Vector2 = c.size
 	var W = sz.x
 	var H = sz.y
@@ -13934,7 +14026,7 @@ func _fin_update(dt: float) -> void:
 		var wait = fly_t if fin.fly else 1.2
 		if fin.t >= wait:
 			if fin.has("lbl") and is_instance_valid(fin.lbl):
-				(fin.lbl as Node).queue_free()
+				_qf(fin.lbl)
 			if fin.win and not ships[0].out and not free_ride and not _jungle():
 				fin.phase = 5   # Siegerfeier am Ziel, danach die Comic-Seite
 				fin.pt = 0.0
@@ -14903,19 +14995,25 @@ func _race_snap() -> void:
 		ships0.append((o as Dictionary).duplicate(true))
 
 
+# Knoten wegräumen, aber nur, wenn es ihn noch gibt (ein Aufruf auf einen schon gelöschten Knoten lässt die Handy-Fassung abstürzen)
+func _qf(x) -> void:
+	if typeof(x) == TYPE_OBJECT and is_instance_valid(x) and x is Node:
+		(x as Node).queue_free()
+
+
 func _free_fx_entry(e) -> void:
-	if e is Node:
-		if is_instance_valid(e):
-			(e as Node).queue_free()
+	if typeof(e) == TYPE_OBJECT:
+		if is_instance_valid(e) and e is Node:
+			_qf(e)
 	elif e is Dictionary:
 		for v in (e as Dictionary).values():
-			if v is Node and is_instance_valid(v) and not (v as Node).has_meta("keep"):
+			if is_instance_valid(v) and v is Node and not (v as Node).has_meta("keep"):
 				var isship = false
 				for o in ships:
 					if o.node == v:
 						isship = true
 				if not isship:
-					(v as Node).queue_free()
+					_qf(v)
 
 
 # Rennen zurücksetzen (Strecke bleibt stehen). false = geht nicht, dann klassisch neu laden.
@@ -14947,7 +15045,7 @@ func _soft_reset() -> bool:
 			if is_instance_valid(n):
 				n.queue_free()
 	if fin.has("lbl") and is_instance_valid(fin.lbl):
-		(fin.lbl as Node).queue_free()
+		_qf(fin.lbl)
 	for n in get_children():
 		if n.has_meta("rfx"):
 			n.queue_free()
@@ -14959,13 +15057,14 @@ func _soft_reset() -> bool:
 			n.queue_free()   # noch klingende Einzel-Geräusche
 	if not cm.is_empty():
 		for v in cm.values():
-			if v is CanvasLayer and is_instance_valid(v):
+			if is_instance_valid(v) and v is CanvasLayer:
 				v.queue_free()
 	# Rennzustand zurück
 	for k in RACE_VARS:
 		var v = race0[k]
 		set(k, v.duplicate(true) if (v is Array or v is Dictionary) else v)
 	fx_gen += 1
+	race_gen += 1
 	for i in range(ships.size()):
 		var o: Dictionary = ships[i]
 		var o0: Dictionary = ships0[i]
