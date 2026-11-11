@@ -661,18 +661,24 @@ func _post_update(dt: float) -> void:
 	_sp(post, "asp", vp.x / maxf(1.0, vp.y))
 	_sp(post, "shp", 0.9 if _noir() else 0.6)
 	_sp(post, "grn", 0.06 if _noir() else 0.035)
-	var g: Dictionary = ships[0]
+	var g: Dictionary = _focus()
 	var q = int(cfg.gfx)
 	var sp = 0.0
-	if state == "race" or state == "done":
-		# Tempo-Gefühl: schon bei normaler Fahrt ein Grundmaß (0,36); Boost und Turbo legen bis 1 drauf; wer ausgebremst wird, verliert es
+	# Tempo-Effekte nur, wenn die Kamera mit dem Gleiter nach vorn fliegt: im Rennen und im Replay bei „Chase“ und „Cockpit“.
+	# Bei Kamerafahrt/Siegerfeier, Kill-Cam und den anderen Replay-Perspektiven wären Linien zur Bildmitte falsch.
+	var fwd_cam = state == "race" or (state == "replay" and not rp.is_empty() and RP_CAMS[rp.ci][0] in ["chase", "cock"])
+	if fwd_cam:
+		# normale Fahrt: dezentes Grundmaß (0,32); Boost, Speedpads und Turbo legen deutlich bis 1 drauf; wer ausgebremst wird, verliert es
 		var sv: float = g.spd / BASE_DEF
-		sp = clampf(clampf((sv - 0.35) / 0.65, 0.0, 1.0) * 0.36 + maxf(0.0, sv - 1.0) * 0.45 + g.boost * 0.2 + (0.25 if g.turbo > 0.0 else 0.0), 0.0, 1.0)
-	if state == "done":
-		sp *= 0.4   # nach dem Ziel (Ergebnistafel) ruhiger
+		sp = clampf(clampf((sv - 0.35) / 0.65, 0.0, 1.0) * 0.32 + maxf(0.0, sv - 1.0) * 0.5 + float(g.boost) * 0.3 + (0.25 if float(g.get("turbo", 0.0)) > 0.0 else 0.0), 0.0, 1.0)
 	if OS.get_environment("SPDK") != "":
 		sp *= float(OS.get_environment("SPDK"))   # nur zum Testen: Tempo-Effekte stärker/schwächer/aus
-	post_spd += (sp - post_spd) * (1.0 - exp(-dt / 0.25))
+	if fwd_cam:
+		post_spd += (sp - post_spd) * (1.0 - exp(-dt / 0.25))
+	else:
+		post_spd = 0.0   # sofort aus, sonst sähe man beim Schnitt auf eine andere Perspektive noch kurz die Linien
+	if OS.get_environment("SPDDBG") != "" and Engine.get_process_frames() % 20 == 0:
+		print("POSTSPD state=", state, " cam=", (RP_CAMS[rp.ci][0] if not rp.is_empty() else "-"), " post=", snappedf(post_spd, 0.01), " fov=", snappedf(cam.fov, 0.1))
 	_sp(post, "spd", post_spd * (1.0 if q >= 1 else 0.0) if post_spd > 0.002 else 0.0)
 	gl_v = maxf(0.0, gl_v - dt * 1.4)
 	_sp(post, "gl", gl_v)
@@ -10617,7 +10623,7 @@ func _rp_cam(dt: float) -> bool:
 	_flash_fade(dt * 2.2)
 	cam.global_position = ro
 	cam.look_at(ta, up)
-	cam.fov = 52.0 if cm != "side" else 38.0
+	cam.fov = 38.0 if cm == "side" else (52.0 * (1.0 + 0.25 * post_spd) if cm == "cock" else 52.0)
 	return true
 
 
@@ -13562,8 +13568,8 @@ func _camera(dt: float) -> void:
 		var tt2 = Time.get_ticks_msec() / 1000.0
 		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * 0.09
 	# Tempo-Zittern: bei normaler Fahrt kaum spürbar, bei Boost deutlich (die Kamera vibriert, das Bild wackelt leicht mit)
-	if state == "race" and post_spd > 0.01:
-		var rum = (0.003 + 0.02 * maxf(0.0, post_spd - 0.36) / 0.64) * clampf(post_spd / 0.36, 0.0, 1.0)
+	if (state == "race" or state == "replay") and post_spd > 0.01:
+		var rum = (0.003 + 0.02 * maxf(0.0, post_spd - 0.32) / 0.68) * clampf(post_spd / 0.32, 0.0, 1.0)
 		var t3 = Time.get_ticks_msec() / 1000.0
 		var jr = (sin(t3 * 71.0) + sin(t3 * 113.0 + 1.3)) * 0.5
 		var ju = (sin(t3 * 83.0 + 0.7) + sin(t3 * 131.0 + 2.1)) * 0.5
@@ -13573,7 +13579,7 @@ func _camera(dt: float) -> void:
 		print("SPD state=", state, " spd=", snappedf(g.spd, 0.1), " boost=", snappedf(g.boost, 0.01), " post=", snappedf(post_spd, 0.01), " fov=", snappedf(52.0 * minf(1.42, 1.0 + 0.1 * minf(1.5, g.boost) + 0.3 * post_spd), 0.1), " shake_px~=", snappedf((ro - (S0 - fc * (2.6 + cam_d) + uc * (0.95 - 0.15 * cam_d) - f.uu * g.h * 0.5)).length() * 1000.0, 0.1), "mm")
 	cam.global_position = ro
 	cam.look_at(ta, uc)
-	# Sichtfeld weitet sich mit dem Tempo: Stand 52°, normale Fahrt ~58°, Boost bis ~74°
+	# Sichtfeld weitet sich mit dem Tempo: Stand 52°, normale Fahrt ~57°, Boost bis ~74°
 	cam.fov = 52.0 * minf(1.42, 1.0 + 0.1 * minf(1.5, g.boost) + 0.3 * post_spd)
 	cam.rotate_object_local(Vector3(0, 0, 1), -g.u * 0.05)   # leichtes Mitneigen beim Lenken
 
