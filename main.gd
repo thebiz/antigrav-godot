@@ -249,7 +249,7 @@ func _buses() -> void:
 		rv.dry = 0.9
 		rv.predelay_msec = 90.0
 		AudioServer.add_bus_effect(si, rv)
-	for nm in ["Game", "Voice", "Music"]:
+	for nm in ["Game", "Voice", "Music", "Cabin"]:
 		if AudioServer.get_bus_index(nm) == -1:
 			AudioServer.add_bus()
 			var i = AudioServer.bus_count - 1
@@ -279,6 +279,21 @@ func _buses() -> void:
 		var lim = AudioEffectHardLimiter.new()
 		lim.ceiling_db = -0.5
 		AudioServer.add_bus_effect(vi, lim)
+	if AudioServer.get_bus_effect_count(vi) == 2:
+		# Bordfunk im Cockpit (sonst aus): schmalbandig, leicht angezerrt, dadurch klar und knackig über dem dumpfen Rest
+		var rhp = AudioEffectHighPassFilter.new()
+		rhp.cutoff_hz = 380.0
+		AudioServer.add_bus_effect(vi, rhp)
+		var rlp = AudioEffectLowPassFilter.new()
+		rlp.cutoff_hz = 4200.0
+		AudioServer.add_bus_effect(vi, rlp)
+		var rds = AudioEffectDistortion.new()
+		rds.mode = AudioEffectDistortion.MODE_OVERDRIVE
+		rds.drive = 0.22
+		rds.post_gain = 3.0
+		AudioServer.add_bus_effect(vi, rds)
+		for k in range(2, 5):
+			AudioServer.set_bus_effect_enabled(vi, k, false)
 
 
 # ---------------------------------------------------------------- Startsound-Labor: eigener Kanal „Start“ mit Tonhöhe, Klang, Echo, Hall, Biss
@@ -421,7 +436,7 @@ func _sounds() -> void:
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
-			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "minewarn.wav", "hover.wav", "ignite.wav",
+			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
@@ -440,6 +455,15 @@ func _sounds() -> void:
 		add_child(p)
 		p.play()
 		loops[k] = p
+	# Cockpit: Herzschlag und Warntöne – eigener Kanal ohne Dämpfung, laufen still mit und werden nur hochgezogen
+	for k in ["ck_herz90", "ck_herz140", "ck_mines", "ck_missile"]:
+		var p2 = AudioStreamPlayer.new()
+		p2.stream = _looped(snd[k])
+		p2.volume_db = -80.0
+		p2.bus = "Cabin"
+		add_child(p2)
+		p2.play()
+		loops[k] = p2
 	# Musik: eigener Kanal (Regler „Music“ in den Einstellungen), wechselt weich zwischen Menü und Rennen
 	music_p = AudioStreamPlayer.new()
 	music_p.bus = "Music"
@@ -520,7 +544,7 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 	p.stream = snd[k]
 	p.volume_db = db
 	p.pitch_scale = pitch
-	if k.begins_with("vo_"):
+	if k.begins_with("vo_") or k == "incoming":
 		_rev(["vo", k, db])   # Ansagen auch in der Wiederholung
 		p.bus = "Voice"
 		# solange die Stimme spricht (ohne den Hall am Ende), alles andere absenken
@@ -547,6 +571,18 @@ func _sound_update(dt: float) -> void:
 	loops.engine.volume_db = linear_to_db(0.02 + (0.5 + 0.35 * sp + 0.35 * g.boost if on else 0.12)) + 1.5 * ck_snd
 	loops.idle.pitch_scale = clampf((0.75 + 0.45 * sp + 0.25 * g.boost) * (1.0 - 0.25 * ck_snd), 0.3, 3.0)
 	loops.idle.volume_db = linear_to_db((0.32 if state != "menu" else 0.2) * (1.0 + 0.9 * ck_snd))
+	# Cockpit-Warntöne und Herzschlag (nur im Rennen, nur im Cockpit)
+	if loops.has("ck_herz90"):
+		var live = ckt > 0.5 and state in ["race", "count"] and not g.out
+		var hk = clampf((0.22 - float(g.en)) / 0.2, 0.0, 1.0) if live else 0.0   # ab 22 % Energie leise, bei 2 % voll
+		ck_hb += (hk - ck_hb) * (1.0 - exp(-dt / (0.4 if hk > ck_hb else 1.2)))
+		var fast = clampf((ck_hb - 0.45) / 0.35, 0.0, 1.0)
+		loops.ck_herz90.volume_db = linear_to_db(maxf(0.0001, ck_hb * (1.0 - fast) * 0.9))
+		loops.ck_herz140.volume_db = linear_to_db(maxf(0.0001, ck_hb * fast * 1.0))
+		var wm = 1.0 if live and bool(ckh.get("mis", false)) else 0.0
+		var wn = 1.0 if live and bool(ckh.get("mine", false)) and wm < 0.5 else 0.0
+		loops.ck_missile.volume_db = linear_to_db(maxf(0.0001, wm * 0.55))
+		loops.ck_mines.volume_db = linear_to_db(maxf(0.0001, wn * 0.45))
 	var scr = on and absf(g.lat) >= T.TW - 0.31 and not g.air and g.spd > 1.0 and g.shield <= 0.0
 	var tv = 0.25 if scr else 0.0   # Leitplanke: nur dezent
 	scr_v += (tv - scr_v) * (1.0 - exp(-dt / (0.02 if scr else 0.08)))
@@ -13644,6 +13680,9 @@ func _camera(dt: float) -> void:
 		ro = S0 + SU * CK_EYE.y - SF * CK_EYE.x
 		ta = S0 + SF * 12.0 + SU * CK_EYE.z
 		uc = f.uu.lerp(SU, 0.4).normalized()   # Horizont kippt nur zu 40 % mit (volle 45° Schräglage wären zu wild)
+		# Fliehkraft: beim Boost in den Sitz gedrückt (Blick weicht zurück), beim Aufsetzen ein Ruck nach unten
+		ro += -SF * 0.16 * float(ckh.push) - SU * 0.06 * float(ckh.lj)
+		ta += -SU * 0.6 * float(ckh.lj)
 	shake = maxf(0.0, shake - dt * 1.8)
 	_flash_fade(dt * 2.2)
 	if shake > 0.0:
@@ -13685,6 +13724,7 @@ var ck = {}
 var ck_hid = false
 var ck_rot = 0.0
 var ck_snd = 0.0   # 0 = draußen, 1 = im Cockpit (gleitet beim Umschalten)
+var ck_hb = 0.0    # Herzschlag-Stärke
 var ck_bus_v = -1.0
 
 
@@ -13698,6 +13738,10 @@ func _ck_bus(v: float) -> void:
 	var on = v > 0.01
 	AudioServer.set_bus_effect_enabled(gi, 0, on)
 	AudioServer.set_bus_effect_enabled(gi, 1, on)
+	var vi = AudioServer.get_bus_index("Voice")
+	if vi >= 0 and AudioServer.get_bus_effect_count(vi) >= 5:
+		for k in range(2, 5):
+			AudioServer.set_bus_effect_enabled(vi, k, v > 0.5)
 	if not on:
 		return
 	var lp = AudioServer.get_bus_effect(gi, 0) as AudioEffectLowPassFilter
@@ -13718,8 +13762,28 @@ func _ck_build(cl: CanvasLayer) -> void:
 	floor_r.color = Color(0.09, 0.085, 0.1)
 	floor_r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(floor_r)
+	# Licht auf Armaturen und Handschuhen: Reflex-Band beim Vorbeiflug an Lampen, rotes Warnlicht von unten, Schadens-Flackern
+	var cksh = _shader_mat("""
+shader_type canvas_item;
+uniform float ry=-1.;
+uniform vec3 rc=vec3(1.);
+uniform float ra=0.;
+uniform float df=1.;
+void fragment(){
+	vec4 c=COLOR;
+	vec2 s=SCREEN_UV;
+	float lum=dot(c.rgb,vec3(.33));
+	if(ry>-.5){
+		float b=exp(-pow((s.y+(s.x-.5)*.45-ry)*11.,2.));
+		c.rgb+=rc*b*(.08+lum*1.1);
+	}
+	c.rgb+=vec3(1.,.07,.04)*ra*smoothstep(.5,1.,s.y)*(.3+lum*1.2);
+	c.rgb*=df;
+	COLOR=c;
+}""")
 	var body = TextureRect.new()
 	body.texture = load("res://art/ck/body.png")
+	body.material = cksh
 	body.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	body.stretch_mode = TextureRect.STRETCH_SCALE
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -13751,6 +13815,7 @@ func _ck_build(cl: CanvasLayer) -> void:
 	root.add_child(hdc)
 	var hands = TextureRect.new()
 	hands.texture = load("res://art/ck/hands.png")
+	hands.material = cksh
 	hands.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	hands.stretch_mode = TextureRect.STRETCH_SCALE
 	hands.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -13777,7 +13842,65 @@ func _ck_build(cl: CanvasLayer) -> void:
 	glow.material = gm
 	hands.add_child(glow)
 	root.move_child(ptr, -1)   # Zeiger-Licht über den Händen, sonst verschluckt es der Hologramm-Ring
-	ck = {"root": root, "body": body, "hands": hands, "glow": glow, "floor": floor_r, "hud": hdc, "ptr": ptr}
+	# Rauch bei starkem Schaden: kräuselt unten aus dem Cockpit hoch
+	var sgt = GradientTexture2D.new()
+	sgt.fill = GradientTexture2D.FILL_RADIAL
+	sgt.fill_from = Vector2(0.5, 0.5)
+	sgt.fill_to = Vector2(1.0, 0.5)
+	sgt.width = 64
+	sgt.height = 64
+	var sgr = Gradient.new()
+	sgr.set_color(0, Color(0.55, 0.55, 0.58, 0.9))
+	sgr.set_color(1, Color(0.3, 0.3, 0.32, 0.0))
+	sgt.gradient = sgr
+	var smoke = CPUParticles2D.new()
+	smoke.texture = sgt
+	smoke.amount = 26
+	smoke.lifetime = 2.2
+	smoke.emitting = false
+	smoke.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	smoke.direction = Vector2(0, -1)
+	smoke.spread = 28.0
+	smoke.gravity = Vector2(0, -30)
+	smoke.local_coords = false
+	var scr2 = Gradient.new()
+	scr2.offsets = PackedFloat32Array([0.0, 0.2, 1.0])
+	scr2.colors = PackedColorArray([Color(0.6, 0.6, 0.63, 0.0), Color(0.62, 0.62, 0.66, 0.85), Color(0.45, 0.45, 0.5, 0.0)])
+	smoke.color_ramp = scr2
+	root.add_child(smoke)
+	# Funken an der Bande: fliegen dicht am Cockpit vorbei nach hinten weg
+	var kgt = GradientTexture2D.new()
+	kgt.width = 4
+	kgt.height = 18
+	kgt.fill_from = Vector2(0.5, 0.0)
+	kgt.fill_to = Vector2(0.5, 1.0)
+	var kgr = Gradient.new()
+	kgr.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+	kgr.colors = PackedColorArray([Color(1, 1, 1, 0.0), Color(1, 1, 1, 1.0), Color(1, 1, 1, 0.0)])
+	kgt.gradient = kgr
+	var sparks = []
+	for sd in [-1.0, 1.0]:
+		var sp = CPUParticles2D.new()
+		sp.texture = kgt
+		sp.amount = 70
+		sp.lifetime = 0.55
+		sp.emitting = false
+		sp.local_coords = false
+		sp.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+		sp.direction = Vector2(sd * 0.55, 1.0)
+		sp.spread = 22.0
+		sp.gravity = Vector2(0, 1400)
+		sp.particle_flag_align_y = true
+		var kcr = Gradient.new()
+		kcr.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
+		kcr.colors = PackedColorArray([Color(1.0, 1.0, 0.85, 1.0), Color(1.0, 0.7, 0.2, 1.0), Color(1.0, 0.2, 0.05, 0.0)])
+		sp.color_ramp = kcr
+		var km = CanvasItemMaterial.new()
+		km.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+		sp.material = km
+		root.add_child(sp)
+		sparks.append(sp)
+	ck = {"root": root, "body": body, "hands": hands, "glow": glow, "floor": floor_r, "hud": hdc, "ptr": ptr, "sh": cksh, "smoke": smoke, "sparks": sparks}
 
 
 func _ck_on() -> bool:
@@ -13814,7 +13937,7 @@ func _ck_update(dt: float) -> void:
 	var sc = vp.x / 852.0
 	# unten bündig mit der Mitte der unteren HUD-Leiste: die Leiste verdeckt den Schnitt an den Unterarmen,
 	# und der Hologramm-Kern sitzt frei über dem Waffen-Rad (bei jedem Seitenverhältnis)
-	var by = vp.y - 192.0 * vp.x / GA_W
+	var by = vp.y - 192.0 * vp.x / GA_W + (float(ckh.push) * 16.0 + float(ckh.lj) * 18.0) * sc
 	var bs: Vector2 = (ck.body as TextureRect).texture.get_size() * sc
 	ck.body.position = Vector2(0.0, by - bs.y)
 	ck.body.size = bs
@@ -13824,6 +13947,17 @@ func _ck_update(dt: float) -> void:
 	# Lenken: Hände kippen um den Kern (bis 18°), dazu ein kleines Mitschwingen zur Seite
 	var tgt = clampf(float(g.roll) * CK_ROLLK, -1.0, 1.0)
 	ck_hud_tick(dt, g)
+	if OS.get_environment("CKEN") != "":
+		g.en = float(OS.get_environment("CKEN"))   # nur zum Testen: feste Energie (Schaden, Herzschlag)
+	if OS.get_environment("CKWARN") != "":
+		ckh.mis = OS.get_environment("CKWARN") == "mis"
+		ckh.mine = OS.get_environment("CKWARN") == "mine"
+		ckh.al = 1.0
+		ckh.mang = 2.4
+	if OS.get_environment("CKSCR") != "":
+		ckh.scr = int(OS.get_environment("CKSCR"))
+	if OS.get_environment("CKREFL") != "":
+		ckh.rf = float(OS.get_environment("CKREFL"))
 	if OS.get_environment("CKROT") != "":
 		tgt = float(OS.get_environment("CKROT"))   # nur zum Testen: fester Lenkausschlag der Hände
 	ck_rot += (tgt - ck_rot) * (1.0 - exp(-dt / 0.08))
@@ -13842,6 +13976,34 @@ func _ck_update(dt: float) -> void:
 	ck.ptr.size = Vector2(pw, ph)
 	ck.ptr.position = Vector2(px - pw * 0.5, ck.body.position.y + CK_STRIP.z * sc - ph * 0.5)
 	ck.ptr.modulate = Color(1.6, 1.3, 1.6, 0.85 + 0.15 * sin(Time.get_ticks_msec() / 1000.0 * 6.0))
+	# Licht und Schaden auf die Cockpit-Bilder
+	var tnow = Time.get_ticks_msec() / 1000.0
+	var rf = float(ckh.rf)
+	_sp(ck.sh, "ry", lerpf(0.5, 1.1, rf) if rf < 1.0 else -1.0)
+	var rcc: Color = ckh.rc
+	_sp(ck.sh, "rc", Vector3(rcc.r, rcc.g, rcc.b))
+	_sp(ck.sh, "ra", float(ckh.al) * (0.5 + 0.5 * sin(tnow * 5.0)) * 0.7)
+	var dmg = clampf((0.3 - float(g.en)) / 0.25, 0.0, 1.0) if state in ["race", "count"] else 0.0
+	_sp(ck.sh, "df", 1.0 - (0.35 if dmg > 0.0 and fmod(tnow * 9.3, 1.0) < 0.12 * dmg else 0.0))
+	ck.smoke.emitting = dmg > 0.05
+	ck.smoke.modulate.a = 0.4 + 0.6 * dmg
+	ck.smoke.position = Vector2(vp.x * 0.5, by - 330.0 * sc)   # aus den Spalten neben den Griffen, über dem Waffen-Rad
+	ck.smoke.emission_rect_extents = Vector2(vp.x * 0.38, 40.0 * sc)
+	ck.smoke.initial_velocity_min = 120.0 * sc
+	ck.smoke.initial_velocity_max = 240.0 * sc
+	ck.smoke.scale_amount_min = 2.4 * sc
+	ck.smoke.scale_amount_max = 4.5 * sc
+	for i in range(2):
+		var sp: CPUParticles2D = ck.sparks[i]
+		var on_s = int(ckh.scr) == (-1 if i == 0 else 1)
+		sp.emitting = on_s
+		sp.position = Vector2(vp.x * (0.06 if i == 0 else 0.94), vp.y * 0.5)
+		sp.emission_rect_extents = Vector2(6.0 * sc, vp.y * 0.12)
+		sp.initial_velocity_min = 700.0 * sc
+		sp.initial_velocity_max = 1300.0 * sc
+		sp.direction = Vector2(-0.4 if i == 0 else 0.4, 1.0)   # nach unten-außen: fliegen am Cockpit vorbei nach hinten
+		sp.scale_amount_min = 2.6 * sc
+		sp.scale_amount_max = 4.6 * sc
 	ck.hands.pivot_offset = CK_CORE * sc * CK_HS
 	ck.hands.rotation = deg_to_rad(18.0) * ck_rot
 	# Kern: pulsiert schneller und heller mit dem Tempo, beim Boost kräftig
@@ -13865,7 +14027,8 @@ func _ck_update(dt: float) -> void:
 
 # Head-up-Display im Cockpit: schwebende Neon-Linien vor dir (Zielkreis mit Tempo, Horizont-Striche, Waffe groß darüber,
 # Zielrahmen um Gegner vor dir, Pfeile für Gegner dicht hinter dir). Flimmert leicht, wackelt bei Treffern, schwimmt beim Lenken nach.
-var ckh = {"w": "", "wt": 9.0, "sw": Vector2.ZERO, "gl": 0.0, "vt": 9.0}
+var ckh = {"w": "", "wt": 9.0, "sw": Vector2.ZERO, "gl": 0.0, "vt": 9.0, "mis": false, "mang": 0.0, "mine": false, "al": 0.0,
+	"rf": 9.0, "rc": Color(0.4, 0.95, 1.0), "lmp": -1, "push": 0.0, "kick": 0.0, "bo": 0.0, "lj": 0.0, "ljt": 9.0, "air": false, "scr": 0}
 
 
 func _ck_core_hit(p: Vector2) -> bool:
@@ -13883,6 +14046,63 @@ func ck_hud_tick(dt: float, g: Dictionary) -> void:
 		ckh.w = w
 	ckh.wt = float(ckh.wt) + dt
 	ckh.vt = float(ckh.vt) + dt
+	var racing_now = state in ["race", "count"] and not g.out
+	# Warnung: Lenkrakete auf dich (Richtung merken) – Minen voraus in deiner Spur
+	var mis = false
+	var best = 999.0
+	if racing_now:
+		for sh in shots:
+			var tg = sh.get("tg")
+			if tg != null and typeof(tg) == TYPE_DICTIONARY and int(tg.get("idx", -1)) == int(g.idx):
+				var dz = float(sh.z) - float(g.z)
+				if absf(dz) < best:
+					best = absf(dz)
+					mis = true
+					ckh.mang = atan2(float(sh.lat) - float(g.lat), -dz * 0.25)
+	var mine = false
+	if racing_now:
+		for m in mines:
+			if m.get("own", 0) == 0:
+				continue
+			var mz: float = m.z - g.z
+			if mz > 1.0 and mz < 35.0 and absf(m.lat - g.lat) < 1.4:
+				mine = true
+				break
+	ckh.mis = mis
+	ckh.mine = mine
+	ckh.al = move_toward(float(ckh.al), 1.0 if (mis or mine) else 0.0, dt * 3.0)
+	# Lichtreflex: alle 6 Einheiten steht eine Lampe auf der Bande – beim Vorbeiflug huscht ein Lichtband über das Cockpit
+	ckh.rf = float(ckh.rf) + dt * clampf(float(g.spd) / 4.0, 3.0, 9.0)
+	if not _jungle() and racing_now:
+		var lzv = T.lz(float(g.z))
+		var lmp = int(floor((lzv - 24.0) / 6.0))
+		if lmp != int(ckh.lmp):
+			if int(ckh.lmp) >= 0 and lzv > 24.0 and lzv < 719.0:
+				ckh.rf = 0.0
+				ckh.rc = Color(0.45, 0.95, 1.0) if lmp % 2 == 0 else Color(1.0, 0.4, 0.9)
+			ckh.lmp = lmp
+	# Fliehkraft: dauernd etwas beim Boost, dazu ein Stoß, wenn der Boost einsetzt
+	var bo = float(g.boost)
+	if bo > 0.45 and float(ckh.bo) < 0.15:
+		ckh.kick = 1.0
+	ckh.bo = bo
+	ckh.kick = maxf(0.0, float(ckh.kick) - dt * 2.5)
+	var pt = 0.35 * minf(1.0, bo) + 0.65 * float(ckh.kick)
+	ckh.push = lerpf(float(ckh.push), pt, 1.0 - exp(-dt / 0.12))
+	# Aufsetzen nach einem Sprung: gedämpftes Nachfedern
+	var air = bool(g.get("air", false))
+	if bool(ckh.air) and not air:
+		ckh.ljt = 0.0
+	ckh.air = air
+	ckh.ljt = float(ckh.ljt) + dt
+	ckh.lj = sin(float(ckh.ljt) * 26.0) * exp(-float(ckh.ljt) * 7.0) if float(ckh.ljt) < 1.0 else 0.0
+	# an der Bande schrammen: Seite merken (−1 links, 1 rechts)
+	ckh.scr = 0
+	if racing_now and absf(float(g.lat)) >= T.TW - 0.31 and not air and float(g.spd) > 1.0 and float(g.shield) <= 0.0:
+		ckh.scr = 1 if float(g.lat) > 0.0 else -1
+	# Schaden: bei wenig Energie Bildstörungen im Head-up-Display
+	if racing_now and float(g.en) < 0.3 and randf() < dt * (1.0 + 6.0 * (0.3 - float(g.en)) / 0.3):
+		ckh.gl = maxf(float(ckh.gl), randf_range(0.3, 0.7))
 	# Nachschwimmen: das Bild hängt beim Lenken kurz hinterher
 	var sw_t = Vector2(-ck_rot * 26.0, absf(ck_rot) * 6.0)
 	ckh.sw = (ckh.sw as Vector2).lerp(sw_t, 1.0 - exp(-dt / 0.18))
@@ -13927,6 +14147,8 @@ func _ck_hud_draw(c: Control) -> void:
 	var CY = Color(0.35, 0.95, 1.0)
 	var MG = Color(1.0, 0.3, 0.85)
 	var fl = 0.82 + 0.1 * sin(t * 37.0) * sin(t * 11.0) + 0.08 * float(fmod(t * 7.3, 1.0) < 0.05)   # Flimmern
+	if float(g.en) < 0.3 and state in ["race", "count"]:
+		fl *= 0.55 + 0.45 * float(fmod(t * 13.7, 1.0) > 0.18 * (1.0 - float(g.en) / 0.3))   # Schaden: Anzeige setzt kurz aus
 	var jit = Vector2.ZERO
 	if float(ckh.gl) > 0.0:
 		jit = Vector2(sin(t * 91.0) * 7.0, sin(t * 67.0) * 2.0) * float(ckh.gl) * u
@@ -14038,6 +14260,26 @@ func _ck_hud_draw(c: Control) -> void:
 				var lf2 = int(11.0 * u)
 				var lw2 = font.get_string_size(lab2, HORIZONTAL_ALIGNMENT_LEFT, -1, lf2).x
 				_ht(c, font, q2 + Vector2(-lw2 * 0.5, 20.0 * u), lab2, HORIZONTAL_ALIGNMENT_LEFT, -1, lf2, Color(pc, al2 * 0.9))
+	# --- Warnung: Dreieck mit Ausrufezeichen, darunter was kommt; bei Raketen ein Pfeil am Zielkreis aus der Richtung
+	if bool(ckh.mis) or bool(ckh.mine):
+		var bl = 0.5 + 0.5 * sin(t * 10.0)
+		var RD = Color(1.0, 0.18, 0.12)
+		var W = C + Vector2(0, -210.0) * u
+		var tri = PackedVector2Array([W + Vector2(0, -26) * u, W + Vector2(28, 22) * u, W + Vector2(-28, 22) * u, W + Vector2(0, -26) * u])
+		c.draw_colored_polygon(tri, Color(RD, 0.18 + 0.2 * bl))
+		_hp(c, tri, Color(RD, 0.65 + 0.35 * bl), lw * 1.4)
+		_hl(c, W + Vector2(0, -12) * u, W + Vector2(0, 6) * u, Color(1, 0.9, 0.85, 0.7 + 0.3 * bl), lw * 1.6)
+		c.draw_circle(W + Vector2(0, 13) * u, 2.6 * u, Color(1, 0.9, 0.85, 0.7 + 0.3 * bl))
+		var wn = "MISSILE" if bool(ckh.mis) else "MINES AHEAD"
+		var wf = int(18.0 * u)
+		var ww = font.get_string_size(wn, HORIZONTAL_ALIGNMENT_LEFT, -1, wf).x
+		_ht(c, font, W + Vector2(-ww * 0.5, 48.0 * u), wn, HORIZONTAL_ALIGNMENT_LEFT, -1, wf, Color(RD.lerp(Color(1, 1, 1), 0.2), 0.75 + 0.25 * bl))
+		if bool(ckh.mis):
+			var dv = Vector2(sin(float(ckh.mang)), -cos(float(ckh.mang)))
+			var ap = C + dv * 72.0 * u
+			var nv = Vector2(-dv.y, dv.x)
+			var arr = PackedVector2Array([ap + dv * 14.0 * u, ap - dv * 6.0 * u + nv * 10.0 * u, ap - dv * 6.0 * u - nv * 10.0 * u])
+			c.draw_colored_polygon(arr, Color(RD, 0.6 + 0.4 * bl))
 	# --- Sicht gewechselt: Name kurz groß einblenden
 	if float(ckh.vt) < 1.4:
 		var vn = VM_NAMES[int(cfg.get("vmode", 0)) % VM_NAMES.size()]
