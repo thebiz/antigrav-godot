@@ -255,6 +255,16 @@ func _buses() -> void:
 			var i = AudioServer.bus_count - 1
 			AudioServer.set_bus_name(i, nm)
 			AudioServer.set_bus_send(i, "Master")
+	var gi = AudioServer.get_bus_index("Game")
+	if AudioServer.get_bus_effect_count(gi) == 0:
+		var clp = AudioEffectLowPassFilter.new()   # 0: Cockpit-Dämpfung (aus = 20 kHz)
+		clp.cutoff_hz = 20000.0
+		clp.resonance = 0.6
+		AudioServer.add_bus_effect(gi, clp)
+		var ceq = AudioEffectEQ6.new()               # 1: Cockpit-Bass
+		AudioServer.add_bus_effect(gi, ceq)
+		AudioServer.set_bus_effect_enabled(gi, 0, false)
+		AudioServer.set_bus_effect_enabled(gi, 1, false)
 	var vi = AudioServer.get_bus_index("Voice")
 	_bus_levels()
 	# Begrenzer, damit die lautere Stimme nicht übersteuert
@@ -528,10 +538,15 @@ func _sound_update(dt: float) -> void:
 	var g: Dictionary = ships[0]
 	var sp = g.spd / maxf(1.0, base_spd)
 	var on = state == "race" or state == "done"
-	loops.engine.pitch_scale = clampf(0.7 + 0.6 * sp + 0.35 * g.boost, 0.3, 3.0)
-	loops.engine.volume_db = linear_to_db(0.02 + (0.5 + 0.35 * sp + 0.35 * g.boost if on else 0.12))
-	loops.idle.pitch_scale = clampf(0.75 + 0.45 * sp + 0.25 * g.boost, 0.3, 3.0)
-	loops.idle.volume_db = linear_to_db(0.32 if state != "menu" else 0.2)
+	# Cockpit: alles klingt wie durch die Hülle – dumpfer, mehr Bass, der eigene Antrieb brummt tiefer
+	var ckt = 1.0 if _ck_on() else 0.0
+	ck_snd += (ckt - ck_snd) * (1.0 - exp(-dt / 0.15))
+	_ck_bus(ck_snd)
+	var pk = 1.0 - 0.14 * ck_snd
+	loops.engine.pitch_scale = clampf((0.7 + 0.6 * sp + 0.35 * g.boost) * pk, 0.3, 3.0)
+	loops.engine.volume_db = linear_to_db(0.02 + (0.5 + 0.35 * sp + 0.35 * g.boost if on else 0.12)) + 1.5 * ck_snd
+	loops.idle.pitch_scale = clampf((0.75 + 0.45 * sp + 0.25 * g.boost) * (1.0 - 0.25 * ck_snd), 0.3, 3.0)
+	loops.idle.volume_db = linear_to_db((0.32 if state != "menu" else 0.2) * (1.0 + 0.9 * ck_snd))
 	var scr = on and absf(g.lat) >= T.TW - 0.31 and not g.air and g.spd > 1.0 and g.shield <= 0.0
 	var tv = 0.25 if scr else 0.0   # Leitplanke: nur dezent
 	scr_v += (tv - scr_v) * (1.0 - exp(-dt / (0.02 if scr else 0.08)))
@@ -13586,7 +13601,7 @@ func _camera(dt: float) -> void:
 		var ww = w * w * (3.0 - 2.0 * w)
 		ta = (S0 + f.fw * 0.25).lerp(ta, ww)
 		uc = Y.lerp(uc, ww).normalized()
-	var ckm = state == "race" and _ck_on()
+	var ckm = (state == "race" or state == "count") and _ck_on()
 	if ckm:
 		# Cockpit: Augen knapp über dem Gleiter, Blick längs der Schiffsnase (rollt mit dem Schiff, das Cockpit-Bild bleibt fest davor)
 		var nb: Basis = (g.node as Node3D).global_transform.basis
@@ -13632,6 +13647,28 @@ const CK_CORE = Vector2(426.0, 185.0)      # Mitte des Hologramm-Kerns im Hände
 var ck = {}
 var ck_hid = false
 var ck_rot = 0.0
+var ck_snd = 0.0   # 0 = draußen, 1 = im Cockpit (gleitet beim Umschalten)
+var ck_bus_v = -1.0
+
+
+func _ck_bus(v: float) -> void:
+	if absf(v - ck_bus_v) < 0.004:
+		return
+	ck_bus_v = v
+	var gi = AudioServer.get_bus_index("Game")
+	if gi < 0 or AudioServer.get_bus_effect_count(gi) < 2:
+		return
+	var on = v > 0.01
+	AudioServer.set_bus_effect_enabled(gi, 0, on)
+	AudioServer.set_bus_effect_enabled(gi, 1, on)
+	if not on:
+		return
+	var lp = AudioServer.get_bus_effect(gi, 0) as AudioEffectLowPassFilter
+	lp.cutoff_hz = 20000.0 * pow(1400.0 / 20000.0, v)   # 20 kHz → 1,4 kHz
+	var eq = AudioServer.get_bus_effect(gi, 1) as AudioEffectEQ6
+	eq.set_band_gain_db(0, 5.0 * v)    # 32 Hz
+	eq.set_band_gain_db(1, 4.0 * v)    # 100 Hz
+	eq.set_band_gain_db(2, 1.5 * v)    # 320 Hz
 
 
 func _ck_build(cl: CanvasLayer) -> void:
@@ -13650,6 +13687,11 @@ func _ck_build(cl: CanvasLayer) -> void:
 	body.stretch_mode = TextureRect.STRETCH_SCALE
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(body)
+	var hdc = Control.new()
+	hdc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hdc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hdc.draw.connect(_ck_hud_draw.bind(hdc))
+	root.add_child(hdc)
 	var hands = TextureRect.new()
 	hands.texture = load("res://art/ck/hands.png")
 	hands.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -13677,13 +13719,13 @@ func _ck_build(cl: CanvasLayer) -> void:
 	gm.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	glow.material = gm
 	hands.add_child(glow)
-	ck = {"root": root, "body": body, "hands": hands, "glow": glow, "floor": floor_r}
+	ck = {"root": root, "body": body, "hands": hands, "glow": glow, "floor": floor_r, "hud": hdc}
 
 
 func _ck_on() -> bool:
 	if ships.is_empty():
 		return false
-	if state == "race":
+	if state == "race" or state == "count":
 		return int(cfg.get("view", 0)) == 1 and not ships[0].out
 	return state == "replay" and not rp.is_empty() and RP_CAMS[rp.ci][0] == "cock"
 
@@ -13697,7 +13739,7 @@ func _ck_update(dt: float) -> void:
 	if hud.has("pausebtn") and is_instance_valid(hud.pausebtn) and not state in ["intro", "count", "race"]:
 		hud.pausebtn.visible = false
 	# eigenes Schiff im Rennen ausblenden, solange man drinsitzt (im Replay macht das die Replay-Wiedergabe selbst)
-	if state == "race" and on:
+	if (state == "race" or state == "count") and on:
 		(ships[0].node as Node3D).visible = false
 		ck_hid = true
 	elif ck_hid:
@@ -13723,6 +13765,7 @@ func _ck_update(dt: float) -> void:
 	var hs: Vector2 = (ck.hands as TextureRect).texture.get_size() * sc * CK_HS
 	# Lenken: Hände kippen um den Kern (bis 18°), dazu ein kleines Mitschwingen zur Seite
 	var tgt = clampf(float(g.roll) * CK_ROLLK, -1.0, 1.0)
+	ck_hud_tick(dt, g)
 	if OS.get_environment("CKROT") != "":
 		tgt = float(OS.get_environment("CKROT"))   # nur zum Testen: fester Lenkausschlag der Hände
 	ck_rot += (tgt - ck_rot) * (1.0 - exp(-dt / 0.08))
@@ -13752,6 +13795,180 @@ func _ck_update(dt: float) -> void:
 					print("CKHUD ", k, " ", rr, " vp=", vp)
 	if OS.get_environment("CKDBG") != "" and Engine.get_process_frames() % 20 == 0:
 		print("CKDBG state=", state, " roll=", snappedf(float(g.roll), 0.001), " rot=", snappedf(ck_rot, 0.01), " u=", snappedf(float(g.get("u", 0.0)), 0.01), " glow=", snappedf(ck.glow.modulate.a, 0.01), " fov=", snappedf(cam.fov, 0.1))
+
+
+# Head-up-Display im Cockpit: schwebende Neon-Linien vor dir (Zielkreis mit Tempo, Horizont-Striche, Waffe groß darüber,
+# Zielrahmen um Gegner vor dir, Pfeile für Gegner dicht hinter dir). Flimmert leicht, wackelt bei Treffern, schwimmt beim Lenken nach.
+var ckh = {"w": "", "wt": 9.0, "sw": Vector2.ZERO, "gl": 0.0}
+
+
+func ck_hud_tick(dt: float, g: Dictionary) -> void:
+	var w = str(g.get("wpn", ""))
+	if w != ckh.w:
+		if w != "":
+			ckh.wt = 0.0   # gerade eingesammelt: Symbol springt groß auf
+		ckh.w = w
+	ckh.wt = float(ckh.wt) + dt
+	# Nachschwimmen: das Bild hängt beim Lenken kurz hinterher
+	var sw_t = Vector2(-ck_rot * 26.0, absf(ck_rot) * 6.0)
+	ckh.sw = (ckh.sw as Vector2).lerp(sw_t, 1.0 - exp(-dt / 0.18))
+	# kurze Bildstörung bei Treffern
+	ckh.gl = maxf(float(ckh.gl) - dt * 3.0, 0.0)
+	if shake > 0.35:
+		ckh.gl = maxf(float(ckh.gl), shake)
+	if ck.has("hud") and is_instance_valid(ck.hud):
+		(ck.hud as Control).queue_redraw()
+
+
+# Linien mit weichem Schein (breit und schwach, darüber schmal und hell)
+func _hl(c: Control, a: Vector2, b: Vector2, col: Color, w: float, aa := true) -> void:
+	c.draw_line(a, b, Color(col, col.a * 0.22), w * 3.2, aa)
+	c.draw_line(a, b, Color(col.lerp(Color(1, 1, 1), 0.25), minf(1.0, col.a * 1.15)), w, aa)
+
+
+func _ha(c: Control, p: Vector2, r: float, a0: float, a1: float, n: int, col: Color, w: float, aa := true) -> void:
+	c.draw_arc(p, r, a0, a1, n, Color(col, col.a * 0.22), w * 3.2, aa)
+	c.draw_arc(p, r, a0, a1, n, Color(col.lerp(Color(1, 1, 1), 0.25), minf(1.0, col.a * 1.15)), w, aa)
+
+
+func _hp(c: Control, pts: PackedVector2Array, col: Color, w: float, aa := true) -> void:
+	c.draw_polyline(pts, Color(col, col.a * 0.22), w * 3.2, aa)
+	c.draw_polyline(pts, Color(col.lerp(Color(1, 1, 1), 0.25), minf(1.0, col.a * 1.15)), w, aa)
+
+
+# Schrift mit dunklem, weichem Rand, damit sie auch vor hellem Neon lesbar bleibt
+func _ht(c: Control, font: Font, p: Vector2, txt: String, al: int, wd: float, fs: int, col: Color) -> void:
+	c.draw_string_outline(font, p, txt, al, wd, fs, maxi(3, int(fs * 0.22)), Color(0.0, 0.02, 0.06, 0.55 * col.a))
+	c.draw_string(font, p, txt, al, wd, fs, col)
+
+
+func _ck_hud_draw(c: Control) -> void:
+	if not ck.has("hud") or ck.hud != c or ships.is_empty() or not (ck.root as Control).visible:
+		return
+	var g: Dictionary = _focus()
+	var vp = c.size
+	var u = vp.x / 540.0
+	var t = Time.get_ticks_msec() / 1000.0
+	var font = ThemeDB.fallback_font
+	var CY = Color(0.35, 0.95, 1.0)
+	var MG = Color(1.0, 0.3, 0.85)
+	var fl = 0.82 + 0.1 * sin(t * 37.0) * sin(t * 11.0) + 0.08 * float(fmod(t * 7.3, 1.0) < 0.05)   # Flimmern
+	var jit = Vector2.ZERO
+	if float(ckh.gl) > 0.0:
+		jit = Vector2(sin(t * 91.0) * 7.0, sin(t * 67.0) * 2.0) * float(ckh.gl) * u
+	var C = Vector2(vp.x * 0.5, vp.y * 0.4) + (ckh.sw as Vector2) * u + jit
+	var bo = clampf(float(g.boost), 0.0, 1.0)
+	var spc = CY.lerp(MG, bo)
+	var lw = maxf(2.0, 2.6 * u)
+	# --- Horizont-Striche links und rechts
+	for sd in [-1.0, 1.0]:
+		_hl(c, C + Vector2(sd * 74.0, 0) * u, C + Vector2(sd * 150.0, 0) * u, Color(CY, 0.55 * fl), lw, true)
+		_hl(c, C + Vector2(sd * 150.0, 0) * u, C + Vector2(sd * 150.0, 8) * u, Color(CY, 0.55 * fl), lw, true)
+		for k in range(1, 3):
+			var yy = 34.0 * k
+			_hl(c, C + Vector2(sd * 96.0, -yy) * u, C + Vector2(sd * 130.0, -yy) * u, Color(CY, 0.22 * fl), lw * 0.8, true)
+			_hl(c, C + Vector2(sd * 96.0, yy) * u, C + Vector2(sd * 130.0, yy) * u, Color(CY, 0.22 * fl), lw * 0.8, true)
+	# --- Zielkreis: vier Bogenstücke, innen ein Punkt
+	var rr = 40.0 * u
+	for k in range(4):
+		var a0 = TAU * k / 4.0 + 0.25 + t * 0.4
+		_ha(c, C, rr, a0, a0 + 1.0, 12, Color(CY, 0.8 * fl), lw, true)
+	c.draw_circle(C, 2.5 * u, Color(CY, 0.9 * fl))
+	# --- Tempo-Bogen außen (270°), wird beim Boost magenta
+	var sv = clampf(float(g.spd) / maxf(1.0, base_spd * 1.6), 0.0, 1.0)
+	var a_s = PI * 0.75
+	_ha(c, C, 54.0 * u, a_s, a_s + PI * 1.5, 40, Color(CY, 0.18 * fl), lw * 2.0, true)
+	if sv > 0.01:
+		_ha(c, C, 54.0 * u, a_s, a_s + PI * 1.5 * sv, 40, Color(spc, 0.85 * fl), lw * 2.0, true)
+	# Tempo als Zahl unter dem Kreis
+	var vs = str(int(round(float(hud.get("gs", 0.0)) * 12.0)))
+	var fs = int(30.0 * u)
+	var vw = font.get_string_size(vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	_ht(c, font, C + Vector2(-vw * 0.5, 92.0 * u), vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(spc, 0.95 * fl))
+	var ks = "BOOST" if bo > 0.02 else "KM/H"
+	var kf = int(13.0 * u)
+	var kw = font.get_string_size(ks, HORIZONTAL_ALIGNMENT_LEFT, -1, kf).x
+	_ht(c, font, C + Vector2(-kw * 0.5, 108.0 * u), ks, HORIZONTAL_ALIGNMENT_LEFT, -1, kf, Color(spc, 0.7 * fl))
+	# Boost: Winkel-Pfeile wandern vom Kreis nach außen
+	if bo > 0.02:
+		for k in range(3):
+			var ph = fmod(t * 2.2 + k / 3.0, 1.0)
+			var dx = (70.0 + 70.0 * ph) * u
+			var al = (1.0 - ph) * bo * fl
+			for sd in [-1.0, 1.0]:
+				var q = C + Vector2(sd * dx, 0)
+				_hp(c, PackedVector2Array([q + Vector2(-sd * 7, -9) * u, q, q + Vector2(-sd * 7, 9) * u]), Color(MG, al), lw * 1.3, true)
+	# --- Waffe: großes Symbol über dem Kreis, springt beim Einsammeln auf
+	var w = str(ckh.w)
+	if w != "":
+		var wc: Color = WC.get(w, CY)
+		if g.get("mega", false):
+			wc = Color(1.0, 0.25, 0.3)
+		elif g.get("sup", false):
+			wc = Color(1.0, 0.85, 0.3)
+		var wt = float(ckh.wt)
+		var pop = 1.0 + 1.2 * exp(-wt * 6.0) * cos(wt * 14.0)
+		var P = C + Vector2(0, -112.0) * u
+		var ws = 22.0 * u * pop
+		var bs = 34.0 * u * pop
+		var ba = clampf(0.55 + 0.45 * sin(t * 5.0), 0.0, 1.0) * fl
+		# Eck-Klammern um das Symbol
+		for cx in [-1.0, 1.0]:
+			for cy in [-1.0, 1.0]:
+				var q = P + Vector2(cx, cy) * bs
+				_hl(c, q, q - Vector2(cx * 12.0, 0) * u, Color(wc, 0.6 + 0.4 * ba), lw, true)
+				_hl(c, q, q - Vector2(0, cy * 12.0) * u, Color(wc, 0.6 + 0.4 * ba), lw, true)
+		_wicon(c, P, ws, w, Color(wc, 0.95 * fl))
+		var nm = str(WN.get(w, ""))
+		if g.get("mega", false):
+			nm = "MEGA " + nm
+		elif g.get("sup", false):
+			nm = "SUPER " + nm
+		var nf = int(14.0 * u)
+		var nw = font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, nf).x
+		_ht(c, font, P + Vector2(-nw * 0.5, bs + 20.0 * u), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, nf, Color(wc, 0.85 * fl))
+		if wt < 0.5:   # Ring, der beim Einsammeln aufgeht
+			_ha(c, P, bs * (1.0 + wt * 4.0), 0.0, TAU, 32, Color(wc, (1.0 - wt * 2.0) * 0.9), lw * 1.5, true)
+	# --- Gegner vor dir: Zielrahmen mit Name und Abstand
+	if state in ["race", "count", "replay"]:
+		for i in range(ships.size()):
+			var o: Dictionary = ships[i]
+			if int(o.idx) == int(g.idx) or o.out:
+				continue
+			var dz = float(o.z) - float(g.z)
+			var pc: Color = CHARS[i][2] if i < CHARS.size() else CY
+			pc = pc.lerp(Color(1, 1, 1), 0.3)
+			if dz > 2.5 and dz < 80.0:
+				var wp = (o.node as Node3D).global_position
+				if cam.is_position_behind(wp):
+					continue
+				var sp: Vector2 = cam.unproject_position(wp) * (vp.x / maxf(1.0, get_viewport().get_visible_rect().size.x))
+				var bz = clampf(260.0 / dz, 9.0, 34.0) * u
+				var al = clampf(1.2 - dz / 80.0, 0.3, 1.0) * fl
+				for cx in [-1.0, 1.0]:
+					for cy in [-1.0, 1.0]:
+						var q = sp + Vector2(cx * bz * 1.4, cy * bz)
+						_hl(c, q, q - Vector2(cx * bz * 0.5, 0), Color(pc, al), lw, true)
+						_hl(c, q, q - Vector2(0, cy * bz * 0.5), Color(pc, al), lw, true)
+				var lab = "%s %dm" % [CHARS[i][0] if i < CHARS.size() else "?", int(dz * 4.0)]
+				var lf = int(12.0 * u)
+				_ht(c, font, sp + Vector2(bz * 1.4 + 4.0 * u, -bz + lf), lab, HORIZONTAL_ALIGNMENT_LEFT, -1, lf, Color(pc, al * 0.9))
+			elif dz < -0.5 and dz > -18.0:
+				# dicht hinter dir: Pfeil unten am Anzeigefeld, links/rechts nach Spur
+				var x = C.x + clampf((float(o.lat) - float(g.lat)) / T.TW, -1.0, 1.0) * 120.0 * u
+				var y = C.y + 132.0 * u
+				var al2 = clampf(1.0 + dz / 18.0, 0.2, 1.0) * (0.6 + 0.4 * sin(t * 9.0)) * fl
+				var q2 = Vector2(x, y)
+				c.draw_colored_polygon(PackedVector2Array([q2 + Vector2(-9, -5) * u, q2 + Vector2(9, -5) * u, q2 + Vector2(0, 6) * u]), Color(pc, al2))
+				var lab2 = "%dm" % int(-dz * 4.0)
+				var lf2 = int(11.0 * u)
+				var lw2 = font.get_string_size(lab2, HORIZONTAL_ALIGNMENT_LEFT, -1, lf2).x
+				_ht(c, font, q2 + Vector2(-lw2 * 0.5, 20.0 * u), lab2, HORIZONTAL_ALIGNMENT_LEFT, -1, lf2, Color(pc, al2 * 0.9))
+	# --- feine Zeilen über allem, wie bei einer Projektion
+	var sl = int(vp.y * 0.18 / (6.0 * u))
+	for k in range(sl):
+		var yy = C.y - 150.0 * u + k * 6.0 * u + fmod(t * 20.0, 6.0) * u
+		c.draw_line(Vector2(C.x - 160.0 * u, yy), Vector2(C.x + 160.0 * u, yy), Color(CY, 0.03 * fl), 1.0)
 
 
 # ---------------------------------------------------------------- Comic: Manga-Panels mit den Fahrern (Cyber Gothic)
