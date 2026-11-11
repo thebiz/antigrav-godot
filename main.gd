@@ -57,7 +57,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "view": 0}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -5770,6 +5770,7 @@ func _hud() -> void:
 	var cl = CanvasLayer.new()
 	add_child(cl)
 	hud.layer = cl
+	_ck_build(cl)
 	# Lenkzonen: weicher weißer Schein vom linken und rechten Rand nach innen (keine Knöpfe, nur Licht)
 	var sg = GradientTexture2D.new()
 	sg.fill = GradientTexture2D.FILL_RADIAL
@@ -5823,6 +5824,22 @@ func _hud() -> void:
 	pzb.visible = false
 	cl.add_child(pzb)
 	hud.pausebtn = pzb
+	# Kamera umschalten (Verfolger ↔ Cockpit): rechts neben Pause, ebenfalls nur Anzeige, Tipp in _input
+	var vwb = Button.new()
+	vwb.text = "CAM"
+	vwb.add_theme_font_size_override("font_size", 24)
+	vwb.add_theme_stylebox_override("normal", _style(Color(0, 0, 0, 0.35), Color(1, 1, 1, 0.3)))
+	vwb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vwb.focus_mode = Control.FOCUS_NONE
+	vwb.anchor_left = 0.5
+	vwb.anchor_right = 0.5
+	vwb.offset_left = 60
+	vwb.offset_right = 160
+	vwb.offset_top = 26
+	vwb.offset_bottom = 106
+	vwb.visible = false
+	cl.add_child(vwb)
+	hud.viewbtn = vwb
 	hud.top = mk.call(34, HORIZONTAL_ALIGNMENT_CENTER)
 	hud.top.anchor_right = 1.0
 	hud.top.offset_top = 70
@@ -7044,6 +7061,10 @@ func _input(ev: InputEvent) -> void:
 				return
 			if hud.has("pausebtn") and (hud.pausebtn as Control).visible and (hud.pausebtn as Control).get_global_rect().grow(24).has_point(ev.position):
 				_pause(true)
+				return
+			if hud.has("viewbtn") and (hud.viewbtn as Control).visible and (hud.viewbtn as Control).get_global_rect().grow(16).has_point(ev.position):
+				cfg.view = 1 - int(cfg.view)
+				_save_cfg()
 				return
 			if state == "race" and fire_rect.has_point(ev.position):
 				fire_req = true
@@ -9653,6 +9674,8 @@ func _weapons(dt: float, racing: bool) -> void:
 	var r = (hud.fire as Control).get_global_rect()
 	fire_rect = r.grow(20) if r.size.x > 0 else Rect2(vp.x * 0.5 - 130, vp.y - 270, 260, 200)
 	hud.pausebtn.visible = state in ["intro", "count", "race"] and fin.is_empty()
+	if hud.has("viewbtn"):
+		hud.viewbtn.visible = state in ["count", "race"] and fin.is_empty()
 	for o in ships:
 		if o.idx > 0 and (o.node as Node3D).has_meta("bar"):
 			var bar: MeshInstance3D = (o.node as Node3D).get_meta("bar")
@@ -10610,9 +10633,9 @@ func _rp_cam(dt: float) -> bool:
 		ro = T.world(rp.sp, rp.sk * (T.TW * 0.8 if inT else (T.TW + 0.55 if trib else T.TW + 1.5)), 1.3 if inT else (1.15 if trib else 0.9))
 		ta = S0 + f.fw * 0.6
 	elif cm == "cock":
-		ro = S0 + SF * 0.3 + SU * 0.2
-		ta = S0 + SF * 10.0 + SU * 0.15
-		up = SU
+		ro = S0 + SU * CK_EYE.y - SF * CK_EYE.x
+		ta = S0 + SF * 12.0 + SU * CK_EYE.z
+		up = f.uu.lerp(SU, 0.4).normalized()
 	elif cm == "heli":
 		ro = S0 - f.fw * 6.0 + Vector3.UP * 6.0 + f.rr * 2.0
 		ta = S0 + f.fw * 4.0
@@ -10623,7 +10646,7 @@ func _rp_cam(dt: float) -> bool:
 	_flash_fade(dt * 2.2)
 	cam.global_position = ro
 	cam.look_at(ta, up)
-	cam.fov = 38.0 if cm == "side" else (52.0 * (1.0 + 0.25 * post_spd) if cm == "cock" else 52.0)
+	cam.fov = 38.0 if cm == "side" else (CK_FOV * minf(1.35, 1.0 + 0.25 * post_spd) if cm == "cock" else 52.0)
 	return true
 
 
@@ -13455,6 +13478,7 @@ func _pose_all(dt: float) -> void:
 
 # Kamera: hinter dem Gleiter, folgt der Nase gedämpft, bleibt beim Boost kurz zurück
 func _camera(dt: float) -> void:
+	_ck_update(dt)
 	if state == "replay" and _rp_cam(dt):
 		return
 	if state == "kill" and _kc_cam():
@@ -13562,11 +13586,20 @@ func _camera(dt: float) -> void:
 		var ww = w * w * (3.0 - 2.0 * w)
 		ta = (S0 + f.fw * 0.25).lerp(ta, ww)
 		uc = Y.lerp(uc, ww).normalized()
+	var ckm = state == "race" and _ck_on()
+	if ckm:
+		# Cockpit: Augen knapp über dem Gleiter, Blick längs der Schiffsnase (rollt mit dem Schiff, das Cockpit-Bild bleibt fest davor)
+		var nb: Basis = (g.node as Node3D).global_transform.basis
+		var SF: Vector3 = nb.z.normalized()
+		var SU: Vector3 = nb.y.normalized()
+		ro = S0 + SU * CK_EYE.y - SF * CK_EYE.x
+		ta = S0 + SF * 12.0 + SU * CK_EYE.z
+		uc = f.uu.lerp(SU, 0.4).normalized()   # Horizont kippt nur zu 40 % mit (volle 45° Schräglage wären zu wild)
 	shake = maxf(0.0, shake - dt * 1.8)
 	_flash_fade(dt * 2.2)
 	if shake > 0.0:
 		var tt2 = Time.get_ticks_msec() / 1000.0
-		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * 0.09
+		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * (0.04 if ckm else 0.09)
 	# Tempo-Zittern: bei normaler Fahrt kaum spürbar, bei Boost deutlich (die Kamera vibriert, das Bild wackelt leicht mit)
 	if (state == "race" or state == "replay") and post_spd > 0.01:
 		var rum = (0.003 + 0.02 * maxf(0.0, post_spd - 0.32) / 0.68) * clampf(post_spd / 0.32, 0.0, 1.0)
@@ -13581,7 +13614,144 @@ func _camera(dt: float) -> void:
 	cam.look_at(ta, uc)
 	# Sichtfeld weitet sich mit dem Tempo: Stand 52°, normale Fahrt ~57°, Boost bis ~74°
 	cam.fov = 52.0 * minf(1.42, 1.0 + 0.1 * minf(1.5, g.boost) + 0.3 * post_spd)
+	if ckm:
+		cam.fov = CK_FOV * minf(1.35, 1.0 + 0.08 * minf(1.5, g.boost) + 0.25 * post_spd)
+		return
 	cam.rotate_object_local(Vector3(0, 0, 1), -g.u * 0.05)   # leichtes Mitneigen beim Lenken
+
+
+# ---------------------------------------------------------------- Cockpit-Ansicht
+# Zwei flache Bilder vor der Kamera: der Gleiter-Rand (art/ck/body.png) und die Hände an den Griffen mit dem
+# Hologramm-Kern (art/ck/hands.png). Beide sind 852 px breit und werden auf Bildschirmbreite gezogen, unten bündig.
+# Die Hände kippen beim Lenken um den Kern, der Kern pulsiert mit dem Tempo und leuchtet beim Boost auf.
+const CK_EYE = Vector3(0.12, 0.34, -0.1)   # Auge: x = hinter der Mitte, y = über der Mitte, z = Höhe des Blickziels
+const CK_FOV = 62.0
+const CK_HS = 0.9                           # Größe der Hände relativ zur Bildschirmbreite
+const CK_ROLLK = 1.25                       # Schiffs-Schräglage → Lenkausschlag der Hände (voll eingelenkt ≈ 0,8 → 1)
+const CK_CORE = Vector2(426.0, 185.0)      # Mitte des Hologramm-Kerns im Hände-Bild (Pixel)
+var ck = {}
+var ck_hid = false
+var ck_rot = 0.0
+
+
+func _ck_build(cl: CanvasLayer) -> void:
+	var root = Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.visible = false
+	cl.add_child(root)
+	var floor_r = ColorRect.new()   # Cockpitboden unter dem Bild (das Bild sitzt über der unteren HUD-Leiste)
+	floor_r.color = Color(0.09, 0.085, 0.1)
+	floor_r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(floor_r)
+	var body = TextureRect.new()
+	body.texture = load("res://art/ck/body.png")
+	body.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	body.stretch_mode = TextureRect.STRETCH_SCALE
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(body)
+	var hands = TextureRect.new()
+	hands.texture = load("res://art/ck/hands.png")
+	hands.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	hands.stretch_mode = TextureRect.STRETCH_SCALE
+	hands.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(hands)
+	# Leuchten über dem Kern (additiv), dreht mit den Händen mit
+	var gt = GradientTexture2D.new()
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 0.5)
+	gt.width = 128
+	gt.height = 128
+	var gr = Gradient.new()
+	gr.set_color(0, Color(0.75, 0.55, 1.0, 1.0))
+	gr.set_color(1, Color(0.2, 0.9, 1.0, 0.0))
+	gr.add_point(0.45, Color(0.4, 0.8, 1.0, 0.45))
+	gt.gradient = gr
+	var glow = TextureRect.new()
+	glow.texture = gt
+	glow.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	glow.stretch_mode = TextureRect.STRETCH_SCALE
+	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var gm = CanvasItemMaterial.new()
+	gm.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+	glow.material = gm
+	hands.add_child(glow)
+	ck = {"root": root, "body": body, "hands": hands, "glow": glow, "floor": floor_r}
+
+
+func _ck_on() -> bool:
+	if ships.is_empty():
+		return false
+	if state == "race":
+		return int(cfg.get("view", 0)) == 1 and not ships[0].out
+	return state == "replay" and not rp.is_empty() and RP_CAMS[rp.ci][0] == "cock"
+
+
+func _ck_update(dt: float) -> void:
+	var on = _ck_on()
+	# Pause- und Kamera-Knopf oben nur im Rennen (blieben sonst z. B. im Replay grau stehen)
+	if hud.has("viewbtn") and is_instance_valid(hud.viewbtn):
+		hud.viewbtn.visible = state in ["count", "race"] and fin.is_empty()
+		hud.viewbtn.text = "CAM"
+	if hud.has("pausebtn") and is_instance_valid(hud.pausebtn) and not state in ["intro", "count", "race"]:
+		hud.pausebtn.visible = false
+	# eigenes Schiff im Rennen ausblenden, solange man drinsitzt (im Replay macht das die Replay-Wiedergabe selbst)
+	if state == "race" and on:
+		(ships[0].node as Node3D).visible = false
+		ck_hid = true
+	elif ck_hid:
+		ck_hid = false
+		if not ships.is_empty() and state != "replay":
+			(ships[0].node as Node3D).visible = not ships[0].out
+	if ck.is_empty() or not is_instance_valid(ck.root):
+		return
+	ck.root.visible = on
+	if not on:
+		return
+	var g: Dictionary = _focus()
+	var vp = get_viewport().get_visible_rect().size
+	var sc = vp.x / 852.0
+	# unten bündig mit der Mitte der unteren HUD-Leiste: die Leiste verdeckt den Schnitt an den Unterarmen,
+	# und der Hologramm-Kern sitzt frei über dem Waffen-Rad (bei jedem Seitenverhältnis)
+	var by = vp.y - 192.0 * vp.x / GA_W
+	var bs: Vector2 = (ck.body as TextureRect).texture.get_size() * sc
+	ck.body.position = Vector2(0.0, by - bs.y)
+	ck.body.size = bs
+	ck.floor.position = Vector2(0.0, by - 2.0)
+	ck.floor.size = Vector2(vp.x, vp.y - by + 2.0)
+	var hs: Vector2 = (ck.hands as TextureRect).texture.get_size() * sc * CK_HS
+	# Lenken: Hände kippen um den Kern (bis 18°), dazu ein kleines Mitschwingen zur Seite
+	var tgt = clampf(float(g.roll) * CK_ROLLK, -1.0, 1.0)
+	if OS.get_environment("CKROT") != "":
+		tgt = float(OS.get_environment("CKROT"))   # nur zum Testen: fester Lenkausschlag der Hände
+	ck_rot += (tgt - ck_rot) * (1.0 - exp(-dt / 0.08))
+	var jit = Vector2.ZERO
+	if shake > 0.0:
+		var tj = Time.get_ticks_msec() / 1000.0
+		jit = Vector2(sin(tj * 57.0), sin(tj * 43.0 + 1.0)) * shake * 9.0 * sc
+	ck.hands.size = hs
+	ck.hands.position = Vector2(ck_rot * 14.0 * sc, by - hs.y + absf(ck_rot) * 6.0 * sc) + jit
+	ck.hands.position.x += vp.x * (1.0 - CK_HS) * 0.5
+	ck.hands.pivot_offset = CK_CORE * sc * CK_HS
+	ck.hands.rotation = deg_to_rad(18.0) * ck_rot
+	# Kern: pulsiert schneller und heller mit dem Tempo, beim Boost kräftig
+	var t = Time.get_ticks_msec() / 1000.0
+	var pul = 0.5 + 0.5 * sin(t * (3.0 + 9.0 * post_spd))
+	var gs = (150.0 + 22.0 * pul + 40.0 * minf(1.0, float(g.boost))) * sc
+	ck.glow.size = Vector2(gs, gs)
+	gs *= CK_HS
+	ck.glow.size = Vector2(gs, gs)
+	ck.glow.position = CK_CORE * sc * CK_HS - Vector2(gs, gs) * 0.5
+	ck.glow.modulate.a = clampf(0.18 + 0.22 * pul * (0.4 + post_spd) + 0.45 * minf(1.0, float(g.boost)), 0.0, 0.9)
+	if OS.get_environment("CKDBG") != "" and Engine.get_process_frames() == 400:
+		for k in hud.keys():
+			if hud[k] is Control and (hud[k] as Control).is_visible_in_tree():
+				var rr: Rect2 = (hud[k] as Control).get_global_rect()
+				if rr.end.y > vp.y * 0.6 and rr.size.y < vp.y * 0.6:
+					print("CKHUD ", k, " ", rr, " vp=", vp)
+	if OS.get_environment("CKDBG") != "" and Engine.get_process_frames() % 20 == 0:
+		print("CKDBG state=", state, " roll=", snappedf(float(g.roll), 0.001), " rot=", snappedf(ck_rot, 0.01), " u=", snappedf(float(g.get("u", 0.0)), 0.01), " glow=", snappedf(ck.glow.modulate.a, 0.01), " fov=", snappedf(cam.fov, 0.1))
 
 
 # ---------------------------------------------------------------- Comic: Manga-Panels mit den Fahrern (Cyber Gothic)
