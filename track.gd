@@ -14,9 +14,12 @@ const RINGS := [90, 96, 102, 108, 114, 290, 296, 302, 308, 314, 440, 446, 452, 4
 const TUN := [[160.0, 245.0], [510.0, 595.0]]
 # Korkenzieher-Röhre (nur Neon Night): die Fahrbahn dreht sich einmal ganz um die Fahrtrichtung – man fährt über Wand und Decke
 const TWZ := [326.0, 390.0]
+# Wasser-Abschnitt (nur Extreme): die Fahrbahn endet, man gleitet über einen See
+const WAT := [436.0, 500.0]
 # Dschungel: turbotauglich – weite, fließende Kurven (Summe weniger Sinuswellen, keine hektischen Wechsel),
 # langer sanfter Anstieg (120–400), steile lange Abfahrt (440–520) und direkt danach die lange Steilkurve (500–690)
 static var J := false
+static var X := false   # Extreme-Strecke: Neon Night mit Korkenzieher-Röhre und Wasser-Abschnitt
 static var S := false   # Lenk-Teststrecke: ganz gerade und flach
 const SEG_J := []
 const CRV_J := [[1.0, 22.0, -3.9225], [2.0, 10.0, -9.4158], [3.0, 4.5, -14.9091], [4.0, 2.0, -20.4024]]   # [Welle, Weite, Phase] – große Kurve um z 632
@@ -163,7 +166,7 @@ static func bank(z: float) -> float:
 
 # Drehung der Fahrbahn in der Röhre (0 … 2π, weich ein- und ausgeblendet)
 static func twist(z: float) -> float:
-	if J or S:
+	if J or S or not X:
 		return 0.0
 	var l := lz(z)
 	if l <= TWZ[0] or l >= TWZ[1]:
@@ -172,7 +175,23 @@ static func twist(z: float) -> float:
 
 
 static func in_twist(zl: float, m: float = 0.0) -> bool:
-	return not J and not S and zl >= TWZ[0] - m and zl <= TWZ[1] + m
+	return X and not J and not S and zl >= TWZ[0] - m and zl <= TWZ[1] + m
+
+
+static func in_water(zl: float, m: float = 0.0) -> bool:
+	return X and not J and not S and zl >= WAT[0] - m and zl <= WAT[1] + m
+
+
+# Abschnitte von a bis b ohne den Wasser-Abschnitt (für Fahrbahn, Bande und alles, was über dem See fehlt)
+static func dry(a: float, b: float) -> Array:
+	if not X or J or S or b <= WAT[0] or a >= WAT[1]:
+		return [[a, b]]
+	var r = []
+	if a < WAT[0]:
+		r.append([a, WAT[0]])
+	if b > WAT[1]:
+		r.append([WAT[1], b])
+	return r
 
 
 # Krümmung für die Fahrphysik (Kurve läuft dem Gleiter davon, wenn man nicht lenkt)

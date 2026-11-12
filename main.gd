@@ -57,7 +57,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "view": 0, "vmode": 0}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "view": 0, "vmode": 0, "trk": 1}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -119,7 +119,10 @@ func _ready() -> void:
 		cfg.look = 1
 	if OS.get_cmdline_user_args().has("--jungle"):
 		cfg.look = 2
+	if OS.get_environment("TRK") != "":
+		cfg.trk = int(OS.get_environment("TRK"))   # nur zum Testen: 0 Classic, 1 Extreme
 	T.J = _jungle()   # eigene Streckenführung im Dschungel
+	T.X = int(cfg.get("trk", 1)) == 1 and not _jungle()   # Extreme: Korkenzieher-Röhre und See
 	T.S = pending_test or (OS.get_cmdline_user_args().has("--steertest") and OS.get_environment("AG_RELOADED") == "")
 	if T.S:
 		pending_test = false
@@ -436,7 +439,7 @@ func _sounds() -> void:
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
-			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "minewarn.wav", "hover.wav", "ignite.wav",
+			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
@@ -455,6 +458,14 @@ func _sounds() -> void:
 		add_child(p)
 		p.play()
 		loops[k] = p
+	# See: Wasserrauschen unter dem Gleiter (läuft still mit)
+	var wp2 = AudioStreamPlayer.new()
+	wp2.stream = _looped(snd["water"])
+	wp2.volume_db = -80.0
+	wp2.bus = "Game"
+	add_child(wp2)
+	wp2.play()
+	loops["water"] = wp2
 	# Cockpit: Herzschlag und Warntöne – eigener Kanal ohne Dämpfung, laufen still mit und werden nur hochgezogen
 	for k in ["ck_herz90", "ck_herz140", "ck_mines", "ck_missile"]:
 		var p2 = AudioStreamPlayer.new()
@@ -571,6 +582,11 @@ func _sound_update(dt: float) -> void:
 	loops.engine.volume_db = linear_to_db(0.02 + (0.5 + 0.35 * sp + 0.35 * g.boost if on else 0.12)) + 1.5 * ck_snd
 	loops.idle.pitch_scale = clampf((0.75 + 0.45 * sp + 0.25 * g.boost) * (1.0 - 0.25 * ck_snd), 0.3, 3.0)
 	loops.idle.volume_db = linear_to_db((0.32 if state != "menu" else 0.2) * (1.0 + 0.9 * ck_snd))
+	if loops.has("water"):
+		var onw = state in ["race", "done"] and T.in_water(T.lz(float(g.z))) and not g.air and not g.out
+		wat_snd = move_toward(wat_snd, (0.35 + 0.4 * clampf(float(g.spd) / maxf(1.0, base_spd), 0.0, 1.5)) if onw else 0.0, dt * 2.5)
+		loops.water.volume_db = linear_to_db(maxf(0.0001, wat_snd))
+		loops.water.pitch_scale = 0.85 + 0.3 * clampf(float(g.spd) / maxf(1.0, base_spd), 0.0, 1.5)
 	# Cockpit-Warntöne und Herzschlag (nur im Rennen, nur im Cockpit)
 	if loops.has("ck_herz90"):
 		var live = ckt > 0.5 and state in ["race", "count"] and not g.out
@@ -1535,7 +1551,7 @@ func _build_track() -> void:
 			var x = -TW + 2.0 * TW * i / 8.0
 			# Dschungel: Piste wie eine ausgefahrene Rinne – zu den Rändern hin leicht hoch
 			row.append(f.c + f.rr * x + (f.uu * 0.06 * pow(absf(x) / TW, 3.0) if _jungle() else Vector3.ZERO))
-		if prev.size() > 0 and not T.gap(z - 0.25):
+		if prev.size() > 0 and not T.gap(z - 0.25) and not T.in_water(z - 0.25):
 			for i in range(8):
 				var u0 = float(i) / 8.0
 				var u1 = float(i + 1) / 8.0
@@ -1544,15 +1560,17 @@ func _build_track() -> void:
 		z += 0.5
 	# Leitplanken: Metallwand innen, Deckel, Neonband (links Cyan, rechts Magenta)
 	for sd in ([] if _jungle() else [-1.0, 1.0]):   # Dschungel: keine Leitplanken, der Erdwall begrenzt die Piste
-		_strip("wall", 20.0, 720.0, sd * TW, sd * TW, -0.06, 0.46)
-		_strip("wallcap", 20.0, 720.0, sd * TW, sd * (TW + 0.12), 0.46, 0.46)
-		_strip("neonL" if sd < 0 else "neonR", 20.0, 720.0, sd * (TW - 0.012), sd * (TW - 0.012), 0.30, 0.36)
-		# Leuchtkante auf der Fahrbahn
-		_strip("neonL" if sd < 0 else "neonR", 20.0, 720.0, sd * (TW - 0.16), sd * (TW - 0.11), 0.006, 0.006)
+		for dz in T.dry(20.0, 720.0):   # über dem See keine Bande
+			_strip("wall", dz[0], dz[1], sd * TW, sd * TW, -0.06, 0.46)
+			_strip("wallcap", dz[0], dz[1], sd * TW, sd * (TW + 0.12), 0.46, 0.46)
+			_strip("neonL" if sd < 0 else "neonR", dz[0], dz[1], sd * (TW - 0.012), sd * (TW - 0.012), 0.30, 0.36)
+			# Leuchtkante auf der Fahrbahn
+			_strip("neonL" if sd < 0 else "neonR", dz[0], dz[1], sd * (TW - 0.16), sd * (TW - 0.11), 0.006, 0.006)
 	# Mittellinie, gestrichelt (im Dschungel nicht)
 	var zz = 20.0 if not _jungle() else 9999.0
 	while zz < 720.0:
-		_strip("line", zz, zz + 1.5, -0.012, 0.012, 0.005, 0.005)
+		if not T.in_water(zz, 1.5):
+			_strip("line", zz, zz + 1.5, -0.012, 0.012, 0.005, 0.005)
 		zz += 3.33
 	# Tempo-Marken: dicht am Schiff huscht ständig etwas vorbei – Leuchtpfosten an der Bande (alle 2), Randstriche auf der
 	# Fahrbahn (alle 2, versetzt), Spurstriche und kleine Lampen auf der Bande (alle 6). Im Dschungel gibt es keine Bande.
@@ -1560,7 +1578,7 @@ func _build_track() -> void:
 		var zp = 21.0
 		var pk = 0
 		while zp < 719.0:
-			for sd in [-1.0, 1.0]:
+			for sd in ([] if T.in_water(zp, 2.0) else [-1.0, 1.0]):
 				var pm = "postL" if sd < 0 else "postR"
 				_mark(pm, zp, zp + 0.09, sd * (TW - 0.014), sd * (TW - 0.014), 0.05, 0.25)
 				_mark("line", zp + 1.0, zp + 1.6, sd * (TW - 0.5), sd * (TW - 0.38), 0.005, 0.005)
@@ -1572,7 +1590,7 @@ func _build_track() -> void:
 			pk += 1
 	# Korkenzieher-Röhre: gläserne Röhre um die sich drehende Fahrbahn – Neonstreifen laufen als Spirale mit, Ringe alle 3 Einheiten,
 	# leuchtende Tore am Ein- und Ausgang
-	if not _jungle() and not T.S:
+	if T.X and not T.S:
 		var tz0 = float(T.TWZ[0]) - 7.0
 		var tz1 = float(T.TWZ[1]) + 7.0
 		var NR = 32
@@ -1647,6 +1665,64 @@ void fragment(){
 	c+=vec3(1.,.5,.95)*gate*2.2;
 	ALBEDO=c*fade;
 }""" % [tz0, tz1])
+	# See (nur Extreme): die Fahrbahn endet, man gleitet über spiegelndes Wasser; Bojenketten statt Bande
+	if T.X and not T.S:
+		var w0 = float(T.WAT[0])
+		var w1 = float(T.WAT[1])
+		var zw = w0 - 16.0
+		var XS = [-60.0, -30.0, -16.0, -8.0, -4.0, -2.4, 0.0, 2.4, 4.0, 8.0, 16.0, 30.0, 60.0]
+		while zw < w1 + 16.0 - 0.001:
+			st_z = zw
+			var wst = _st("water")
+			var fa = T.frame(zw)
+			var fb = T.frame(zw + 1.0)
+			for k in range(XS.size() - 1):
+				var xa = XS[k]
+				var xb = XS[k + 1]
+				_quad(wst, fa.c + fa.rr * xa - fa.uu * 0.05, fb.c + fb.rr * xa - fb.uu * 0.05, fb.c + fb.rr * xb - fb.uu * 0.05, fa.c + fa.rr * xb - fa.uu * 0.05, fa.uu,
+					Vector2(xa, zw), Vector2(xa, zw + 1.0), Vector2(xb, zw + 1.0), Vector2(xb, zw))
+			zw += 1.0
+		mats["water"] = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,cull_disabled,blend_mix,depth_draw_opaque,shadows_disabled;
+uniform float z0=%f;
+uniform float z1=%f;
+float hs(float n){return fract(sin(n*91.7)*43758.5);}
+void fragment(){
+	float x=UV.x,z=UV.y,t=TIME;
+	// Wellen: mehrere Sinuszüge, daraus Verzerrung und Glitzern
+	float w=sin(z*1.7+x*.6-t*2.2)*.5+sin(z*.9-x*1.3+t*1.6)*.35+sin((z+x)*3.1-t*3.5)*.15;
+	float w2=sin(z*5.3-x*2.1-t*4.)*.5+sin(x*4.7+z*1.1+t*3.)*.5;
+	float fr=pow(1.-clamp(abs(dot(NORMAL,VIEW)),0.,1.),3.);
+	vec3 deep=vec3(.0,.03,.07);
+	vec3 sky=vec3(.1,.06,.22);
+	// Spiegelung der Stadtlichter: senkrechte, flimmernde Streifen
+	float band=floor(x*.8+w*.5);
+	float h=hs(band);
+	float streak=step(.8,h)*(.55+.45*sin(z*.3+h*20.+w));
+	vec3 nc=mix(vec3(.2,.85,1.),vec3(1.,.25,.8),step(.9,h));
+	nc=mix(nc,vec3(1.,.7,.2),step(.97,h));
+	// Bojenlicht spiegelt sich links Cyan, rechts Magenta
+	float edge=exp(-pow((abs(x)-2.55)*2.2,2.))*(.55+.45*w2);
+	vec3 c=mix(deep,sky,fr+.15);
+	c+=nc*streak*(.35+.35*w2)*(.35+fr*2.2);
+	c+=mix(vec3(.2,.85,1.),vec3(1.,.25,.8),step(0.,x))*edge*.55;
+	c+=vec3(.55,.8,1.)*pow(max(0.,w2*.5+w*.5),10.)*.5;
+	// Fahrrinne leicht heller
+	c+=vec3(.02,.06,.1)*exp(-x*x*.25);
+	float fade=smoothstep(z0,z0+8.,z)*smoothstep(z1,z1-8.,z)*smoothstep(60.,40.,abs(x));
+	ALBEDO=c;
+	ALPHA=fade;
+}""" % [w0 - 16.0, w1 + 16.0])
+		# Bojen: kleine Leuchtkörper alle 2 Einheiten auf Höhe der Bande, links Cyan, rechts Magenta
+		var zb = w0 + 1.0
+		while zb < w1 - 0.5:
+			for sd in [-1.0, 1.0]:
+				_box("postL" if sd < 0 else "postR", zb, sd * TW, 0.02, 0.07, 0.07, 0.07)
+			zb += 2.0
+		# Kante, wo die Fahrbahn ins Wasser übergeht
+		for ze in [w0, w1]:
+			_mark("neonR", ze - 0.18, ze + 0.0, -TW, TW, 0.01, 0.01)
 	# Startlinie
 	_strip("start", 19.5, 20.5, -TW, TW, 0.007, 0.007)
 	# Boost-Felder
@@ -1670,7 +1746,7 @@ void fragment(){
 		var zc = gk * 28.0 + 7.0
 		if zc > 20.0 and _jungle():
 			lights.append([zc, _neo(gk * 0.29)])   # Dschungel: nur die schwebenden Irrlichter
-		elif zc > 20.0 and not T.in_tun(zc, 2.0):
+		elif zc > 20.0 and not T.in_tun(zc, 2.0) and not T.in_water(zc, 1.0):
 			for sd in [-1.0, 1.0]:
 				_box("metal", zc, sd * (TW + 0.25), 0.6, 0.07, 0.72, 0.07)
 			_box("metal", zc, 0.0, 1.34, TW + 0.32, 0.08, 0.09)
@@ -1698,7 +1774,7 @@ void fragment(){
 	_props_make()
 	for k in range(2, 51):
 		var zc = k * 14.0 + 7.0
-		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle():
+		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle() or T.in_water(zc, 1.0):
 			continue
 		_box("metal", zc, 0.0, -3.3, 0.16, 3.1, 0.16)
 	# Neonringe in Gruppen (im Dschungel stattdessen Baumwurzeln über der Strecke)
@@ -3935,7 +4011,266 @@ func _crash_site(o: Dictionary, bp: Vector3, f: Dictionary, rn: RandomNumberGene
 			"r": 0.06 * s3, "t": 0.0, "m": null, "sp": 0.0, "hit": false, "kt": 0.0, "wreck": false, "small": true})
 
 
+# ---------------------------------------------------------------- See: Gischt hinter jedem Gleiter, ein Wal, Tropfen auf der Scheibe
+var wsp = []          # Gischt je Schiff
+var whale = {}        # laufender Wal-Sprung
+var whale_lap = -1
+var wet = 0.0         # wie nass die Scheibe ist
+
+
+func _spray_node() -> CPUParticles3D:
+	var p = CPUParticles3D.new()
+	var qm = QuadMesh.new()
+	qm.size = Vector2(0.16, 0.16)
+	var mm = StandardMaterial3D.new()
+	mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	mm.vertex_color_use_as_albedo = true
+	mm.albedo_texture = _soft_dot()
+	qm.material = mm
+	p.mesh = qm
+	p.amount = 60
+	p.lifetime = 0.7
+	p.emitting = false
+	p.local_coords = false
+	p.spread = 28.0
+	p.gravity = Vector3(0, -9.0, 0)
+	p.initial_velocity_min = 2.5
+	p.initial_velocity_max = 5.5
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.8
+	var gr = Gradient.new()
+	gr.offsets = PackedFloat32Array([0.0, 0.25, 1.0])
+	gr.colors = PackedColorArray([Color(0.85, 0.95, 1.0, 0.0), Color(0.8, 0.92, 1.0, 0.75), Color(0.6, 0.8, 1.0, 0.0)])
+	p.color_ramp = gr
+	p.set_meta("keep", true)
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(p)
+	return p
+
+
+var soft_dot_tex: GradientTexture2D
+
+
+func _soft_dot() -> GradientTexture2D:
+	if soft_dot_tex == null:
+		soft_dot_tex = GradientTexture2D.new()
+		soft_dot_tex.fill = GradientTexture2D.FILL_RADIAL
+		soft_dot_tex.fill_from = Vector2(0.5, 0.5)
+		soft_dot_tex.fill_to = Vector2(1.0, 0.5)
+		soft_dot_tex.width = 32
+		soft_dot_tex.height = 32
+		var g2 = Gradient.new()
+		g2.offsets = PackedFloat32Array([0.0, 1.0])
+		g2.colors = PackedColorArray([Color(1, 1, 1, 1), Color(1, 1, 1, 0)])
+		soft_dot_tex.gradient = g2
+	return soft_dot_tex
+
+
+func _water_update(dt: float) -> void:
+	if not T.X or ships.is_empty():
+		return
+	while wsp.size() < ships.size():
+		wsp.append(_spray_node())
+	var racing_w = state in ["race", "done", "replay", "count"]
+	for i in range(ships.size()):
+		var o: Dictionary = ships[i]
+		if not is_instance_valid(wsp[i]):   # erst prüfen, dann zuweisen (gelöschtes Objekt in typisierter Variable = Absturz auf dem Handy)
+			wsp[i] = _spray_node()
+		var p: CPUParticles3D = wsp[i]
+		var on = racing_w and not o.out and not bool(o.get("air", false)) and float(o.spd) > 2.0 and T.in_water(T.lz(float(o.z)))
+		p.emitting = on
+		if on:
+			var f = T.frame(float(o.z))
+			p.global_position = f.c + f.rr * float(o.lat) - f.fw * 0.55 + f.uu * 0.02
+			p.direction = (-f.fw * 0.8 + f.uu * 0.9).normalized()
+			p.initial_velocity_max = 3.0 + float(o.spd) * 0.25
+	# Wal: einmal pro Runde springt er neben der Strecke aus dem Wasser (wenn der Spieler auf den See fährt)
+	var g: Dictionary = ships[0]
+	var lzg = T.lz(float(g.z))
+	var lapn = int(floor((float(g.z) - 20.0) / T.LAP))
+	if state == "race" and not g.out and lapn != whale_lap and lzg > float(T.WAT[0]) + 2.0 and lzg < float(T.WAT[0]) + 12.0 and whale.is_empty():
+		whale_lap = lapn
+		_whale_start(float(g.z) + 68.0, 13.0 if lapn % 2 == 0 else -13.0)
+	if OS.get_environment("WHALE") != "" and whale.is_empty() and Engine.get_process_frames() > int(OS.get_environment("WHALEF")) and whale_lap < 0:
+		whale_lap = 0
+		_whale_start(float(OS.get_environment("WHALE").split(",")[0]), float(OS.get_environment("WHALE").split(",")[1]))
+		print("WHALE start frame ", Engine.get_process_frames())
+	if not whale.is_empty():
+		_whale_tick(dt)
+	# nasse Scheibe: auf dem See (im Cockpit stärker), trocknet danach in gut zwei Sekunden
+	var wtar = 0.0
+	if state in ["race", "count"] and not g.out and T.in_water(lzg) and not g.air:
+		wtar = 1.0 if _ck_on() else 0.45
+	if not whale.is_empty() and float(whale.t) > 2.4 and float(whale.t) < 3.2 and absf(float(whale.z) - float(g.z)) < 26.0:
+		wtar = maxf(wtar, 1.0 if _ck_on() else 0.7)   # der Wal klatscht zurück: Wasser bis auf die Scheibe
+	wet = move_toward(wet, wtar, dt * (2.0 if wtar > wet else 0.45))
+	if OS.get_environment("WET") != "":
+		wet = float(OS.get_environment("WET"))
+	if hud.has("drops") and is_instance_valid(hud.drops):
+		hud.drops.visible = wet > 0.01
+		if wet > 0.01:
+			_sp(hud.drops.material, "wet", wet)
+
+
+# Wal: dunkler Körper mit Neon-Saum, aus Ringen gebaut; Schwanzflosse und Brustflossen als flache Flächen
+func _whale_mesh() -> ArrayMesh:
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var L = 15.0
+	var NA = 18
+	var NL = 26
+	var rings = []
+	for i in range(NL + 1):
+		var t = float(i) / NL
+		var zz = -L * 0.5 + L * t
+		var r = 0.14 + 1.95 * pow(sin(PI * clampf(pow(t, 1.35), 0.0, 0.985)), 0.5)   # dünner Schwanzstiel, mächtiger Kopf
+		var ring = []
+		for k in range(NA):
+			var a = TAU * k / NA
+			var y = sin(a) * r * 0.85
+			if y < 0.0:
+				y *= 0.85   # Bauch etwas flacher
+			ring.append(Vector3(cos(a) * r, y, zz))
+		rings.append(ring)
+	for i in range(NL):
+		for k in range(NA):
+			var k2 = (k + 1) % NA
+			var a = rings[i][k]
+			var b = rings[i + 1][k]
+			var c = rings[i + 1][k2]
+			var d = rings[i][k2]
+			for v in [a, b, c, a, c, d]:
+				var nn = Vector3(v.x, v.y * 1.3, 0.0).normalized()
+				var belly = clampf(-v.y * 1.2, 0.0, 1.0)
+				var groove = 0.85 + 0.15 * sin(v.x * 9.0) if v.y < -0.3 and v.z > 0.0 else 1.0
+				st.set_color(Color(0.07, 0.09, 0.13).lerp(Color(0.42, 0.45, 0.5), belly) * groove)
+				st.set_normal(nn)
+				st.add_vertex(v)
+	# Schwanzflosse (waagrecht, nach hinten gepfeilt) und Brustflossen
+	var fins = [
+		[Vector3(0, 0, -7.0), Vector3(4.3, 0.2, -9.2), Vector3(0.9, 0.05, -8.6)],
+		[Vector3(0, 0, -7.0), Vector3(-4.3, 0.2, -9.2), Vector3(-0.9, 0.05, -8.6)],
+		[Vector3(0, 0, -7.0), Vector3(0.9, 0.05, -8.6), Vector3(0, 0, -8.1)],
+		[Vector3(0, 0, -7.0), Vector3(0, 0, -8.1), Vector3(-0.9, 0.05, -8.6)],
+		[Vector3(1.3, -0.6, 2.8), Vector3(4.2, -1.3, 0.4), Vector3(1.5, -0.7, 1.6)],
+		[Vector3(-1.3, -0.6, 2.8), Vector3(-4.2, -1.3, 0.4), Vector3(-1.5, -0.7, 1.6)],
+	]
+	for tri in fins:
+		for v in tri:
+			st.set_color(Color(0.08, 0.1, 0.14))
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v)
+		for j in [0, 2, 1]:
+			st.set_color(Color(0.3, 0.33, 0.38))
+			st.set_normal(Vector3.DOWN)
+			st.add_vertex(tri[j])
+	return st.commit()
+
+
+func _whale_start(z: float, lat: float) -> void:
+	var mi = MeshInstance3D.new()
+	mi.mesh = _whale_mesh()
+	mi.material_override = _shader_mat("""
+shader_type spatial;
+render_mode cull_disabled;
+varying vec3 lp;
+void vertex(){lp=VERTEX;}
+float hs(vec3 p){return fract(sin(dot(p,vec3(12.9,78.2,37.7)))*43758.5);}
+void fragment(){
+	ALBEDO=COLOR.rgb;
+	ROUGHNESS=.25;
+	SPECULAR=.8;
+	float fr=pow(1.-clamp(dot(NORMAL,VIEW),0.,1.),2.5);
+	// leuchtet wie ein Tiefseewesen: Saum, Linie an der Flanke, Punkte auf dem Rücken
+	float flank=exp(-pow((lp.y+.15)*5.,2.))*(.6+.4*sin(lp.z*2.-TIME*6.));
+	vec3 cell=floor(lp*2.2);
+	float dots=step(.86,hs(cell))*smoothstep(.45,.1,length(fract(lp*2.2)-.5))*step(.2,lp.y);
+	EMISSION=vec3(.2,.8,1.)*(fr*1.1+flank*.9)+vec3(1.,.3,.85)*dots*1.6+COLOR.rgb*.15;
+}""")
+	mi.set_meta("keep", true)
+	mi.set_meta("rfx", true)
+	add_child(mi)
+	whale = {"n": mi, "z": z, "lat": lat, "t": 0.0, "sp": 0}
+
+
+func _whale_splash(pos: Vector3, big: float) -> void:
+	var p = CPUParticles3D.new()
+	var qm = QuadMesh.new()
+	qm.size = Vector2(0.5, 0.5)
+	var mm = StandardMaterial3D.new()
+	mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	mm.vertex_color_use_as_albedo = true
+	mm.albedo_texture = _soft_dot()
+	qm.material = mm
+	p.mesh = qm
+	p.amount = int(150 * big)
+	p.lifetime = 1.8
+	p.one_shot = true
+	p.explosiveness = 0.85
+	p.local_coords = false
+	p.direction = Vector3.UP
+	p.spread = 38.0
+	p.gravity = Vector3(0, -11.0, 0)
+	p.initial_velocity_min = 5.0 * big
+	p.initial_velocity_max = 13.0 * big
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = 2.2
+	p.scale_amount_min = 0.8
+	p.scale_amount_max = 2.6
+	var gr = Gradient.new()
+	gr.offsets = PackedFloat32Array([0.0, 0.15, 1.0])
+	gr.colors = PackedColorArray([Color(0.9, 0.97, 1.0, 0.0), Color(0.85, 0.95, 1.0, 0.85), Color(0.6, 0.8, 1.0, 0.0)])
+	p.color_ramp = gr
+	p.set_meta("deb", true)
+	p.set_meta("rfx", true)
+	add_child(p)
+	p.global_position = pos
+	p.emitting = true
+	get_tree().create_timer(2.5).timeout.connect(func(): _qf(p))
+	_snd("splash", -2.0 + 4.0 * big, randf_range(0.9, 1.05), pos)
+
+
+func _whale_tick(dt: float) -> void:
+	if not is_instance_valid(whale.n):
+		whale = {}
+		return
+	var TT = 3.4
+	whale.t = float(whale.t) + dt
+	var t = float(whale.t)
+	if t > TT + 0.3 or state == "menu":
+		_qf(whale.n)
+		whale = {}
+		return
+	var f = T.frame(float(whale.z))
+	var q = clampf(t / TT, 0.0, 1.0)
+	# er springt quer über die Strecke vor dir: von der Seite zu sehen, in voller Länge
+	var sd = signf(float(whale.lat))
+	var across: Vector3 = -f.rr * sd
+	var base: Vector3 = f.c + f.rr * float(whale.lat)
+	var hgt = -6.0 + 18.0 * sin(PI * q)
+	var adv = -4.0 + 2.0 * absf(float(whale.lat)) * q + 8.0 * q
+	var pos: Vector3 = base + across * adv + Vector3.UP * hgt
+	var vel: Vector3 = across * ((2.0 * absf(float(whale.lat)) + 8.0) / TT) + Vector3.UP * (18.0 * PI / TT * cos(PI * q))
+	var fwd = vel.normalized()
+	var xr = Vector3.UP.cross(fwd).normalized()
+	var b = Basis(xr, fwd.cross(xr).normalized(), fwd)
+	b = b * Basis(Vector3(0, 0, 1), 0.5 * sin(PI * q))   # dreht sich in der Luft etwas auf die Seite
+	(whale.n as Node3D).global_transform = Transform3D(b, pos)
+	if int(whale.sp) == 0 and t > 0.35:
+		whale.sp = 1
+		_whale_splash(base + across * -3.5, 0.8)
+	if int(whale.sp) == 1 and t > TT - 0.45:
+		whale.sp = 2
+		_whale_splash(base + across * (2.0 * absf(float(whale.lat)) + 4.0), 1.25)
+		shake = maxf(shake, 0.25)
+
+
 func _debris_update(dt: float) -> void:
+	_water_update(dt)
 	for sc in scorch:
 		sc.t += dt
 		(sc.m as ShaderMaterial).set_shader_parameter("heat", maxf(0.3, 1.0 - float(sc.t) / 25.0))
@@ -5928,6 +6263,51 @@ func _hud() -> void:
 	var cl = CanvasLayer.new()
 	add_child(cl)
 	hud.layer = cl
+	var drops = ColorRect.new()   # Tropfen auf der Scheibe (über dem Bild, unter Cockpit und Anzeigen)
+	drops.set_anchors_preset(Control.PRESET_FULL_RECT)
+	drops.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	drops.visible = false
+	drops.material = _shader_mat("""
+shader_type canvas_item;
+uniform sampler2D scr:hint_screen_texture,filter_linear_mipmap;
+uniform float wet=0.;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+void fragment(){
+	vec2 uv=SCREEN_UV;
+	vec2 off=vec2(0.);
+	float m=0.,hi=0.;
+	float rim=0.;
+	for(int L=0;L<2;L++){
+		float sc=5.+float(L)*4.;
+		vec2 g=uv*vec2(sc*.5,sc);
+		// die Tropfen wandern im Fahrtwind nach außen und etwas nach unten
+		float dir=sign(uv.x-.5);
+		g.x-=dir*TIME*(.45+float(L)*.25);
+		g.y-=TIME*(.25+float(L)*.15);
+		vec2 id=floor(g);
+		vec2 f=fract(g)-.5;
+		float r=h(id+float(L)*13.1);
+		if(r<wet*.75){
+			vec2 c=vec2(h(id+3.1)-.5,h(id+5.7)-.5)*.5;
+			vec2 d=f-c;
+			d.y*=.8;
+			float rad=.16+.16*h(id+9.3);
+			// Schliere hinter dem Tropfen
+			vec2 dt2=d;dt2.x+=dir*rad*1.6;
+			float tr=smoothstep(rad*.55,0.,length(dt2*vec2(.6,2.2)))*.4;
+			float dm=smoothstep(rad,rad*.65,length(d));
+			m=max(m,max(dm,tr));
+			off+=d*dm*.3;
+			rim+=smoothstep(rad*.7,rad,length(d))*dm;
+			hi+=smoothstep(rad*.35,rad*.05,length(d-vec2(-rad*.35,-rad*.4)))*dm;
+		}
+	}
+	// Linse: das Bild dahinter steht im Tropfen auf dem Kopf und ist verzerrt, der Rand dunkler, oben links ein Glanzpunkt
+	vec3 col=textureLod(scr,uv-off*.6,1.).rgb*(1.1-rim*.55)+hi*.22;
+	COLOR=vec4(col,clamp(m*1.2,0.,1.)*clamp(wet*1.5,0.,1.));
+}""")
+	cl.add_child(drops)
+	hud.drops = drops
 	_ck_build(cl)
 	# Lenkzonen: weicher weißer Schein vom linken und rechten Rand nach innen (keine Knöpfe, nur Licht)
 	var sg = GradientTexture2D.new()
@@ -6759,6 +7139,23 @@ func _menu() -> void:
 				_reload())
 		lr.add_child(b)
 		ui.look.append(b)
+	lcol.add_child(_lbl("Track (Color & Noir)", 32))
+	var tkr = HBoxContainer.new()
+	tkr.add_theme_constant_override("separation", 10)
+	lcol.add_child(tkr)
+	ui.trk = []
+	for q in range(2):
+		var b = _btn(["Classic", "Extreme"][q])
+		b.add_theme_font_size_override("font_size", 30)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.toggle_mode = true
+		b.pressed.connect(func():
+			if int(cfg.get("trk", 1)) != q:
+				cfg.trk = q
+				_save_cfg()
+				_reload())
+		tkr.add_child(b)
+		ui.trk.append(b)
 	# Boost- und Waffenfelder: feste Positionen oder bei jedem Rennen neu verteilt
 	var pcol = VBoxContainer.new()
 	pcol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -7012,6 +7409,12 @@ func _refresh_ui() -> void:
 		var st3 = _style(Color(0.93, 0.41, 0.18) if on3 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on3 else Color(1, 1, 1, 0.22))
 		for k in ["normal", "pressed", "hover"]:
 			ui.pads[q].add_theme_stylebox_override(k, st3)
+	for q in range(ui.get("trk", []).size()):
+		var on5 = int(cfg.get("trk", 1)) == q
+		ui.trk[q].button_pressed = on5
+		var st5 = _style(Color(0.93, 0.41, 0.18) if on5 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on5 else Color(1, 1, 1, 0.22))
+		for k in ["normal", "pressed", "hover"]:
+			ui.trk[q].add_theme_stylebox_override(k, st5)
 	for q in range(3):
 		var on2 = int(cfg.look) == q
 		var st2 = _style(Color(0.93, 0.41, 0.18) if on2 else Color(1, 1, 1, 0.08), Color(1, 0.7, 0.54) if on2 else Color(1, 1, 1, 0.22))
@@ -11560,6 +11963,9 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		var ce = 4.0 * (1.0 - clampf(absf(s.u) * 1.6, 0.0, 1.0))
 		s.psi -= s.psi * (1.0 - exp(-dt * ce))
 	var grip = 0.8 if s.air else (9.5 if is_p else 7.0)
+	var on_w = not s.air and T.in_water(T.lz(z))
+	if on_w:
+		grip *= 0.3   # über Wasser: wenig Haftung, das Heck schwimmt
 	s.vpsi = clampf(s.vpsi + ((s.psi - s.vpsi) * grip + turn) * dt, -0.9, 0.9)
 	if is_p and not s.air and racing and not s.out:
 		_assist(s, dt)
@@ -11580,6 +11986,8 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	if s.slowT > 0.0:
 		s.slowT -= dt
 	s.spd = base_spd * s.sk * (1.0 + 0.6 * s.boost) * s.slow * (0.75 if s.slowT > 0.0 else 1.0) if (racing or state == "done") and not party_on else 0.0
+	if on_w:
+		s.spd *= 0.92   # Wasser bremst etwas
 	if T.S and is_p:
 		s.spd *= stt_spd
 	if is_p and not fin.is_empty() and fin.get("fly", false):
@@ -11914,7 +12322,7 @@ const REC_PATH = "user://records.cfg"
 
 
 func _rec_key() -> String:
-	return "speed%d" % int(round(float(cfg.speed) * 100.0))
+	return "speed%d" % int(round(float(cfg.speed) * 100.0)) + ("x" if T.X else "")   # Extreme hat eigene Bestenlisten
 
 
 const REC_N = 5   # Plätze je Liste
@@ -13808,6 +14216,7 @@ var ck_hid = false
 var ck_rot = 0.0
 var ck_snd = 0.0   # 0 = draußen, 1 = im Cockpit (gleitet beim Umschalten)
 var ck_hb = 0.0    # Herzschlag-Stärke
+var wat_snd = 0.0
 var ck_bus_v = -1.0
 
 
@@ -15778,7 +16187,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
-	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs"]
+	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
