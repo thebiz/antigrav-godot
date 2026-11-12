@@ -1774,7 +1774,7 @@ void fragment(){
 	_props_make()
 	for k in range(2, 51):
 		var zc = k * 14.0 + 7.0
-		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle() or T.in_water(zc, 1.0):
+		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle() or T.in_water(zc, 1.0) or T.in_twist(zc, 6.0):
 			continue
 		_box("metal", zc, 0.0, -3.3, 0.16, 3.1, 0.16)
 	# Neonringe in Gruppen (im Dschungel stattdessen Baumwurzeln über der Strecke)
@@ -2006,8 +2006,8 @@ void fragment(){
 
 
 var mats = {}
-const TWT_R = 2.9    # Radius der Korkenzieher-Röhre
-const TWT_OC = 1.05  # Mitte der Röhre über der Fahrbahn
+const TWT_R = 3.7    # Radius der Korkenzieher-Röhre (weit und luftig)
+const TWT_OC = 1.4   # Mitte der Röhre über der Fahrbahn
 var lights = []
 var lights_nodes = []
 var wpads = []

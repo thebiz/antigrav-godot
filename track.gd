@@ -13,7 +13,7 @@ const HILL := [[2.4, 2.0, 0.0], [0.8, 5.0, 1.0]]
 const RINGS := [90, 96, 102, 108, 114, 290, 296, 302, 308, 314, 440, 446, 452, 458, 464, 625, 631, 637, 643, 649]
 const TUN := [[160.0, 245.0], [510.0, 595.0]]
 # Korkenzieher-Röhre (nur Neon Night): die Fahrbahn dreht sich einmal ganz um die Fahrtrichtung – man fährt über Wand und Decke
-const TWZ := [326.0, 390.0]
+const TWZ := [258.0, 392.0]   # lang gezogen: eine ruhige Umdrehung über gut 130 Einheiten
 # Wasser-Abschnitt (nur Extreme): die Fahrbahn endet, man gleitet über einen See
 const WAT := [436.0, 500.0]
 # Dschungel: turbotauglich – weite, fließende Kurven (Summe weniger Sinuswellen, keine hektischen Wechsel),
