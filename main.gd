@@ -1483,8 +1483,8 @@ func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: V
 # Kasten im Streckenrahmen: Mitte (lat, h) an Stelle z, halbe Maße (seitlich, hoch, längs)
 func _box(key: String, z: float, lat: float, h: float, hx: float, hy: float, hz: float) -> void:
 	st_z = z
-	var f = T.frame(z)
-	var c: Vector3 = f.c + f.rr * lat + f.uu * h
+	var f = T.sframe(z, lat)
+	var c: Vector3 = f.c + f.uu * h
 	var X: Vector3 = f.rr * hx
 	var Y: Vector3 = f.uu * hy
 	var Z: Vector3 = f.fw * hz
@@ -1503,8 +1503,7 @@ func _mark(key: String, z0: float, z1: float, la: float, lb: float, ha: float, h
 		return
 	st_z = z0
 	var f0 = T.frame(z0)
-	var f1 = T.frame(z1)
-	_quad(_st(key), f0.c + f0.rr * la + f0.uu * ha, f0.c + f0.rr * lb + f0.uu * hb, f1.c + f1.rr * lb + f1.uu * hb, f1.c + f1.rr * la + f1.uu * ha, f0.uu)
+	_quad(_st(key), T.world(z0, la, ha), T.world(z0, lb, hb), T.world(z1, lb, hb), T.world(z1, la, ha), f0.uu)
 
 
 # Leuchtstreifen auf/an der Strecke: von lat a nach b, Höhe h, entlang z0…z1
@@ -1517,7 +1516,9 @@ func _strip(key: String, z0: float, z1: float, la: float, lb: float, ha: float, 
 	var prev = []
 	while z <= z1 + 0.001:
 		var f = T.frame(z)
-		var p: Array = [f.c + f.rr * la + f.uu * ha, f.c + f.rr * lb + f.uu * hb]
+		var fa = T.sframe(z, la)   # in der Röhre liegt alles auf der gewölbten Fläche
+		var fb = T.sframe(z, lb)
+		var p: Array = [fa.c + fa.uu * ha, fb.c + fb.uu * hb]
 		if prev.size() > 0 and not T.gap(z - 0.25):
 			if not whole:
 				st_z = z - 0.25
@@ -1583,7 +1584,7 @@ func _build_track() -> void:
 			var x = -TW + 2.0 * TW * i / 8.0
 			# Dschungel: Piste wie eine ausgefahrene Rinne – zu den Rändern hin leicht hoch
 			row.append(f.c + f.rr * x + (f.uu * 0.06 * pow(absf(x) / TW, 3.0) if _jungle() else Vector3.ZERO))
-		if prev.size() > 0 and not T.gap(z - 0.25) and not T.in_water(z - 0.25):
+		if prev.size() > 0 and not T.gap(z - 0.25) and not T.in_water(z - 0.25) and not T.in_pipe(z - 0.25):
 			for i in range(8):
 				var u0 = float(i) / 8.0
 				var u1 = float(i + 1) / 8.0
@@ -1601,7 +1602,7 @@ func _build_track() -> void:
 	# Mittellinie, gestrichelt (im Dschungel nicht)
 	var zz = 20.0 if not _jungle() else 9999.0
 	while zz < 720.0:
-		if not T.in_water(zz, 1.5):
+		if not T.in_water(zz, 1.5) and not T.in_pipe(zz, 1.5):
 			_strip("line", zz, zz + 1.5, -0.012, 0.012, 0.005, 0.005)
 		zz += 3.33
 	# Tempo-Marken: dicht am Schiff huscht ständig etwas vorbei – Leuchtpfosten an der Bande (alle 2), Randstriche auf der
@@ -1610,7 +1611,7 @@ func _build_track() -> void:
 		var zp = 21.0
 		var pk = 0
 		while zp < 719.0:
-			for sd in ([] if T.in_water(zp, 2.0) else [-1.0, 1.0]):
+			for sd in ([] if T.in_water(zp, 2.0) or T.in_pipe(zp, 2.0) else [-1.0, 1.0]):
 				var pm = "postL" if sd < 0 else "postR"
 				_mark(pm, zp, zp + 0.09, sd * (TW - 0.014), sd * (TW - 0.014), 0.05, 0.25)
 				_mark("line", zp + 1.0, zp + 1.6, sd * (TW - 0.5), sd * (TW - 0.38), 0.005, 0.005)
@@ -1620,83 +1621,67 @@ func _build_track() -> void:
 					_mark("line", zp + 0.3, zp + 1.3, sd * TW * 0.5 - 0.012, sd * TW * 0.5 + 0.012, 0.005, 0.005)
 			zp += 2.0
 			pk += 1
-	# Korkenzieher-Röhre: gläserne Röhre um die sich drehende Fahrbahn – Neonstreifen laufen als Spirale mit, Ringe alle 3 Einheiten,
-	# leuchtende Tore am Ein- und Ausgang
+	# Röhre (nur Extreme): die Fahrbahn wölbt sich zur geschlossenen Röhre. Innen dunkles Glas mit Leuchtbahnen längs,
+	# Ringen quer und Pfeilen auf dem Boden; an den Enden offen (Halbröhre), dort eine Neonkante als Grenze.
 	if T.X and not T.S:
-		var tz0 = float(T.TWZ[0]) - 7.0
-		var tz1 = float(T.TWZ[1]) + 7.0
-		var NR = 32
-		var zt = tz0
-		while zt < tz1 - 0.001:
+		var pz0 = float(T.PIPE[0])
+		var pz1 = float(T.PIPE[1])
+		var NP = 48
+		var zt = pz0
+		while zt < pz1 - 0.001:
 			st_z = zt
-			var tst = _st("twtube")
-			var fa = T.frame(zt)
-			var fb = T.frame(zt + 0.5)
-			for k in range(NR):
-				var a0 = TAU * k / NR
-				var a1 = TAU * (k + 1) / NR
-				var ra0: Vector3 = fa.rr * cos(a0) + fa.uu * sin(a0)
-				var ra1: Vector3 = fa.rr * cos(a1) + fa.uu * sin(a1)
-				var rb0: Vector3 = fb.rr * cos(a0) + fb.uu * sin(a0)
-				var rb1: Vector3 = fb.rr * cos(a1) + fb.uu * sin(a1)
-				var oa: Vector3 = fa.c + fa.uu * TWT_OC
-				var ob: Vector3 = fb.c + fb.uu * TWT_OC
-				_quad(tst, oa + ra0 * TWT_R, ob + rb0 * TWT_R, ob + rb1 * TWT_R, oa + ra1 * TWT_R, -ra0,
-					Vector2(float(k) / NR, zt), Vector2(float(k) / NR, zt + 0.5), Vector2(float(k + 1) / NR, zt + 0.5), Vector2(float(k + 1) / NR, zt))
+			var tst = _st("pipe")
+			var la = T.lim(zt)
+			var lb = T.lim(zt + 0.5)
+			for k in range(NP):
+				var u0 = -1.0 + 2.0 * k / NP
+				var u1 = -1.0 + 2.0 * (k + 1) / NP
+				var a0 = T.sframe(zt, u0 * la)
+				var a1 = T.sframe(zt, u1 * la)
+				var b0 = T.sframe(zt + 0.5, u0 * lb)
+				var b1 = T.sframe(zt + 0.5, u1 * lb)
+				_quad(tst, a0.c, b0.c, b1.c, a1.c, a0.uu,
+					Vector2(u0 * la, zt), Vector2(u0 * lb, zt + 0.5), Vector2(u1 * lb, zt + 0.5), Vector2(u1 * la, zt))
 			zt += 0.5
-		# leuchtende Pfeile und Randlinien auf der Fahrbahn: zeigen in der Röhre, wo unten ist
-		var zr = float(T.TWZ[0]) - 4.0
-		while zr < float(T.TWZ[1]) + 4.0 - 0.001:
-			st_z = zr
-			var rst = _st("twroad")
-			var ra = T.frame(zr)
-			var rb = T.frame(zr + 0.5)
-			var la = ra.c + ra.uu * 0.012
-			var lb = rb.c + rb.uu * 0.012
-			_quad(rst, la - ra.rr * TW, lb - rb.rr * TW, lb + rb.rr * TW, la + ra.rr * TW, ra.uu,
-				Vector2(0.0, zr), Vector2(0.0, zr + 0.5), Vector2(1.0, zr + 0.5), Vector2(1.0, zr))
-			zr += 0.5
-		mats["twroad"] = _shader_mat("""
+		mats["pipe"] = _shader_mat("""
 shader_type spatial;
-render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+render_mode unshaded,cull_disabled,blend_mix,depth_draw_always,shadows_disabled;
+uniform float pr=%f;
 uniform float z0=%f;
 uniform float z1=%f;
 void fragment(){
-	float x=UV.x*2.-1.,z=UV.y;
-	float fade=smoothstep(z0,z0+3.,z)*smoothstep(z1,z1-3.,z);
-	// Pfeile nach vorn alle 4 Einheiten, laufen mit
-	float q=fract(z/4.-TIME*.8);
-	float chev=1.-smoothstep(.0,.08,abs(q-(.5-abs(x)*.35)));
-	chev*=step(abs(x),.6);
-	float edge=1.-smoothstep(.0,.03,abs(abs(x)-.93));
-	vec3 c=vec3(.25,.9,1.)*chev*1.7+mix(vec3(.25,.9,1.),vec3(1.,.3,.85),step(0.,x))*edge*1.2;
-	ALBEDO=c*fade;
-}""" % [zr - (float(T.TWZ[1]) - float(T.TWZ[0]) + 8.0), zr])
-		mats["twtube"] = _shader_mat("""
-shader_type spatial;
-render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
-uniform float z0=%f;
-uniform float z1=%f;
-void fragment(){
-	float u=UV.x,z=UV.y;
-	float fade=smoothstep(z0,z0+4.,z)*smoothstep(z1,z1-4.,z);
-	float fr=pow(1.-abs(dot(NORMAL,VIEW)),2.5);
-	// Spiralstreifen: 8 Bahnen, abwechselnd Cyan und Magenta
-	float su=fract(u*8.);
-	float line=1.-smoothstep(.0,.035,abs(su-.5));
-	vec3 lc=mod(floor(u*8.),2.)<.5?vec3(.2,.9,1.):vec3(1.,.25,.85);
-	// Lichtpulse, die durch die Röhre nach vorn rasen
-	float pulse=smoothstep(.85,1.,fract(z/14.-TIME*1.6));
-	// Ringe alle 3 Einheiten
-	float rib=1.-smoothstep(.0,.05,abs(fract(z/3.)-.5));
-	// Tore am Ein- und Ausgang
-	float gate=exp(-pow((z-(z0+5.))*1.6,2.))+exp(-pow((z-(z1-5.))*1.6,2.));
-	vec3 c=vec3(.05,.18,.32)*fr*.9;
-	c+=lc*line*(.55+1.4*pulse);
-	c+=vec3(.55,.75,1.)*rib*.32;
-	c+=vec3(1.,.5,.95)*gate*2.2;
-	ALBEDO=c*fade;
-}""" % [tz0, tz1])
+	float x=UV.x,z=UV.y;
+	float ang=x/pr;                 // Winkel um die Röhre, 0 = Boden
+	float bot=smoothstep(1.4,.6,abs(ang));
+	// Leuchtbahnen längs, alle 30 Grad; abwechselnd Cyan und Magenta
+	float q=ang/(PI/6.);
+	float ln=1.-smoothstep(0.,.05,abs(fract(q)-.5));
+	vec3 lc=mod(floor(q),2.)<.5?vec3(.2,.9,1.):vec3(1.,.25,.85);
+	// Ringe quer, Lichtpulse nach vorn, Pfeile auf dem Boden
+	float rib=1.-smoothstep(0.,.04,abs(fract(z/4.)-.5));
+	float pulse=smoothstep(.85,1.,fract(z/16.-TIME*1.4));
+	float qq=fract(z/5.-TIME*.7);
+	float chev=(1.-smoothstep(0.,.07,abs(qq-(.5-abs(ang)*.8))))*step(abs(ang),.5);
+	vec3 base=mix(vec3(.02,.03,.07),vec3(.04,.05,.09),bot);
+	vec3 c=base;
+	c+=lc*ln*(.6+1.3*pulse);
+	c+=vec3(.5,.7,1.)*rib*.25;
+	c+=vec3(.3,.9,1.)*chev*1.2;
+	ALBEDO=c;
+	ALPHA=mix(.88,.55,1.-bot);     // oben durchscheinend: man sieht die Stadt durch die Decke
+}""" % [T.PR, pz0, pz1])
+		# Ränder der Halbröhre an den Enden (wo noch keine geschlossene Röhre ist)
+		for side in [-1.0, 1.0]:
+			for rng in [[pz0, pz0 + T.PT], [pz1 - T.PT, pz1]]:
+				var ze = float(rng[0])
+				while ze < float(rng[1]) - 0.001:
+					st_z = ze
+					var est = _st("neonL" if side < 0 else "neonR")
+					var ea = T.sframe(ze, side * (T.lim(ze) - 0.02))
+					var eb = T.sframe(ze + 0.5, side * (T.lim(ze + 0.5) - 0.02))
+					_quad(est, ea.c - ea.rr * 0.06, eb.c - eb.rr * 0.06, eb.c + eb.rr * 0.06 + eb.uu * 0.25, ea.c + ea.rr * 0.06 + ea.uu * 0.25, ea.rr * -side,
+						Vector2(0, 0), Vector2(0, 1), Vector2(1, 1), Vector2(1, 0))
+					ze += 0.5
 	# See (nur Extreme): die Fahrbahn endet, man gleitet über spiegelndes Wasser; Bojenketten statt Bande
 	if T.X and not T.S:
 		var w0 = float(T.WAT[0])
@@ -1778,7 +1763,7 @@ void fragment(){
 		var zc = gk * 28.0 + 7.0
 		if zc > 20.0 and _jungle():
 			lights.append([zc, _neo(gk * 0.29)])   # Dschungel: nur die schwebenden Irrlichter
-		elif zc > 20.0 and not T.in_tun(zc, 2.0) and not T.in_water(zc, 1.0):
+		elif zc > 20.0 and not T.in_tun(zc, 2.0) and not T.in_water(zc, 1.0) and not T.in_pipe(zc, 2.0):
 			for sd in [-1.0, 1.0]:
 				_box("metal", zc, sd * (TW + 0.25), 0.6, 0.07, 0.72, 0.07)
 			_box("metal", zc, 0.0, 1.34, TW + 0.32, 0.08, 0.09)
@@ -1791,7 +1776,7 @@ void fragment(){
 		gk += 1
 	for k in range(1, 36):
 		var zc = k * 20.0 + 10.0
-		if zc > 715.0 or T.in_tun(zc, 2.0) or _jungle() or zc < 56.0 or zc > 684.0:
+		if zc > 715.0 or T.in_tun(zc, 2.0) or _jungle() or zc < 56.0 or zc > 684.0 or T.in_pipe(zc, 2.0):
 			continue
 		var sd = 1.0 if k % 2 == 0 else -1.0
 		if _noir():
@@ -1806,13 +1791,15 @@ void fragment(){
 	_props_make()
 	for k in range(2, 51):
 		var zc = k * 14.0 + 7.0
-		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle() or T.in_water(zc, 1.0) or T.in_twist(zc, 6.0):
+		if zc > 715.0 or T.in_tun(zc, 1.0) or T.gap(zc) or _jungle() or T.in_water(zc, 1.0) or T.in_pipe(zc, 6.0):
 			continue
 		_box("metal", zc, 0.0, -3.3, 0.16, 3.1, 0.16)
 	# Neonringe in Gruppen (im Dschungel stattdessen Baumwurzeln über der Strecke)
 	if _jungle():
 		_jungle_track()
 	for zr in ([] if _jungle() else T.RINGS):
+		if T.in_pipe(float(zr), 3.0):
+			continue   # in der Röhre keine Ringe
 		_ring("ringC" if int(floor(zr / 150.0)) % 2 == 0 else "ringM", float(zr), TW + 0.55, 0.95, 0.065)
 	# Tunnel: Röhre innen, leuchtende Ringe, Deckenband
 	for tu in T.tuns():   # Dschungel: ein dunkler Erdtunnel in der Steilkurve
@@ -2030,16 +2017,14 @@ void fragment(){
 				beam_mat.shader.code = beam_mat.shader.code.replace("vec3 c=.5+.5*cos(6.2832*(UV.x+TIME*.3+vec3(0.,.33,.67)));", "vec3 c=vec3(1.,.36,.03);")
 		for wp in wpads:
 			var bm = _pillar_node()
-			var f = T.frame(wp[0])
-			bm.transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * wp[1] + f.uu * 1.1)
+			var f = T.sframe(wp[0], wp[1])
+			bm.transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * 1.1)
 			n.add_child(bm)
 			beam_n.append(bm)
 		laps.append(n)
 
 
 var mats = {}
-const TWT_R = 3.7    # Radius der Korkenzieher-Röhre (weit und luftig)
-const TWT_OC = 1.4   # Mitte der Röhre über der Fahrbahn
 var lights = []
 var lights_nodes = []
 var wpads = []
@@ -10395,9 +10380,9 @@ func _weapons(dt: float, racing: bool) -> void:
 				_qf(e)
 			shots.remove_at(i)
 		else:
-			var f = T.frame(sh.z)
+			var f = T.sframe(sh.z, sh.lat)
 			var bn: int = sh.get("br", 1)
-			var bp: Vector3 = f.c + f.rr * sh.lat + f.uu * 0.25
+			var bp: Vector3 = f.c + f.uu * 0.25
 			var bb = Basis(f.rr, f.fw, -f.uu)
 			sh.n.global_transform = Transform3D(bb, bp + _braid_off(f, bn, 0, sh.t))
 			for k in range(1, bn):
@@ -12080,8 +12065,17 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 				if not ap:
 					s.slow = minf(s.slow, 0.9)
 	# Leitplanke: weich parallel ausrichten, etwas bremsen
-	var ml = T.TW - 0.3
-	if absf(s.lat) > ml and not s.air:
+	var ml = T.lim(s.z) - 0.3
+	if T.pipe_full(s.z):
+		# geschlossene Röhre: keine Bande, einmal rundherum kommt man auf der anderen Seite wieder an
+		var circ = TAU * T.PR
+		if absf(s.lat) > circ * 0.5:
+			s.lat -= signf(s.lat) * circ
+	elif absf(s.lat) > ml and not s.air and T.pipe_k(s.z) > 0.001:
+		# Übergang Röhre → Bahn: wer zu weit oben fährt, wird sanft die Wand hinunter getragen (keine Bande, kein Abbremsen)
+		s.lat = signf(s.lat) * ml
+		s.vpsi -= s.vpsi * minf(1.0, dt * 3.0)
+	elif absf(s.lat) > ml and not s.air:
 		s.lat = signf(s.lat) * ml
 		s.psi -= s.psi * minf(1.0, dt * 6.0)
 		s.vpsi -= s.vpsi * minf(1.0, dt * 6.0)
@@ -12114,6 +12108,8 @@ func _ai_inp(o: Dictionary, t: float, dt: float) -> float:
 	var spd = maxf(1.0, o.spd)
 	var d2 = T.d2px(zz + 14.0)
 	var tg = o.lane + signf(d2) * minf(0.5, absf(d2) * 45.0)
+	if T.pipe_k(zz + 14.0) > 0.9:
+		tg = 0.75 * PI * T.PR * sin(zz * 0.03 + float(o.ai) * 1.7)   # in der Röhre: Gegner kreisen an Wände und Decke
 	o.tl += (tg - o.tl) * (1.0 - exp(-dt / 1.2))
 	var turn: float = T.kap(zz) * spd
 	var vd = clampf((o.tl - o.lat) / 0.9, -3.0, 3.0)
@@ -12747,6 +12743,8 @@ func _process(delta: float) -> void:
 		g.boost = maxf(g.boost, 1.5)
 	g.shield = maxf(0.0, g.shield - dt)
 	g.mshield = maxf(0.0, float(g.get("mshield", 0.0)) - dt)
+	if OS.get_environment("PLAT") != "" and racing and T.pipe_k(g.z) > 0.5:
+		g.lat = float(OS.get_environment("PLAT"))   # nur zum Testen: Spieler auf feste Stelle der Röhre (Wand, Decke)
 	if OS.get_environment("SPDT") != "" and racing:
 		g.boost = float(OS.get_environment("SPDT"))   # nur zum Testen: fester Boost-Wert (Tempo-Effekte ansehen)
 	if OS.get_environment("BOT") != "" and Engine.get_process_frames() % 300 == 0:
@@ -13448,7 +13446,7 @@ func _lab_step(dt: float) -> void:
 			_phys(g, _ai_inp(g, tt0, dt / nn), true, dt / nn, true)
 		# Tunnel überspringen: im Tunnel sähe man von außen nichts
 		var zl = T.lz(g.z)
-		for tu in T.TUN:
+		for tu in T.tuns():
 			if zl > tu[0] - 18.0 and zl < tu[1] + 3.0:
 				g.z += tu[1] + 4.0 - zl
 				lab.tz = g.z + 0.3
@@ -13948,7 +13946,7 @@ func _tunnel(dt: float) -> void:
 			tun_l.append(l)
 	var base = g.z - zl
 	var j = 0
-	for tu in ([] if _jungle() else T.TUN):   # Erdtunnel bleibt dunkel
+	for tu in ([] if _jungle() else T.tuns()):   # Erdtunnel bleibt dunkel
 		var ti0 = 4
 		while j < tun_l.size():
 			var zr = tu[0] + 1.0 + ti0 * 1.43
@@ -13974,10 +13972,10 @@ func _pose_all(dt: float) -> void:
 	var tt = Time.get_ticks_msec() / 1000.0
 	for i in range(ships.size()):
 		var s: Dictionary = ships[i]
-		var f = T.frame(s.z)
+		var f = T.sframe(s.z, s.lat)   # Rahmen dort, wo das Schiff fährt (in der Röhre auch an Wand und Decke)
 		var SX: Dictionary = fx.ship
 		var bob = 0.012 * float(SX.bob) * sin(tt * 2.7 + s.ai)
-		var pos: Vector3 = f.c + f.rr * s.lat + f.uu * (0.16 * float(SX.height) + s.h + bob)
+		var pos: Vector3 = f.c + f.uu * (0.16 * float(SX.height) + s.h + bob)
 		var dir: Vector3 = (f.fw * cos(s.psi) + f.rr * sin(s.psi)).normalized()
 		if state != "replay" and state != "kill":
 			# Feder: Neigen in Kurven und Nicken beim Beschleunigen schwingen je nach „Wobble“ nach
@@ -14152,17 +14150,15 @@ func _camera(dt: float) -> void:
 		cam.fov = 60.0
 		return
 	var g: Dictionary = _focus()
-	var f = T.frame(g.z)
-	var S0: Vector3 = f.c + f.rr * g.lat + f.uu * (0.16 + g.h)
+	var f = T.sframe(g.z, g.lat)   # in der Röhre: Rahmen an der Stelle des Schiffs (Wand, Decke)
+	var S0: Vector3 = f.c + f.uu * (0.16 + g.h)
 	cam_psi += (g.psi - cam_psi) * (1.0 - exp(-dt / 0.25))
 	var tc = minf(1.0, g.boost) * 0.55
 	cam_d += (tc - cam_d) * (1.0 - exp(-dt / (0.14 if tc > cam_d else 0.8)))
 	var cp = cam_psi * 0.6
 	var fc: Vector3 = (f.fw * cos(cp) + f.rr * sin(cp)).normalized()
-	# in der Korkenzieher-Röhre rollt die Kamera ganz mit: die Fahrbahn bleibt unten, die Welt dreht sich um dich
-	var twk = 0.0
-	if T.in_twist(T.lz(g.z), 8.0):
-		twk = clampf(minf(T.lz(g.z) - (float(T.TWZ[0]) - 8.0), (float(T.TWZ[1]) + 8.0) - T.lz(g.z)) / 8.0, 0.0, 1.0)
+	# in der Röhre rollt die Kamera ganz mit: wo du fährst, ist unten – die Welt dreht sich um dich
+	var twk = clampf(T.pipe_k(g.z) * 2.5, 0.0, 1.0)
 	var uc: Vector3 = (Vector3.UP * 0.25 * (1.0 - twk) + f.uu * (0.75 + 0.25 * twk)).normalized()
 	var ro: Vector3 = S0 - fc * (2.6 + cam_d) + uc * (0.95 - 0.15 * cam_d) - f.uu * g.h * 0.5
 	var ta: Vector3 = S0 + fc * 7.0 + uc * 0.35

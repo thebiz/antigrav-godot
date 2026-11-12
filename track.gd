@@ -12,8 +12,11 @@ const SEG := [[80.0, 120.0, 18.0], [240.0, 140.0, -26.0], [420.0, 110.0, 14.0], 
 const HILL := [[2.4, 2.0, 0.0], [0.8, 5.0, 1.0]]
 const RINGS := [90, 96, 102, 108, 114, 290, 296, 302, 308, 314, 440, 446, 452, 458, 464, 625, 631, 637, 643, 649]
 const TUN := [[160.0, 245.0], [510.0, 595.0]]
-# Korkenzieher-Röhre (nur Neon Night): die Fahrbahn dreht sich einmal ganz um die Fahrtrichtung – man fährt über Wand und Decke
-const TWZ := [258.0, 392.0]   # lang gezogen: eine ruhige Umdrehung über gut 130 Einheiten
+# Röhre (nur Extreme): die Fahrbahn wölbt sich zu einer geschlossenen Röhre – man kann rundherum fahren, auch an der Decke.
+# An beiden Enden öffnet sie sich über PT Einheiten zur Halbröhre und flachen Bahn; wer oben fährt, wird sanft heruntergetragen.
+const PIPE := [165.0, 395.0]
+const PR := 2.7      # Radius der Röhre
+const PT := 28.0     # Länge der Übergänge
 # Wasser-Abschnitt (nur Extreme): die Fahrbahn endet, man gleitet über einen See
 const WAT := [436.0, 500.0]
 # Dschungel: turbotauglich – weite, fließende Kurven (Summe weniger Sinuswellen, keine hektischen Wechsel),
@@ -30,6 +33,8 @@ const TUN_J := [[605.0, 655.0]]   # Erdtunnel mitten in der Steilkurve
 static func tuns() -> Array:
 	if S:
 		return []
+	if X and not J:
+		return [TUN[1]]   # Extreme: die Röhre ersetzt den ersten Tunnel
 	return TUN_J if J else TUN
 
 
@@ -161,21 +166,45 @@ static func bank(z: float) -> float:
 		var d := d2px(z)
 		var b := d * 70.0 + signf(d) * 0.65 * clampf((absf(d) - 0.006) / 0.0035, 0.0, 1.0)
 		return clampf(b, -1.05, 1.05)
-	return clampf(d2px(z) * 45.0, -0.42, 0.42) + twist(z)
+	return clampf(d2px(z) * 45.0, -0.42, 0.42) * (1.0 - pipe_k(z))   # in der Röhre keine Steilkurve
 
 
-# Drehung der Fahrbahn in der Röhre (0 … 2π, weich ein- und ausgeblendet)
-static func twist(z: float) -> float:
-	if J or S or not X:
+# Wie weit die Fahrbahn zur Röhre gewölbt ist: 0 = flach, 1 = geschlossene Röhre
+static func pipe_k(z: float) -> float:
+	if not X or J or S:
 		return 0.0
 	var l := lz(z)
-	if l <= TWZ[0] or l >= TWZ[1]:
+	if l <= PIPE[0] or l >= PIPE[1]:
 		return 0.0
-	return TAU * s5((l - TWZ[0]) / (TWZ[1] - TWZ[0]))
+	return minf(s5(clampf((l - PIPE[0]) / PT, 0.0, 1.0)), s5(clampf((PIPE[1] - l) / PT, 0.0, 1.0)))
 
 
-static func in_twist(zl: float, m: float = 0.0) -> bool:
-	return X and not J and not S and zl >= TWZ[0] - m and zl <= TWZ[1] + m
+static func in_pipe(zl: float, m: float = 0.0) -> bool:
+	return X and not J and not S and zl >= PIPE[0] - m and zl <= PIPE[1] + m
+
+
+# geschlossen: rundherum fahrbar (seitlich läuft man über ±π·PR hinaus wieder herein)
+static func pipe_full(z: float) -> bool:
+	return pipe_k(z) > 0.999
+
+
+# seitliche Grenze (statt der Bande): flach TW, in der Röhre bis zur Decke
+static func lim(z: float) -> float:
+	var k := pipe_k(z)
+	return TW + (PI * PR - TW) * k
+
+
+# Rahmen an einer Stelle der Fahrbahn: c = Punkt auf der Oberfläche, uu = Oberflächen-Normale, rr = quer, fw = längs.
+# Außerhalb der Röhre dasselbe wie frame(z) mit c + rr·lat.
+static func sframe(z: float, lat: float) -> Dictionary:
+	var f := frame(z)
+	var k := pipe_k(z)
+	if k < 0.0005:
+		return {"c": f.c + f.rr * lat, "fw": f.fw, "rr": f.rr, "uu": f.uu}
+	var rk := PR / k
+	var a := lat / rk
+	var n: Vector3 = f.rr * sin(a) - f.uu * cos(a)
+	return {"c": f.c + f.uu * rk + n * rk, "fw": f.fw, "rr": f.rr * cos(a) + f.uu * sin(a), "uu": -n}
 
 
 static func in_water(zl: float, m: float = 0.0) -> bool:
@@ -184,13 +213,20 @@ static func in_water(zl: float, m: float = 0.0) -> bool:
 
 # Abschnitte von a bis b ohne den Wasser-Abschnitt (für Fahrbahn, Bande und alles, was über dem See fehlt)
 static func dry(a: float, b: float) -> Array:
-	if not X or J or S or b <= WAT[0] or a >= WAT[1]:
+	if not X or J or S:
 		return [[a, b]]
-	var r = []
-	if a < WAT[0]:
-		r.append([a, WAT[0]])
-	if b > WAT[1]:
-		r.append([WAT[1], b])
+	var r = [[a, b]]
+	for cut in [WAT, PIPE]:
+		var r2 = []
+		for q in r:
+			if q[1] <= cut[0] or q[0] >= cut[1]:
+				r2.append(q)
+				continue
+			if q[0] < cut[0]:
+				r2.append([q[0], cut[0]])
+			if q[1] > cut[1]:
+				r2.append([cut[1], q[1]])
+		r = r2
 	return r
 
 
@@ -213,8 +249,8 @@ static func frame(z: float) -> Dictionary:
 
 
 static func world(z: float, lat: float, h: float) -> Vector3:
-	var f := frame(z)
-	return f.c + f.rr * lat + f.uu * h
+	var f := sframe(z, lat)
+	return f.c + f.uu * h
 
 
 # Boost-Feld k: liegt auf der Kurvenaußenseite
