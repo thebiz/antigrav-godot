@@ -258,6 +258,34 @@ func _buses() -> void:
 			var i = AudioServer.bus_count - 1
 			AudioServer.set_bus_name(i, nm)
 			AudioServer.set_bus_send(i, "Master")
+	# Bordcomputer: Waffen-Ansagen klingen synthetisch und schmalbandig, leicht metallisch – läuft danach durch den Stimmen-Kanal
+	if AudioServer.get_bus_index("Board") == -1:
+		AudioServer.add_bus()
+		var bi = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(bi, "Board")
+		AudioServer.set_bus_send(bi, "Voice")
+		var bhp = AudioEffectHighPassFilter.new()
+		bhp.cutoff_hz = 320.0
+		AudioServer.add_bus_effect(bi, bhp)
+		var blp = AudioEffectLowPassFilter.new()
+		blp.cutoff_hz = 5500.0
+		AudioServer.add_bus_effect(bi, blp)
+		var bch = AudioEffectChorus.new()   # zwei eng verschobene Kopien: der typische Computer-Klang
+		bch.voice_count = 2
+		bch.dry = 0.75
+		bch.wet = 0.55
+		bch.set_voice_delay_ms(0, 7.0)
+		bch.set_voice_rate_hz(0, 0.0)
+		bch.set_voice_depth_ms(0, 0.0)
+		bch.set_voice_delay_ms(1, 13.0)
+		bch.set_voice_rate_hz(1, 0.0)
+		bch.set_voice_depth_ms(1, 0.0)
+		AudioServer.add_bus_effect(bi, bch)
+		var bds = AudioEffectDistortion.new()
+		bds.mode = AudioEffectDistortion.MODE_OVERDRIVE
+		bds.drive = 0.18
+		bds.post_gain = 2.0
+		AudioServer.add_bus_effect(bi, bds)
 	var gi = AudioServer.get_bus_index("Game")
 	if AudioServer.get_bus_effect_count(gi) == 0:
 		var clp = AudioEffectLowPassFilter.new()   # 0: Cockpit-Dämpfung (aus = 20 kHz)
@@ -541,6 +569,10 @@ void fragment(){
 		nd.set_meta("bar", bar)
 
 
+# Ansagen des Bordcomputers (Waffen und Warnungen) – die Sprecher-Ansagen (Runde, Platz, Start) bleiben natürlich
+const BOARD_VO = ["vo_rak", "vo_lenk", "vo_mine", "vo_orbs", "vo_wand", "vo_beben", "vo_schild", "vo_auto", "vo_turbo", "vo_super", "vo_mega", "vo_enlow", "incoming"]
+
+
 func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 	if warm or not snd.has(k):
 		return
@@ -557,7 +589,7 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 	p.pitch_scale = pitch
 	if k.begins_with("vo_") or k == "incoming":
 		_rev(["vo", k, db])   # Ansagen auch in der Wiederholung
-		p.bus = "Voice"
+		p.bus = "Board" if k in BOARD_VO else "Voice"
 		# solange die Stimme spricht (ohne den Hall am Ende), alles andere absenken
 		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + maxf(0.4, snd[k].get_length() - 0.25) / maxf(0.1, AudioServer.playback_speed_scale))
 	else:
@@ -12437,7 +12469,7 @@ func _name_entry(hits: Array) -> void:
 	ui.named = done
 	ok.pressed.connect(done)
 	le.text_submitted.connect(func(_t): done.call())
-	le.grab_focus.call_deferred()
+	# kein automatischer Fokus: die Tastatur kommt erst, wenn man ins Feld tippt (der gespeicherte Name steht schon drin)
 
 
 func _show_records(on: bool) -> void:
