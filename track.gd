@@ -12,6 +12,8 @@ const SEG := [[80.0, 120.0, 18.0], [240.0, 140.0, -26.0], [420.0, 110.0, 14.0], 
 const HILL := [[2.4, 2.0, 0.0], [0.8, 5.0, 1.0]]
 const RINGS := [90, 96, 102, 108, 114, 290, 296, 302, 308, 314, 440, 446, 452, 458, 464, 625, 631, 637, 643, 649]
 const TUN := [[160.0, 245.0], [510.0, 595.0]]
+# Korkenzieher-Röhre (nur Neon Night): die Fahrbahn dreht sich einmal ganz um die Fahrtrichtung – man fährt über Wand und Decke
+const TWZ := [326.0, 390.0]
 # Dschungel: turbotauglich – weite, fließende Kurven (Summe weniger Sinuswellen, keine hektischen Wechsel),
 # langer sanfter Anstieg (120–400), steile lange Abfahrt (440–520) und direkt danach die lange Steilkurve (500–690)
 static var J := false
@@ -156,7 +158,21 @@ static func bank(z: float) -> float:
 		var d := d2px(z)
 		var b := d * 70.0 + signf(d) * 0.65 * clampf((absf(d) - 0.006) / 0.0035, 0.0, 1.0)
 		return clampf(b, -1.05, 1.05)
-	return clampf(d2px(z) * 45.0, -0.42, 0.42)
+	return clampf(d2px(z) * 45.0, -0.42, 0.42) + twist(z)
+
+
+# Drehung der Fahrbahn in der Röhre (0 … 2π, weich ein- und ausgeblendet)
+static func twist(z: float) -> float:
+	if J or S:
+		return 0.0
+	var l := lz(z)
+	if l <= TWZ[0] or l >= TWZ[1]:
+		return 0.0
+	return TAU * s5((l - TWZ[0]) / (TWZ[1] - TWZ[0]))
+
+
+static func in_twist(zl: float, m: float = 0.0) -> bool:
+	return not J and not S and zl >= TWZ[0] - m and zl <= TWZ[1] + m
 
 
 # Krümmung für die Fahrphysik (Kurve läuft dem Gleiter davon, wenn man nicht lenkt)

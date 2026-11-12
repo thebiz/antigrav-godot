@@ -1570,6 +1570,83 @@ func _build_track() -> void:
 					_mark("line", zp + 0.3, zp + 1.3, sd * TW * 0.5 - 0.012, sd * TW * 0.5 + 0.012, 0.005, 0.005)
 			zp += 2.0
 			pk += 1
+	# Korkenzieher-Röhre: gläserne Röhre um die sich drehende Fahrbahn – Neonstreifen laufen als Spirale mit, Ringe alle 3 Einheiten,
+	# leuchtende Tore am Ein- und Ausgang
+	if not _jungle() and not T.S:
+		var tz0 = float(T.TWZ[0]) - 7.0
+		var tz1 = float(T.TWZ[1]) + 7.0
+		var NR = 32
+		var zt = tz0
+		while zt < tz1 - 0.001:
+			st_z = zt
+			var tst = _st("twtube")
+			var fa = T.frame(zt)
+			var fb = T.frame(zt + 0.5)
+			for k in range(NR):
+				var a0 = TAU * k / NR
+				var a1 = TAU * (k + 1) / NR
+				var ra0: Vector3 = fa.rr * cos(a0) + fa.uu * sin(a0)
+				var ra1: Vector3 = fa.rr * cos(a1) + fa.uu * sin(a1)
+				var rb0: Vector3 = fb.rr * cos(a0) + fb.uu * sin(a0)
+				var rb1: Vector3 = fb.rr * cos(a1) + fb.uu * sin(a1)
+				var oa: Vector3 = fa.c + fa.uu * TWT_OC
+				var ob: Vector3 = fb.c + fb.uu * TWT_OC
+				_quad(tst, oa + ra0 * TWT_R, ob + rb0 * TWT_R, ob + rb1 * TWT_R, oa + ra1 * TWT_R, -ra0,
+					Vector2(float(k) / NR, zt), Vector2(float(k) / NR, zt + 0.5), Vector2(float(k + 1) / NR, zt + 0.5), Vector2(float(k + 1) / NR, zt))
+			zt += 0.5
+		# leuchtende Pfeile und Randlinien auf der Fahrbahn: zeigen in der Röhre, wo unten ist
+		var zr = float(T.TWZ[0]) - 4.0
+		while zr < float(T.TWZ[1]) + 4.0 - 0.001:
+			st_z = zr
+			var rst = _st("twroad")
+			var ra = T.frame(zr)
+			var rb = T.frame(zr + 0.5)
+			var la = ra.c + ra.uu * 0.012
+			var lb = rb.c + rb.uu * 0.012
+			_quad(rst, la - ra.rr * TW, lb - rb.rr * TW, lb + rb.rr * TW, la + ra.rr * TW, ra.uu,
+				Vector2(0.0, zr), Vector2(0.0, zr + 0.5), Vector2(1.0, zr + 0.5), Vector2(1.0, zr))
+			zr += 0.5
+		mats["twroad"] = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+uniform float z0=%f;
+uniform float z1=%f;
+void fragment(){
+	float x=UV.x*2.-1.,z=UV.y;
+	float fade=smoothstep(z0,z0+3.,z)*smoothstep(z1,z1-3.,z);
+	// Pfeile nach vorn alle 4 Einheiten, laufen mit
+	float q=fract(z/4.-TIME*.8);
+	float chev=1.-smoothstep(.0,.08,abs(q-(.5-abs(x)*.35)));
+	chev*=step(abs(x),.6);
+	float edge=1.-smoothstep(.0,.03,abs(abs(x)-.93));
+	vec3 c=vec3(.25,.9,1.)*chev*1.7+mix(vec3(.25,.9,1.),vec3(1.,.3,.85),step(0.,x))*edge*1.2;
+	ALBEDO=c*fade;
+}""" % [zr - (float(T.TWZ[1]) - float(T.TWZ[0]) + 8.0), zr])
+		mats["twtube"] = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+uniform float z0=%f;
+uniform float z1=%f;
+void fragment(){
+	float u=UV.x,z=UV.y;
+	float fade=smoothstep(z0,z0+4.,z)*smoothstep(z1,z1-4.,z);
+	float fr=pow(1.-abs(dot(NORMAL,VIEW)),2.5);
+	// Spiralstreifen: 8 Bahnen, abwechselnd Cyan und Magenta
+	float su=fract(u*8.);
+	float line=1.-smoothstep(.0,.035,abs(su-.5));
+	vec3 lc=mod(floor(u*8.),2.)<.5?vec3(.2,.9,1.):vec3(1.,.25,.85);
+	// Lichtpulse, die durch die Röhre nach vorn rasen
+	float pulse=smoothstep(.85,1.,fract(z/14.-TIME*1.6));
+	// Ringe alle 3 Einheiten
+	float rib=1.-smoothstep(.0,.05,abs(fract(z/3.)-.5));
+	// Tore am Ein- und Ausgang
+	float gate=exp(-pow((z-(z0+5.))*1.6,2.))+exp(-pow((z-(z1-5.))*1.6,2.));
+	vec3 c=vec3(.05,.18,.32)*fr*.9;
+	c+=lc*line*(.55+1.4*pulse);
+	c+=vec3(.55,.75,1.)*rib*.32;
+	c+=vec3(1.,.5,.95)*gate*2.2;
+	ALBEDO=c*fade;
+}""" % [tz0, tz1])
 	# Startlinie
 	_strip("start", 19.5, 20.5, -TW, TW, 0.007, 0.007)
 	# Boost-Felder
@@ -1853,6 +1930,8 @@ void fragment(){
 
 
 var mats = {}
+const TWT_R = 2.9    # Radius der Korkenzieher-Röhre
+const TWT_OC = 1.05  # Mitte der Röhre über der Fahrbahn
 var lights = []
 var lights_nodes = []
 var wpads = []
@@ -13640,7 +13719,11 @@ func _camera(dt: float) -> void:
 	cam_d += (tc - cam_d) * (1.0 - exp(-dt / (0.14 if tc > cam_d else 0.8)))
 	var cp = cam_psi * 0.6
 	var fc: Vector3 = (f.fw * cos(cp) + f.rr * sin(cp)).normalized()
-	var uc: Vector3 = (Vector3.UP * 0.25 + f.uu * 0.75).normalized()
+	# in der Korkenzieher-Röhre rollt die Kamera ganz mit: die Fahrbahn bleibt unten, die Welt dreht sich um dich
+	var twk = 0.0
+	if T.in_twist(T.lz(g.z), 8.0):
+		twk = clampf(minf(T.lz(g.z) - (float(T.TWZ[0]) - 8.0), (float(T.TWZ[1]) + 8.0) - T.lz(g.z)) / 8.0, 0.0, 1.0)
+	var uc: Vector3 = (Vector3.UP * 0.25 * (1.0 - twk) + f.uu * (0.75 + 0.25 * twk)).normalized()
 	var ro: Vector3 = S0 - fc * (2.6 + cam_d) + uc * (0.95 - 0.15 * cam_d) - f.uu * g.h * 0.5
 	var ta: Vector3 = S0 + fc * 7.0 + uc * 0.35
 	# Countdown: Blick leicht nach oben, damit das riesige Start-Mädel ganz ins Bild passt
