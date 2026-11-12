@@ -1333,6 +1333,8 @@ static var shader_cache = {}   # bleibt beim Neustart erhalten: keine Neu-Kompil
 # Fahrbahn-Wert setzen – Bebenwelle auch für die Nass-Spiegelung (zweiter Durchgang), damit beide gleich gewölbt sind
 func _rset(p: StringName, v) -> void:
 	mats.road.set_shader_parameter(p, v)
+	if mats.has("pipe") and String(p).begins_with("q"):
+		(mats.pipe as ShaderMaterial).set_shader_parameter(p, v)   # Bebenwelle auch in der Röhre
 	if road_wet != null and (String(p).begins_with("qz") or String(p).begins_with("qs")):
 		road_wet.set_shader_parameter(p, v)
 
@@ -1649,6 +1651,12 @@ render_mode unshaded,cull_disabled,blend_mix,depth_draw_always,shadows_disabled;
 uniform float pr=%f;
 uniform float z0=%f;
 uniform float z1=%f;
+// Bebenwelle (wie auf der Fahrbahn): läuft als glühender Ring durch die Röhre und hebt die Wand rundum an
+uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
+varying float qh;
+float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
+float quake(float z){return qw(z-qz,qs)+qw(qz2-z,qs2);}
+void vertex(){float wz=(MODEL_MATRIX*vec4(VERTEX,1.)).z;qh=quake(wz);VERTEX+=NORMAL*qh;}
 void fragment(){
 	float x=UV.x,z=UV.y;
 	float ang=x/pr;                 // Winkel um die Röhre, 0 = Boden
@@ -1667,8 +1675,10 @@ void fragment(){
 	c+=lc*ln*(.6+1.3*pulse);
 	c+=vec3(.5,.7,1.)*rib*.25;
 	c+=vec3(.3,.9,1.)*chev*1.2;
+	float cr=max(qh,0.)/max(max(qs,qs2),.01);
+	c+=qc*pow(cr,1.5)*1.8*step(.01,qs+qs2)*qg;
 	ALBEDO=c;
-	ALPHA=mix(.88,.55,1.-bot);     // oben durchscheinend: man sieht die Stadt durch die Decke
+	ALPHA=min(1.,mix(.88,.55,1.-bot)+cr*.5*step(.01,qs+qs2));     // oben durchscheinend: man sieht die Stadt durch die Decke
 }""" % [T.PR, pz0, pz1])
 		# Ränder der Halbröhre an den Enden (wo noch keine geschlossene Röhre ist)
 		for side in [-1.0, 1.0]:
@@ -6293,34 +6303,34 @@ void fragment(){
 	vec2 uv=SCREEN_UV;
 	vec2 off=vec2(0.);
 	float m=0.,hi=0.;
-	float rim=0.;
-	for(int L=0;L<2;L++){
-		float sc=5.+float(L)*4.;
-		vec2 g=uv*vec2(sc*.5,sc);
-		// die Tropfen wandern im Fahrtwind nach außen und etwas nach unten
-		float dir=sign(uv.x-.5);
-		g.x-=dir*TIME*(.45+float(L)*.25);
-		g.y-=TIME*(.25+float(L)*.15);
+	for(int L=0;L<3;L++){
+		float sc=6.+float(L)*5.;
+		vec2 cs=vec2(sc*.5,sc);
+		vec2 g=uv*cs;
 		vec2 id=floor(g);
 		vec2 f=fract(g)-.5;
 		float r=h(id+float(L)*13.1);
-		if(r<wet*.75){
-			vec2 c=vec2(h(id+3.1)-.5,h(id+5.7)-.5)*.5;
+		if(r<wet*.85){
+			// Lebenszeit kurz: aufklatschen, dann reißt der Fahrtwind den Spritzer nach außen weg
+			float per=.22+.25*h(id+2.3);
+			float ph=fract(TIME/per+h(id+7.7));
+			vec2 cen=(id+.5)/cs;
+			vec2 dd=cen-vec2(.5,.42);
+			vec2 dir=normalize(dd*cs+vec2(.0001,.0));
+			vec2 c=vec2(h(id+3.1)-.5,h(id+5.7)-.5)*.35+dir*ph*1.4;
 			vec2 d=f-c;
-			d.y*=.8;
-			float rad=.16+.16*h(id+9.3);
-			// Schliere hinter dem Tropfen
-			vec2 dt2=d;dt2.x+=dir*rad*1.6;
-			float tr=smoothstep(rad*.55,0.,length(dt2*vec2(.6,2.2)))*.4;
-			float dm=smoothstep(rad,rad*.65,length(d));
-			m=max(m,max(dm,tr));
-			off+=d*dm*.3;
-			rim+=smoothstep(rad*.7,rad,length(d))*dm;
-			hi+=smoothstep(rad*.35,rad*.05,length(d-vec2(-rad*.35,-rad*.4)))*dm;
+			float al=dot(d,dir);
+			float pp=dot(d,vec2(-dir.y,dir.x));
+			float len=.05+ph*.65;                      // Schliere wird beim Wegfliegen länger
+			float w=.05+.04*h(id+9.3);
+			float sk=smoothstep(w,w*.3,abs(pp))*smoothstep(len,0.,-al)*smoothstep(w*1.2,0.,al);
+			float a=sk*(1.-ph)*(1.-ph);
+			m=max(m,a);
+			off+=dir*a*.05;
+			hi+=a*smoothstep(w*.5,0.,abs(pp))*.6;
 		}
 	}
-	// Linse: das Bild dahinter steht im Tropfen auf dem Kopf und ist verzerrt, der Rand dunkler, oben links ein Glanzpunkt
-	vec3 col=textureLod(scr,uv-off*.6,1.).rgb*(1.1-rim*.55)+hi*.22;
+	vec3 col=textureLod(scr,uv-off*.4,1.).rgb*1.05+hi*.5+vec3(.6,.8,1.)*m*.22;   // helle, gischtige Schlieren
 	COLOR=vec4(col,clamp(m*1.2,0.,1.)*clamp(wet*1.5,0.,1.));
 }""")
 	cl.add_child(drops)
@@ -9018,6 +9028,8 @@ func _quake_step(q, dt: float) -> Variant:
 	q.n.global_transform = Transform3D(Basis(f.rr * dir, f.uu, f.fw * dir), f.c + f.uu * (qs * 1.6))
 	q.l.light_energy = 8.0 * qs * float(QX.glow)
 	q.qs = qs
+	if OS.get_environment("QDBG") != "" and Engine.get_process_frames() % 6 == 0:
+		print("QDBG z=", snappedf(q.z, 0.1), " qs=", snappedf(qs, 0.01), " pipe=", snappedf(T.pipe_k(q.z), 0.01), " gz=", snappedf(g.z, 0.1))
 	var sfx = "" if dir > 0.0 else "2"
 	_rset("qz" + sfx, q.z)
 	_rset("qs" + sfx, qs)
@@ -12743,6 +12755,9 @@ func _process(delta: float) -> void:
 		g.boost = maxf(g.boost, 1.5)
 	g.shield = maxf(0.0, g.shield - dt)
 	g.mshield = maxf(0.0, float(g.get("mshield", 0.0)) - dt)
+	if OS.get_environment("QFAKE") != "":
+		_rset("qz", float(OS.get_environment("QFAKE")))   # nur zum Testen: stehende Bebenwelle
+		_rset("qs", 1.3)
 	if OS.get_environment("PLAT") != "" and racing and T.pipe_k(g.z) > 0.5:
 		g.lat = float(OS.get_environment("PLAT"))   # nur zum Testen: Spieler auf feste Stelle der Röhre (Wand, Decke)
 	if OS.get_environment("SPDT") != "" and racing:
