@@ -1714,30 +1714,66 @@ shader_type spatial;
 render_mode unshaded,cull_disabled,blend_mix,depth_draw_opaque,shadows_disabled;
 uniform float z0=%f;
 uniform float z1=%f;
-float hs(float n){return fract(sin(n*91.7)*43758.5);}
+uniform sampler2D scr : hint_screen_texture, filter_linear;
+uniform vec4 shp[4];          // Gleiter: Weltposition xyz, w = Stärke (0 = nicht auf dem Wasser)
+varying vec3 wp;
+float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hs(i),hs(i+vec2(1,0)),f.x),mix(hs(i+vec2(0,1)),hs(i+1.),f.x),f.y);}
+// Steigung einer Sinuswelle a*sin(k*(p·d) - s*t)
+vec2 wv(vec2 p,vec2 d,float k,float a,float s,float t,float lod){return d*(a*k*cos(dot(p,d)*k-t*s))*clamp(1.3-k*lod*1.6,0.,1.);}
+void vertex(){wp=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;}
 void fragment(){
-	float x=UV.x,z=UV.y,t=TIME;
-	// Wellen: mehrere Sinuszüge, daraus Verzerrung und Glitzern
-	float w=sin(z*1.7+x*.6-t*2.2)*.5+sin(z*.9-x*1.3+t*1.6)*.35+sin((z+x)*3.1-t*3.5)*.15;
-	float w2=sin(z*5.3-x*2.1-t*4.)*.5+sin(x*4.7+z*1.1+t*3.)*.5;
-	float fr=pow(1.-clamp(abs(dot(NORMAL,VIEW)),0.,1.),3.);
-	vec3 deep=vec3(.0,.03,.07);
-	vec3 sky=vec3(.1,.06,.22);
-	// Spiegelung der Stadtlichter: senkrechte, flimmernde Streifen
-	float band=floor(x*.8+w*.5);
-	float h=hs(band);
-	float streak=step(.8,h)*(.55+.45*sin(z*.3+h*20.+w));
-	vec3 nc=mix(vec3(.2,.85,1.),vec3(1.,.25,.8),step(.9,h));
-	nc=mix(nc,vec3(1.,.7,.2),step(.97,h));
+	float t=TIME;
+	vec2 p=wp.xz;
+	float lod=length(fwidth(p));   // wie viel Wasser ein Pixel abdeckt: feine Wellen in der Ferne weglassen, sonst flimmert es
+	// Dünung + Kräuselwellen aus verschiedenen Richtungen
+	vec2 g=wv(p,vec2(.287,.958),.7,.12,1.4,t,lod);
+	g+=wv(p,vec2(-.6,.8),1.3,.06,2.,t,lod);
+	g+=wv(p,vec2(.914,.406),2.6,.026,3.1,t,lod);
+	g+=wv(p,vec2(-.196,-.981),4.4,.012,4.2,t,lod);
+	vec2 q=p*2.4+vec2(t*.45,t*.3);
+	float n0=vn(q);
+	g+=vec2(vn(q+vec2(.08,0.))-n0,vn(q+vec2(0.,.08))-n0)*.12*clamp(1.-lod*6.,0.,1.);
+	// Wellenringe rund um die Gleiter, nach hinten gezogen (Luftkissen drückt aufs Wasser)
+	for(int i=0;i<4;i++){
+		vec2 d=p-shp[i].xz;
+		float r=length(d*vec2(1.,.55))+.001;
+		g+=(d/r)*sin(r*5.-t*11.)*shp[i].w*exp(-r*1.3)*.16*clamp(1.-lod*4.,0.,1.);
+	}
+	vec3 nw=normalize((INV_VIEW_MATRIX*vec4(NORMAL,0.)).xyz);
+	nw*=sign(nw.y+.0001);
+	vec3 n=normalize(nw+vec3(-g.x,0.,-g.y));
+	vec3 cam=INV_VIEW_MATRIX[3].xyz;
+	vec3 v=normalize(cam-wp);
+	float fr=.03+.97*pow(1.-max(dot(n,v),0.),5.);
+	vec3 r=reflect(-v,n);
+	r.y=abs(r.y);
+	// Spiegelung: reflektierten Strahl ein Stück weit verfolgen und das Bild von dort nehmen (Stadt, Neon, Gleiter)
+	vec3 Q=wp+r*16.;
+	vec4 cq=PROJECTION_MATRIX*(VIEW_MATRIX*vec4(Q,1.));
+	vec4 cp=PROJECTION_MATRIX*(VIEW_MATRIX*vec4(wp,1.));
+	vec2 uq=cq.xy/cq.w*.5+.5;
+	vec2 up=cp.xy/cp.w*.5+.5;
+	if(abs(up.y-SCREEN_UV.y)>abs(1.-up.y-SCREEN_UV.y)){uq.y=1.-uq.y;}
+	vec3 sky=mix(vec3(.16,.06,.26),vec3(.02,.02,.07),clamp(r.y*2.2,0.,1.));
+	vec3 refl=sky;
+	if(cq.w>0.){
+		float eb=smoothstep(0.,.06,min(min(uq.x,1.-uq.x),min(uq.y,1.-uq.y)));
+		vec3 sc=texture(scr,clamp(uq,.001,.999)).rgb;
+		refl=mix(sky,sc*1.15+sky*.25,eb);
+	}
+	// Wasserkörper: tief dunkel, an Wellenkämmen etwas türkis durchscheinend
+	float crest=clamp(length(g)*1.6,0.,1.);
+	vec3 deep=mix(vec3(.0,.02,.045),vec3(.0,.09,.12),crest*.6);
+	vec3 c=mix(deep,refl,clamp(fr*1.25,0.,1.));
+	// Glitzern: winzige Funken, wo die Kräuselwellen das Licht kippen
+	float sp=pow(vn(p*14.+vec2(t*1.3,-t))*vn(p*9.-t*.7),6.)*fr*5.*clamp(1.-lod*5.,0.,1.);
+	c+=vec3(.7,.85,1.)*sp;
 	// Bojenlicht spiegelt sich links Cyan, rechts Magenta
-	float edge=exp(-pow((abs(x)-2.55)*2.2,2.))*(.55+.45*w2);
-	vec3 c=mix(deep,sky,fr+.15);
-	c+=nc*streak*(.35+.35*w2)*(.35+fr*2.2);
-	c+=mix(vec3(.2,.85,1.),vec3(1.,.25,.8),step(0.,x))*edge*.55;
-	c+=vec3(.55,.8,1.)*pow(max(0.,w2*.5+w*.5),10.)*.5;
-	// Fahrrinne leicht heller
-	c+=vec3(.02,.06,.1)*exp(-x*x*.25);
-	float fade=smoothstep(z0,z0+8.,z)*smoothstep(z1,z1-8.,z)*smoothstep(60.,40.,abs(x));
+	float x=UV.x;
+	float edge=exp(-pow((abs(x)-2.55)*2.2,2.))*(.6+.4*sin(UV.y*3.+t*2.));
+	c+=mix(vec3(.2,.85,1.),vec3(1.,.25,.8),step(0.,x))*edge*.35;
+	float fade=smoothstep(z0,z0+8.,UV.y)*smoothstep(z1,z1-8.,UV.y)*smoothstep(60.,40.,abs(x));
 	ALBEDO=c;
 	ALPHA=fade;
 }""" % [w0 - 16.0, w1 + 16.0])
@@ -4050,7 +4086,57 @@ var wet = 0.0         # wie nass die Scheibe ist
 #   sl/sr = feine Tropfenschleier, die seitlich als Bugwelle wegfächern
 #   mist  = großer, zarter Sprühnebel, der hinter dem Schiff stehen bleibt und sich ausbreitet
 #   dazu je Schiff ein Schaum-Kielwasser (Band aus Dreiecken auf dem Wasser, V-förmig, wird breiter und zerfällt)
-func _spray_part(amount: int, life: float, size: float, tex: Texture2D, flat: bool) -> CPUParticles3D:
+var streak_mat: ShaderMaterial
+var puff_tex: ImageTexture
+
+
+# Tropfen als Striche: der Partikel zeigt in Flugrichtung (align_y), das Rechteck dreht sich zur Kamera und wird lang gezogen
+func _streak_mat() -> ShaderMaterial:
+	if streak_mat == null:
+		streak_mat = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled;
+void vertex(){
+	vec3 ax=MODEL_MATRIX[1].xyz;
+	float sc=length(ax);
+	ax/=max(sc,1e-4);
+	vec3 c=MODEL_MATRIX[3].xyz;
+	vec3 cam=INV_VIEW_MATRIX[3].xyz;
+	vec3 sd=normalize(cross(ax,cam-c));
+	vec3 w=c+sd*VERTEX.x*sc+ax*VERTEX.y*sc*5.;
+	POSITION=PROJECTION_MATRIX*(VIEW_MATRIX*vec4(w,1.));
+	COLOR.a*=smoothstep(.5,2.5,distance(cam,c));
+}
+void fragment(){
+	vec2 u=UV*2.-1.;
+	float a=(1.-u.x*u.x)*smoothstep(1.,.2,abs(u.y))*(.6+.4*(1.-u.y));
+	ALBEDO=COLOR.rgb*(1.+.6*(1.-abs(u.x)));
+	ALPHA=COLOR.a*a;
+}""")
+	return streak_mat
+
+
+# Sprühwolke: ausgefranster, wolkiger Fetzen (Rauschen × runde Maske)
+func _puff_tex() -> ImageTexture:
+	if puff_tex == null:
+		var nz = FastNoiseLite.new()
+		nz.seed = 11
+		nz.frequency = 0.09
+		nz.fractal_octaves = 4
+		var n = 64
+		var img = Image.create(n, n, false, Image.FORMAT_RGBA8)
+		for y in range(n):
+			for x in range(n):
+				var d = Vector2((x + 0.5) / n - 0.5, (y + 0.5) / n - 0.5).length() * 2.0
+				var v = nz.get_noise_2d(x, y) * 0.5 + 0.5
+				var m = clampf(1.0 - d, 0.0, 1.0)
+				var al = clampf((v * 1.4 - 0.35) * m * 1.8 + m * m * 0.25, 0.0, 1.0)
+				img.set_pixel(x, y, Color(1, 1, 1, al))
+		puff_tex = ImageTexture.create_from_image(img)
+	return puff_tex
+
+
+func _spray_part(amount: int, life: float, size: float, tex: Texture2D, flat: bool, streak: bool = false) -> CPUParticles3D:
 	var p = CPUParticles3D.new()
 	var qm = QuadMesh.new()
 	qm.size = Vector2(size, size)
@@ -4068,6 +4154,9 @@ func _spray_part(amount: int, life: float, size: float, tex: Texture2D, flat: bo
 	mm.albedo_texture = tex
 	mm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	qm.material = mm
+	if streak:
+		qm.material = _streak_mat()
+		p.particle_flag_align_y = true
 	p.mesh = qm
 	p.amount = amount
 	p.lifetime = life
@@ -4220,27 +4309,47 @@ func _spray_node() -> Node3D:
 	h.set_meta("keep", true)
 	add_child(h)
 	var dot = _soft_dot()
-	# Fontäne
-	var tl = _spray_part(150, 0.85, 0.26, dot, false)
+	var puff = _puff_tex()
+	# Fontäne: Tropfenstriche ...
+	var tl = _spray_part(130, 0.8, 0.035, dot, false, true)
 	tl.direction = Vector3(0, 0.85, 0.55)
-	tl.spread = 9.0
+	tl.spread = 11.0
 	tl.gravity = Vector3(0, -11.0, 0)
 	tl.initial_velocity_min = 3.5
 	tl.initial_velocity_max = 7.0
-	tl.damping_min = 0.6
-	tl.damping_max = 1.4
+	tl.damping_min = 0.3
+	tl.damping_max = 0.9
 	tl.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	tl.emission_box_extents = Vector3(0.06, 0.02, 0.05)
-	tl.scale_amount_min = 0.5
-	tl.scale_amount_max = 1.3
-	tl.scale_amount_curve = _scurve([[0.0, 0.35], [0.3, 0.9], [1.0, 1.6]])
-	tl.color_ramp = _sgrad([0.0, 0.08, 0.45, 1.0], [Color(1, 1, 1, 0.0), Color(0.95, 0.99, 1.0, 0.95), Color(0.75, 0.9, 1.0, 0.55), Color(0.55, 0.75, 1.0, 0.0)])
-	tl.color_initial_ramp = _sgrad([0.0, 1.0], [Color(0.8, 0.9, 1.0), Color(1, 1, 1)])
+	tl.emission_box_extents = Vector3(0.08, 0.02, 0.05)
+	tl.scale_amount_min = 0.6
+	tl.scale_amount_max = 1.4
+	tl.color_ramp = _sgrad([0.0, 0.06, 0.6, 1.0], [Color(1, 1, 1, 0.0), Color(0.95, 0.99, 1.0, 0.9), Color(0.8, 0.92, 1.0, 0.6), Color(0.6, 0.8, 1.0, 0.0)])
+	tl.color_initial_ramp = _sgrad([0.0, 0.5, 1.0], [Color(0.75, 0.95, 1.0), Color(1, 1, 1), Color(1.0, 0.8, 0.95)])   # Neonlicht färbt einzelne Tropfen
 	h.add_child(tl)
+	# ... und wolkige Wasserfetzen als Körper der Fontäne
+	var bd = _spray_part(46, 0.75, 0.5, puff, false)
+	bd.direction = Vector3(0, 0.8, 0.6)
+	bd.spread = 12.0
+	bd.gravity = Vector3(0, -7.0, 0)
+	bd.initial_velocity_min = 2.5
+	bd.initial_velocity_max = 5.5
+	bd.damping_min = 0.8
+	bd.damping_max = 1.6
+	bd.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	bd.emission_box_extents = Vector3(0.1, 0.03, 0.08)
+	bd.angle_min = 0.0
+	bd.angle_max = 360.0
+	bd.angular_velocity_min = -90.0
+	bd.angular_velocity_max = 90.0
+	bd.scale_amount_min = 0.6
+	bd.scale_amount_max = 1.2
+	bd.scale_amount_curve = _scurve([[0.0, 0.3], [0.4, 1.0], [1.0, 1.9]])
+	bd.color_ramp = _sgrad([0.0, 0.1, 0.5, 1.0], [Color(0.9, 0.97, 1.0, 0.0), Color(0.9, 0.97, 1.0, 0.45), Color(0.75, 0.88, 1.0, 0.22), Color(0.6, 0.75, 1.0, 0.0)])
+	h.add_child(bd)
 	# Tropfenschleier links/rechts
 	var sides = []
 	for sd in [-1.0, 1.0]:
-		var s2 = _spray_part(90, 0.6, 0.055, dot, false)
+		var s2 = _spray_part(80, 0.6, 0.025, dot, false, true)
 		s2.position = Vector3(sd * 0.3, 0.0, -0.15)
 		s2.direction = Vector3(sd * 0.9, 0.75, 0.45)
 		s2.spread = 14.0
@@ -4250,13 +4359,14 @@ func _spray_node() -> Node3D:
 		s2.initial_velocity_max = 4.5
 		s2.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
 		s2.emission_box_extents = Vector3(0.04, 0.01, 0.35)
-		s2.scale_amount_min = 0.5
+		s2.scale_amount_min = 0.6
 		s2.scale_amount_max = 1.4
-		s2.color_ramp = _sgrad([0.0, 0.1, 0.7, 1.0], [Color(1, 1, 1, 0.0), Color(0.92, 0.98, 1.0, 1.0), Color(0.75, 0.9, 1.0, 0.7), Color(0.6, 0.8, 1.0, 0.0)])
+		s2.color_ramp = _sgrad([0.0, 0.1, 0.7, 1.0], [Color(1, 1, 1, 0.0), Color(0.92, 0.98, 1.0, 0.9), Color(0.75, 0.9, 1.0, 0.6), Color(0.6, 0.8, 1.0, 0.0)])
+		s2.color_initial_ramp = _sgrad([0.0, 0.5, 1.0], [Color(0.75, 0.95, 1.0), Color(1, 1, 1), Color(1.0, 0.8, 0.95)])
 		h.add_child(s2)
 		sides.append(s2)
 	# Sprühnebel
-	var ms = _spray_part(40, 1.6, 0.9, dot, false)
+	var ms = _spray_part(36, 1.6, 0.9, puff, false)
 	ms.position = Vector3(0, 0.15, 0.4)
 	ms.direction = Vector3(0, 1, 0.2)
 	ms.spread = 50.0
@@ -4269,12 +4379,14 @@ func _spray_node() -> Node3D:
 	ms.emission_box_extents = Vector3(0.3, 0.1, 0.2)
 	ms.angle_min = 0.0
 	ms.angle_max = 360.0
+	ms.angular_velocity_min = -25.0
+	ms.angular_velocity_max = 25.0
 	ms.scale_amount_min = 0.7
 	ms.scale_amount_max = 1.3
 	ms.scale_amount_curve = _scurve([[0.0, 0.4], [1.0, 2.2]])
-	ms.color_ramp = _sgrad([0.0, 0.15, 1.0], [Color(0.8, 0.9, 1.0, 0.0), Color(0.75, 0.88, 1.0, 0.13), Color(0.55, 0.7, 1.0, 0.0)])
+	ms.color_ramp = _sgrad([0.0, 0.15, 1.0], [Color(0.8, 0.9, 1.0, 0.0), Color(0.75, 0.88, 1.0, 0.16), Color(0.55, 0.7, 1.0, 0.0)])
 	h.add_child(ms)
-	h.set_meta("parts", [tl, sides[0], sides[1], ms])
+	h.set_meta("parts", [tl, sides[0], sides[1], ms, bd])
 	return h
 
 
@@ -4307,6 +4419,18 @@ func _water_update(dt: float) -> void:
 		wake_gen = race_gen
 		for w in wake:
 			w.pts.clear()
+	if mats.has("water"):
+		var sh = []
+		for i in range(4):
+			var v4 = Vector4(0, -999, 0, 0)
+			if i < ships.size():
+				var o2: Dictionary = ships[i]
+				if racing_w and not o2.out and T.in_water(T.lz(float(o2.z))):
+					var f2 = T.frame(float(o2.z))
+					var c2: Vector3 = f2.c + f2.rr * float(o2.lat)
+					v4 = Vector4(c2.x, c2.y, c2.z, clampf(float(o2.spd) / 30.0, 0.3, 1.0) * (0.4 if bool(o2.get("air", false)) else 1.0))
+			sh.append(v4)
+		(mats["water"] as ShaderMaterial).set_shader_parameter("shp", sh)
 	for i in range(ships.size()):
 		var o: Dictionary = ships[i]
 		if not is_instance_valid(wsp[i]):   # erst prüfen, dann zuweisen (gelöschtes Objekt in typisierter Variable = Absturz auf dem Handy)
