@@ -467,7 +467,7 @@ func _sounds() -> void:
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
-			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "minewarn.wav", "hover.wav", "ignite.wav",
+			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
@@ -4298,6 +4298,7 @@ func _whale_tick(dt: float) -> void:
 
 func _debris_update(dt: float) -> void:
 	_water_update(dt)
+	_radio_tick(dt)
 	for sc in scorch:
 		sc.t += dt
 		(sc.m as ShaderMaterial).set_shader_parameter("heat", maxf(0.3, 1.0 - float(sc.t) / 25.0))
@@ -6336,6 +6337,7 @@ void fragment(){
 	cl.add_child(drops)
 	hud.drops = drops
 	_ck_build(cl)
+	_radio_build(cl)
 	# Lenkzonen: weicher weißer Schein vom linken und rechten Rand nach innen (keine Knöpfe, nur Licht)
 	var sg = GradientTexture2D.new()
 	sg.fill = GradientTexture2D.FILL_RADIAL
@@ -7651,7 +7653,7 @@ func _input(ev: InputEvent) -> void:
 				_pause(true)
 				return
 			if hud.has("viewbtn") and (hud.viewbtn as Control).visible and (hud.viewbtn as Control).get_global_rect().grow(16).has_point(ev.position):
-				cfg.view = 1 - int(cfg.view)
+				cfg.view = (int(cfg.view) + 1) % 3   # außen → Cockpit → Helmvisier
 				_save_cfg()
 				return
 			if state in ["race", "count"] and _ck_on() and _ck_core_hit(ev.position):
@@ -8479,6 +8481,10 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 		return
 	if o.out or state != "race":
 		return
+	if int(o.idx) == 0 and src > 0:
+		_radio(src, "taunt", 0.6)    # ein Gegner hat dich erwischt: er lacht dich aus
+	elif int(o.idx) > 0 and src == 0:
+		_radio(int(o.idx), "whine", 0.5)   # du hast ihn erwischt: er schimpft
 	if o.shield > 0.0 and float(o.get("mshield", 0.0)) > 0.0:
 		_shield_ping(o)   # Mega-Schild: hält alles aus
 		return
@@ -14242,6 +14248,183 @@ func _camera(dt: float) -> void:
 	cam.rotate_object_local(Vector3(0, 0, 1), -g.u * 0.05)   # leichtes Mitneigen beim Lenken
 
 
+# ---------------------------------------------------------------- Funkbilder: Gegner melden sich per wackeliger Videoverbindung
+# Beim Überholen und bei Treffern: Gesicht (Comic-Panel) mit Rauschen, Streifen und Flackern, Name, Spruch, Pegelbalken
+var radio = {}
+var radio_cd = 0.0
+var radio_side = {}
+
+
+func _radio_build(cl: CanvasLayer) -> void:
+	var box = Control.new()
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.visible = false
+	cl.add_child(box)
+	var bg = Panel.new()
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.02, 0.03, 0.05, 0.82)
+	st.border_color = Color(0.4, 0.9, 1.0, 0.7)
+	st.set_border_width_all(2)
+	st.set_corner_radius_all(10)
+	bg.add_theme_stylebox_override("panel", st)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(bg)
+	var face = TextureRect.new()
+	face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	face.clip_contents = true
+	face.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	face.material = _shader_mat("""
+shader_type canvas_item;
+uniform vec3 tint=vec3(1.);
+uniform float jit=0.;
+uniform float sig=1.;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+void fragment(){
+	vec2 uv=UV;
+	float row=floor(uv.y*90.);
+	// Zeilen springen seitlich, ab und zu reißt ein Streifen weg
+	uv.x+=(h(vec2(row,floor(TIME*20.)))-.5)*.03*jit+step(.985,h(vec2(floor(uv.y*14.),floor(TIME*9.))))*.08*(1.-sig);
+	vec3 c=texture(TEXTURE,uv).rgb;
+	float l=dot(c,vec3(.3,.55,.15));
+	c=mix(vec3(l),c,.5)*tint*1.2;                         // farbstichig wie ein alter Bildschirm
+	c*=.8+.2*sin(UV.y*360.+TIME*14.);                     // Zeilenraster
+	c+=(h(UV*vec2(160.,190.)+floor(TIME*30.))-.5)*.14;    // Rauschen
+	c*=.85+.15*h(vec2(floor(TIME*24.),3.));               // Flackern
+	c*=mix(.35,1.,sig);
+	float v=smoothstep(.85,.35,length(UV-.5));
+	COLOR=vec4(c*v,1.);
+}""")
+	box.add_child(face)
+	var nm = Label.new()
+	nm.add_theme_font_size_override("font_size", 26)
+	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(nm)
+	var tx = Label.new()
+	tx.add_theme_font_size_override("font_size", 28)
+	tx.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tx.add_theme_color_override("font_color", Color(0.92, 0.96, 1.0))
+	box.add_child(tx)
+	var lv = Control.new()   # Pegelbalken
+	lv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lv.draw.connect(_radio_lv_draw.bind(lv))
+	box.add_child(lv)
+	hud.radio = {"box": box, "bg": bg, "st": st, "face": face, "nm": nm, "tx": tx, "lv": lv}
+
+
+func _radio(who: int, kind: String, chance := 1.0) -> void:
+	if radio_cd > 0.0 or not radio.is_empty() or who <= 0 or who >= CHARS.size() or randf() > chance:
+		return
+	if state != "race" or race_t < 3.0 or not hud.has("radio"):
+		return
+	var k: String = CHARS[who][3]
+	var lines: Array = []
+	if kind == "taunt":
+		lines = CM_LINES.get(k, []) + CM_LOSE.get(k, [])
+	else:
+		lines = CM_WIN.get(k, []) + CM_KO.get(k, [])
+	if lines.is_empty():
+		return
+	var txt = str(_pick(lines)).replace("\n", " ")
+	radio = {"who": who, "t": 0.0, "dur": 2.8, "txt": txt, "img": "%s_%d" % [k, randi() % 3]}
+	radio_cd = 9.0
+	var R: Dictionary = hud.radio
+	(R.face as TextureRect).texture = _cm_img(radio.img)
+	var col: Color = CHARS[who][2]
+	R.nm.text = "◉ " + str(CHARS[who][0]) + "  ·  CH %d" % (who + 1)
+	R.nm.add_theme_color_override("font_color", col.lerp(Color(1, 1, 1), 0.25))
+	R.tx.text = "“" + txt + "”"
+	(R.st as StyleBoxFlat).border_color = Color(col.lerp(Color(1, 1, 1), 0.2), 0.8)
+	_sp(R.face.material, "tint", Vector3(0.75 + col.r * 0.4, 0.75 + col.g * 0.4, 0.75 + col.b * 0.4))
+	_snd("radio", -4.0)
+
+
+func _radio_tick(dt: float) -> void:
+	radio_cd = maxf(0.0, radio_cd - dt)
+	if not hud.has("radio"):
+		return
+	var R: Dictionary = hud.radio
+	if not is_instance_valid(R.box):
+		return
+	# Überholen erkennen: wechselt ein Gegner die Seite (vor/hinter dir), meldet er sich
+	if state == "race" and not ships.is_empty() and not ships[0].out:
+		var g: Dictionary = ships[0]
+		for i in range(1, ships.size()):
+			var o: Dictionary = ships[i]
+			if o.out:
+				continue
+			var dz = float(o.z) - float(g.z)
+			var sd = 1 if dz > 0.6 else (-1 if dz < -0.6 else 0)
+			var prev = int(radio_side.get(i, 0))
+			if sd != 0 and prev != 0 and sd != prev and absf(dz) < 6.0:
+				_radio(i, "taunt" if sd > 0 else "whine", 0.7)
+			if sd != 0:
+				radio_side[i] = sd
+	if OS.get_environment("RADIO") != "" and radio.is_empty() and state == "race" and race_t > float(OS.get_environment("RADIOT") if OS.get_environment("RADIOT") != "" else "3.2") and radio_cd <= 0.0:
+		_radio(int(OS.get_environment("RADIO")), "taunt")   # nur zum Testen
+	var on = not radio.is_empty() and state == "race"
+	R.box.visible = on
+	if not on:
+		if not radio.is_empty() and state != "race":
+			radio = {}
+		return
+	radio.t = float(radio.t) + dt
+	var t = float(radio.t)
+	var dur = float(radio.dur)
+	if t > dur:
+		radio = {}
+		R.box.visible = false
+		_snd("radio", -8.0, 0.8)
+		return
+	var vp = get_viewport().get_visible_rect().size
+	var u = vp.x / 540.0
+	# Platz: links unter POS/LAP, über der Strecke
+	var W = 380.0 * u
+	var H = 150.0 * u
+	var x0 = 12.0 * u
+	var y0 = vp.y * 0.205
+	# Verbindung baut sich auf: kurz zusammenklappen/aufziehen wie ein alter Monitor
+	var op = clampf(t / 0.18, 0.0, 1.0) * clampf((dur - t) / 0.2, 0.0, 1.0)
+	R.box.position = Vector2(x0, y0 + H * 0.5 * (1.0 - op))
+	R.box.size = Vector2(W, H * op)
+	R.box.modulate.a = 0.4 + 0.6 * op
+	R.bg.position = Vector2.ZERO
+	R.bg.size = R.box.size
+	var fs = H * op - 12.0 * u
+	R.face.position = Vector2(6.0 * u, 6.0 * u)
+	R.face.size = Vector2(fs * 1.05, fs)
+	# Stimme: Silben-Rhythmus aus Rauschen; das Bild zuckt im Takt, der Pegel schlägt aus
+	var talk = 1.0 if t < dur * 0.8 else 0.0
+	var env = talk * clampf(absf(sin(t * 11.0)) * (0.6 + 0.4 * sin(t * 3.7 + 1.0)) + randf() * 0.25, 0.0, 1.0)
+	radio["env"] = env
+	_sp(R.face.material, "jit", 0.4 + env * 1.4)
+	_sp(R.face.material, "sig", 0.75 + 0.25 * (1.0 - float(randf() < 0.04)))
+	R.face.position.x += (randf() - 0.5) * 3.0 * u * env
+	var tx0 = 6.0 * u + fs * 1.05 + 10.0 * u
+	R.nm.position = Vector2(tx0, 4.0 * u)
+	R.nm.add_theme_font_size_override("font_size", int(17.0 * u))
+	R.tx.position = Vector2(tx0, 30.0 * u)
+	R.tx.size = Vector2(W - tx0 - 8.0 * u, H * op - 46.0 * u)
+	R.tx.add_theme_font_size_override("font_size", int(20.0 * u))
+	R.tx.visible_ratio = clampf(t / (dur * 0.55), 0.0, 1.0)   # Text läuft wie beim Funkspruch mit
+	R.lv.position = Vector2(tx0, H * op - 20.0 * u)
+	R.lv.size = Vector2(W - tx0 - 10.0 * u, 11.0 * u)
+	(R.lv as Control).queue_redraw()
+
+
+func _radio_lv_draw(c: Control) -> void:
+	if not hud.has("radio") or hud.radio.lv != c or radio.is_empty():
+		return
+	var n = 14
+	var e = float(radio.get("env", 0.0))
+	var bw = c.size.x / n
+	var col: Color = CHARS[int(radio.who)][2].lerp(Color(1, 1, 1), 0.3)
+	for i in range(n):
+		var lit = float(i) / n < e * (0.85 + 0.15 * sin(float(i) * 1.7 + float(radio.t) * 30.0))
+		c.draw_rect(Rect2(i * bw + 1.0, 0, bw - 2.0, c.size.y), Color(col, 0.95 if lit else 0.15))
+
+
 # ---------------------------------------------------------------- Cockpit-Ansicht
 # Zwei flache Bilder vor der Kamera: der Gleiter-Rand (art/ck/body.png) und die Hände an den Griffen mit dem
 # Hologramm-Kern (art/ck/hands.png). Beide sind 852 px breit und werden auf Bildschirmbreite gezogen, unten bündig.
@@ -14435,14 +14618,76 @@ void fragment(){
 		sp.material = km
 		root.add_child(sp)
 		sparks.append(sp)
-	ck = {"root": root, "body": body, "hands": hands, "glow": glow, "floor": floor_r, "hud": hdc, "ptr": ptr, "sh": cksh, "smoke": smoke, "sparks": sparks}
+	# Helmvisier (dritte Ansicht): Rand des Visiers, feine Spiegelungen, Atem-Beschlag, Tunnelblick beim Boost
+	var visor = ColorRect.new()
+	visor.set_anchors_preset(Control.PRESET_FULL_RECT)
+	visor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visor.material = _shader_mat("""
+shader_type canvas_item;
+uniform float bo=0.;
+uniform float br=0.;
+uniform float dm=0.;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+void fragment(){
+	vec2 uv=UV;
+	vec2 q=(uv-vec2(.5,.47))*2.;
+	// Visier als abgerundetes Fenster (Superellipse), außen das dunkle Helminnere
+	float d=pow(pow(abs(q.x)/.99,4.)+pow(abs(q.y)/.95,4.),.25);
+	float fr=smoothstep(.955,1.0,d);
+	float rim=smoothstep(.88,.955,d)*(1.-fr);
+	// Tunnelblick: beim Boost zieht sich das Bild zusammen
+	float r=length(q*vec2(1.,.82));
+	float tv=smoothstep(.75-.42*bo,1.25-.45*bo,r)*(.25+.7*bo);
+	// Spiegelungen: zwei weiche, schräge Lichtbahnen, die langsam wandern
+	float rf=smoothstep(.92,1.,sin((uv.x*1.3+uv.y*.7)*5.5+TIME*.25))*.06+smoothstep(.97,1.,sin((uv.x*.8-uv.y*1.1)*7.+1.7-TIME*.18))*.05;
+	// Atem beschlägt das Visier unten, stärker bei wenig Energie
+	float fog=smoothstep(.62,1.,uv.y)*smoothstep(.75,.15,abs(uv.x-.5))*br*(.75+.25*h(floor(uv*60.)));
+	vec3 col=vec3(.015,.018,.03)*fr+vec3(.25,.75,1.)*rim*.5+vec3(.85,.92,1.)*(rf+fog*.6);
+	float a=clamp(max(max(fr,tv),rim*.45)+rf+fog*.45,0.,1.);
+	// Schaden: Riss-Flackern am Rand
+	a=max(a,dm*step(.97,h(floor(uv*vec2(40.,80.))+floor(TIME*12.)))*smoothstep(.6,1.,d));
+	COLOR=vec4(col,a);
+}""")
+	visor.visible = false
+	root.add_child(visor)
+	# Rückspiegel (im Cockpit): eine zweite, kleine Kamera schaut nach hinten
+	var rmv = SubViewport.new()
+	rmv.size = Vector2i(320, 104)
+	rmv.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	rmv.msaa_3d = Viewport.MSAA_DISABLED
+	var rcam = Camera3D.new()
+	rcam.fov = 46.0
+	rcam.far = 220.0
+	rmv.add_child(rcam)
+	rcam.current = true
+	add_child(rmv)
+	var mir = TextureRect.new()
+	mir.texture = rmv.get_texture()
+	mir.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	mir.stretch_mode = TextureRect.STRETCH_SCALE
+	mir.flip_h = true   # gespiegelt wie ein echter Rückspiegel
+	mir.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mfr = Panel.new()
+	var mst = StyleBoxFlat.new()
+	mst.bg_color = Color(0, 0, 0, 0)
+	mst.border_color = Color(0.35, 0.9, 1.0, 0.85)
+	mst.set_border_width_all(3)
+	mst.set_corner_radius_all(14)
+	mst.shadow_color = Color(0.2, 0.8, 1.0, 0.35)
+	mst.shadow_size = 6
+	mfr.add_theme_stylebox_override("panel", mst)
+	mfr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(mir)
+	root.add_child(mfr)
+	ck = {"root": root, "body": body, "hands": hands, "glow": glow, "floor": floor_r, "hud": hdc, "ptr": ptr, "sh": cksh, "smoke": smoke, "sparks": sparks,
+		"visor": visor, "rmv": rmv, "rcam": rcam, "mir": mir, "mfr": mfr}
 
 
 func _ck_on() -> bool:
 	if ships.is_empty():
 		return false
 	if state == "race" or state == "count":
-		return int(cfg.get("view", 0)) == 1 and not ships[0].out
+		return int(cfg.get("view", 0)) >= 1 and not ships[0].out
 	return state == "replay" and not rp.is_empty() and RP_CAMS[rp.ci][0] == "cock"
 
 
@@ -14466,10 +14711,45 @@ func _ck_update(dt: float) -> void:
 		return
 	ck.root.visible = on
 	if not on:
+		(ck.rmv as SubViewport).render_target_update_mode = SubViewport.UPDATE_DISABLED
 		return
 	var g: Dictionary = _focus()
 	var vp = get_viewport().get_visible_rect().size
 	var sc = vp.x / 852.0
+	# Helmvisier statt Cockpit (nur im Rennen; im Replay zeigt „Cockpit“ das Cockpit)
+	var vis = int(cfg.get("view", 0)) == 2 and state != "replay"
+	for k in ["body", "hands", "floor", "ptr", "smoke"]:
+		(ck[k] as CanvasItem).visible = not vis
+	ck.visor.visible = vis
+	if vis:
+		var en = float(g.en)
+		_sp(ck.visor.material, "bo", clampf(float(g.boost), 0.0, 1.0) * 0.6 + clampf(post_spd - 0.32, 0.0, 1.0) * 0.4)
+		var brt = Time.get_ticks_msec() / 1000.0
+		var brs = 0.2 + 0.5 * clampf((0.4 - en) / 0.35, 0.0, 1.0)   # schneller und stärker, wenn's eng wird
+		_sp(ck.visor.material, "br", (0.12 + 0.35 * brs) * (0.5 + 0.5 * sin(brt * (1.3 + 2.0 * brs))))
+		_sp(ck.visor.material, "dm", clampf((0.3 - en) / 0.25, 0.0, 1.0) if state in ["race", "count"] else 0.0)
+	# Rückspiegel: nur im Cockpit, jedes zweite Bild neu (spart Rechenzeit auf dem Handy)
+	var mon = not vis and state in ["race", "count"]
+	ck.mir.visible = mon
+	ck.mfr.visible = mon
+	if mon:
+		var mw = vp.x * 0.5
+		var mh = mw * 104.0 / 320.0
+		var mr = Rect2(Vector2((vp.x - mw) * 0.5, vp.y * 0.105), Vector2(mw, mh))
+		ck.mir.position = mr.position
+		ck.mir.size = mr.size
+		ck.mfr.position = mr.position - Vector2(3, 3)
+		ck.mfr.size = mr.size + Vector2(6, 6)
+		var nb: Basis = (g.node as Node3D).global_transform.basis
+		var gp: Vector3 = (g.node as Node3D).global_position
+		var mup = nb.y.normalized()
+		var mfw = nb.z.normalized()
+		var rc: Camera3D = ck.rcam
+		rc.global_position = gp + mup * 0.55 - mfw * 0.3
+		rc.look_at(gp - mfw * 12.0 + mup * 0.3, mup)
+		(ck.rmv as SubViewport).render_target_update_mode = SubViewport.UPDATE_ONCE if Engine.get_process_frames() % 2 == 0 else SubViewport.UPDATE_DISABLED
+	else:
+		(ck.rmv as SubViewport).render_target_update_mode = SubViewport.UPDATE_DISABLED
 	# unten bündig mit der Mitte der unteren HUD-Leiste: die Leiste verdeckt den Schnitt an den Unterarmen,
 	# und der Hologramm-Kern sitzt frei über dem Waffen-Rad (bei jedem Seitenverhältnis)
 	var by = vp.y - 192.0 * vp.x / GA_W + (float(ckh.push) * 16.0 + float(ckh.lj) * 18.0) * sc
@@ -14567,7 +14847,7 @@ var ckh = {"w": "", "wt": 9.0, "sw": Vector2.ZERO, "gl": 0.0, "vt": 9.0, "mis": 
 
 
 func _ck_core_hit(p: Vector2) -> bool:
-	if ck.is_empty() or not is_instance_valid(ck.glow) or not (ck.root as Control).visible:
+	if ck.is_empty() or not is_instance_valid(ck.glow) or not (ck.root as Control).visible or not (ck.hands as Control).visible:
 		return false
 	var gr: Rect2 = (ck.glow as Control).get_global_rect()
 	return p.distance_to(gr.get_center()) < gr.size.x * 0.55
@@ -16230,7 +16510,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
-	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet"]
+	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet", "radio", "radio_cd", "radio_side"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
