@@ -4045,36 +4045,237 @@ var whale_lap = -1
 var wet = 0.0         # wie nass die Scheibe ist
 
 
-func _spray_node() -> CPUParticles3D:
+# Gischt je Gleiter: ein Halter (folgt Schiff + Fahrbahnlage) mit fünf Emittern, Partikel bleiben in der Welt liegen
+#   tail  = hohe Fontäne direkt hinter dem Antrieb (Hahnenschwanz wie beim Jetboot)
+#   sl/sr = feine Tropfenschleier, die seitlich als Bugwelle wegfächern
+#   mist  = großer, zarter Sprühnebel, der hinter dem Schiff stehen bleibt und sich ausbreitet
+#   dazu je Schiff ein Schaum-Kielwasser (Band aus Dreiecken auf dem Wasser, V-förmig, wird breiter und zerfällt)
+func _spray_part(amount: int, life: float, size: float, tex: Texture2D, flat: bool) -> CPUParticles3D:
 	var p = CPUParticles3D.new()
 	var qm = QuadMesh.new()
-	qm.size = Vector2(0.16, 0.16)
+	qm.size = Vector2(size, size)
+	if flat:
+		qm.orientation = PlaneMesh.FACE_Y
 	var mm = StandardMaterial3D.new()
 	mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	if not flat:
+		mm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+		mm.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_ALPHA   # direkt vor der Kamera ausblenden, sonst beschlägt das Bild
+		mm.distance_fade_min_distance = 0.6
+		mm.distance_fade_max_distance = 3.2
 	mm.vertex_color_use_as_albedo = true
-	mm.albedo_texture = _soft_dot()
+	mm.albedo_texture = tex
+	mm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	qm.material = mm
 	p.mesh = qm
-	p.amount = 60
-	p.lifetime = 0.7
+	p.amount = amount
+	p.lifetime = life
 	p.emitting = false
 	p.local_coords = false
-	p.spread = 28.0
-	p.gravity = Vector3(0, -9.0, 0)
-	p.initial_velocity_min = 2.5
-	p.initial_velocity_max = 5.5
-	p.scale_amount_min = 0.6
-	p.scale_amount_max = 1.8
-	var gr = Gradient.new()
-	gr.offsets = PackedFloat32Array([0.0, 0.25, 1.0])
-	gr.colors = PackedColorArray([Color(0.85, 0.95, 1.0, 0.0), Color(0.8, 0.92, 1.0, 0.75), Color(0.6, 0.8, 1.0, 0.0)])
-	p.color_ramp = gr
-	p.set_meta("keep", true)
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(p)
+	p.set_meta("keep", true)
 	return p
+
+
+func _sgrad(offs: Array, cols: Array) -> Gradient:
+	var gr = Gradient.new()
+	gr.offsets = PackedFloat32Array(offs)
+	gr.colors = PackedColorArray(cols)
+	return gr
+
+
+func _scurve(pts: Array) -> Curve:
+	var c = Curve.new()
+	for q in pts:
+		c.add_point(Vector2(q[0], q[1]))
+	return c
+
+
+var foam_tex: ImageTexture
+
+
+# Schaumfleck: unregelmäßiger, löchriger Kranz aus Bläschen (einmal per Hand gerechnet)
+func _foam_tex() -> ImageTexture:
+	if foam_tex == null:
+		var n = 64
+		var img = Image.create(n, n, false, Image.FORMAT_RGBA8)
+		var rn = RandomNumberGenerator.new()
+		rn.seed = 7
+		var bub = []
+		for k in range(70):
+			var a = rn.randf() * TAU
+			var r = rn.randf_range(0.15, 0.95)
+			bub.append([0.5 + cos(a) * r * 0.45, 0.5 + sin(a) * r * 0.45, rn.randf_range(0.02, 0.07)])
+		for y in range(n):
+			for x in range(n):
+				var u = (x + 0.5) / n
+				var v = (y + 0.5) / n
+				var d = Vector2(u - 0.5, v - 0.5).length() * 2.0
+				var al = 0.0
+				for q in bub:
+					var dd = Vector2(u - q[0], v - q[1]).length()
+					var rr = float(q[2])
+					al = maxf(al, clampf(1.0 - absf(dd - rr) / (rr * 0.55), 0.0, 1.0) * 0.9)   # Bläschenrand
+					if dd < rr:
+						al = maxf(al, 0.25)
+				var ring = exp(-pow((d - 0.62) * 4.0, 2.0))
+				al = clampf(al * (0.35 + ring) * smoothstep(1.0, 0.75, d), 0.0, 1.0)
+				img.set_pixel(x, y, Color(1, 1, 1, al))
+		foam_tex = ImageTexture.create_from_image(img)
+	return foam_tex
+
+
+var wake = []        # je Schiff: {"mi": MeshInstance3D, "im": ImmediateMesh, "pts": [[pos, rr, uu, t], ...]}
+var wake_t = 0.0
+var wake_gen = -1
+const WAKE_LIFE = 1.7
+const WAKE_STEP = 1.2
+var wake_mat: ShaderMaterial
+
+
+func _wake_node() -> Dictionary:
+	if wake_mat == null:
+		wake_mat = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,cull_disabled,blend_mix,depth_draw_never,shadows_disabled;
+varying vec3 wp;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+1.),f.x),f.y);}
+void vertex(){wp=VERTEX;}
+void fragment(){
+	float a=COLOR.a;            // 1 = frisch, 0 = verweht
+	float x=UV.x;               // -1..1 quer übers Band
+	vec2 q=wp.xz*4.2;
+	q+=vec2(n(q*.45+3.1),n(q*.45-7.3))*1.8;                 // verwirbeln, damit nichts kastig wirkt
+	mat2 R=mat2(vec2(.8,.6),vec2(-.6,.8));
+	float f=n(q)*.5+n(R*q*2.13+vec2(TIME*.35,0.))*.3+n(R*R*q*4.71)*.2;
+	float lines=.5+.5*sin(x*7.+f*5.);                      // Schaumschlieren längs der Fahrtrichtung
+	float edge=1.-smoothstep(.4,1.,abs(x));
+	float thr=mix(.74,.36,a*a);                             // frischer Schaum ist dicht, alter reißt in Fetzen auf
+	float fo=smoothstep(thr,thr+.18,f*(.6+.4*edge)*(.8+.3*lines));
+	ALBEDO=vec3(.82,.94,1.)*(.75+.35*f)*COLOR.rgb;
+	ALPHA=clamp(fo*edge*a*.8+edge*a*a*.1,0.,1.);
+}""")
+		wake_mat.render_priority = 2
+	var im = ImmediateMesh.new()
+	var mi = MeshInstance3D.new()
+	mi.mesh = im
+	mi.material_override = wake_mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.set_meta("keep", true)
+	add_child(mi)
+	return {"mi": mi, "im": im, "pts": []}
+
+
+# Kielwasser: Mittelstreifen (aufgewühltes Wasser direkt hinter dem Antrieb) + zwei Arme, die als V auseinanderlaufen
+func _wake_draw(w: Dictionary) -> void:
+	var im: ImmediateMesh = w.im
+	im.clear_surfaces()
+	var pts: Array = w.pts
+	if pts.size() < 2:
+		return
+	for arm in [0.0, -1.0, 1.0]:
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+		for q in pts:
+			var age = clampf((wake_t - float(q[3])) / WAKE_LIFE, 0.0, 1.0)
+			var a = 1.0 - age
+			var off = arm * (0.32 + age * 2.6)
+			var hw = (0.22 + age * 0.35) if arm == 0.0 else (0.14 + age * 0.55)
+			var c: Vector3 = q[0] + q[1] * off + q[2] * (0.012 + age * 0.004)
+			var br = 1.0 if arm == 0.0 else 0.9
+			im.surface_set_color(Color(br, br, br, a))
+			im.surface_set_uv(Vector2(-1.0, 0.0))
+			im.surface_add_vertex(c - q[1] * hw)
+			im.surface_set_color(Color(br, br, br, a))
+			im.surface_set_uv(Vector2(1.0, 0.0))
+			im.surface_add_vertex(c + q[1] * hw)
+		im.surface_end()
+
+
+func _wake_tick(dt: float, i: int, o: Dictionary, on: bool) -> void:
+	while wake.size() <= i:
+		wake.append(_wake_node())
+	var w: Dictionary = wake[i]
+	if not is_instance_valid(w.mi):
+		w = _wake_node()
+		wake[i] = w
+	var pts: Array = w.pts
+	if on:
+		var f = T.frame(float(o.z))
+		var pos: Vector3 = f.c + f.rr * float(o.lat) - f.uu * 0.05 - f.fw * 0.35
+		if pts.is_empty() or (pts[pts.size() - 1][0] as Vector3).distance_to(pos) > WAKE_STEP:
+			pts.append([pos, f.rr, f.uu, wake_t])
+		elif pts.size() >= 2:
+			pts[pts.size() - 1] = [pos, f.rr, f.uu, wake_t]   # Kopf des Bandes klebt am Schiff
+	while not pts.is_empty() and wake_t - float(pts[0][3]) > WAKE_LIFE:
+		pts.pop_front()
+	(w.mi as MeshInstance3D).visible = pts.size() >= 2
+	if pts.size() >= 2 or (w.im as ImmediateMesh).get_surface_count() > 0:
+		_wake_draw(w)
+
+
+func _spray_node() -> Node3D:
+	var h = Node3D.new()
+	h.set_meta("keep", true)
+	add_child(h)
+	var dot = _soft_dot()
+	# Fontäne
+	var tl = _spray_part(150, 0.85, 0.26, dot, false)
+	tl.direction = Vector3(0, 0.85, 0.55)
+	tl.spread = 9.0
+	tl.gravity = Vector3(0, -11.0, 0)
+	tl.initial_velocity_min = 3.5
+	tl.initial_velocity_max = 7.0
+	tl.damping_min = 0.6
+	tl.damping_max = 1.4
+	tl.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	tl.emission_box_extents = Vector3(0.06, 0.02, 0.05)
+	tl.scale_amount_min = 0.5
+	tl.scale_amount_max = 1.3
+	tl.scale_amount_curve = _scurve([[0.0, 0.35], [0.3, 0.9], [1.0, 1.6]])
+	tl.color_ramp = _sgrad([0.0, 0.08, 0.45, 1.0], [Color(1, 1, 1, 0.0), Color(0.95, 0.99, 1.0, 0.95), Color(0.75, 0.9, 1.0, 0.55), Color(0.55, 0.75, 1.0, 0.0)])
+	tl.color_initial_ramp = _sgrad([0.0, 1.0], [Color(0.8, 0.9, 1.0), Color(1, 1, 1)])
+	h.add_child(tl)
+	# Tropfenschleier links/rechts
+	var sides = []
+	for sd in [-1.0, 1.0]:
+		var s2 = _spray_part(90, 0.6, 0.055, dot, false)
+		s2.position = Vector3(sd * 0.3, 0.0, -0.15)
+		s2.direction = Vector3(sd * 0.9, 0.75, 0.45)
+		s2.spread = 14.0
+		s2.flatness = 0.6
+		s2.gravity = Vector3(0, -12.0, 0)
+		s2.initial_velocity_min = 2.0
+		s2.initial_velocity_max = 4.5
+		s2.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		s2.emission_box_extents = Vector3(0.04, 0.01, 0.35)
+		s2.scale_amount_min = 0.5
+		s2.scale_amount_max = 1.4
+		s2.color_ramp = _sgrad([0.0, 0.1, 0.7, 1.0], [Color(1, 1, 1, 0.0), Color(0.92, 0.98, 1.0, 1.0), Color(0.75, 0.9, 1.0, 0.7), Color(0.6, 0.8, 1.0, 0.0)])
+		h.add_child(s2)
+		sides.append(s2)
+	# Sprühnebel
+	var ms = _spray_part(40, 1.6, 0.9, dot, false)
+	ms.position = Vector3(0, 0.15, 0.4)
+	ms.direction = Vector3(0, 1, 0.2)
+	ms.spread = 50.0
+	ms.gravity = Vector3(0, 0.25, 0)
+	ms.initial_velocity_min = 0.4
+	ms.initial_velocity_max = 1.4
+	ms.damping_min = 1.0
+	ms.damping_max = 2.0
+	ms.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	ms.emission_box_extents = Vector3(0.3, 0.1, 0.2)
+	ms.angle_min = 0.0
+	ms.angle_max = 360.0
+	ms.scale_amount_min = 0.7
+	ms.scale_amount_max = 1.3
+	ms.scale_amount_curve = _scurve([[0.0, 0.4], [1.0, 2.2]])
+	ms.color_ramp = _sgrad([0.0, 0.15, 1.0], [Color(0.8, 0.9, 1.0, 0.0), Color(0.75, 0.88, 1.0, 0.13), Color(0.55, 0.7, 1.0, 0.0)])
+	h.add_child(ms)
+	h.set_meta("parts", [tl, sides[0], sides[1], ms])
+	return h
 
 
 var soft_dot_tex: GradientTexture2D
@@ -4101,19 +4302,33 @@ func _water_update(dt: float) -> void:
 	while wsp.size() < ships.size():
 		wsp.append(_spray_node())
 	var racing_w = state in ["race", "done", "replay", "count"]
+	wake_t += dt
+	if wake_gen != race_gen:   # neues Rennen: altes Kielwasser weg
+		wake_gen = race_gen
+		for w in wake:
+			w.pts.clear()
 	for i in range(ships.size()):
 		var o: Dictionary = ships[i]
 		if not is_instance_valid(wsp[i]):   # erst prüfen, dann zuweisen (gelöschtes Objekt in typisierter Variable = Absturz auf dem Handy)
 			wsp[i] = _spray_node()
-		var p: CPUParticles3D = wsp[i]
+		var hn: Node3D = wsp[i]
 		var on = racing_w and not o.out and not bool(o.get("air", false)) and float(o.spd) > 2.0 and T.in_water(T.lz(float(o.z)))
-		p.emitting = on
+		_wake_tick(dt, i, o, on)
+		var pa: Array = hn.get_meta("parts")
+		for q in pa:
+			if is_instance_valid(q):
+				q.emitting = on
 		if on:
 			var f = T.frame(float(o.z))
-			p.global_position = f.c + f.rr * float(o.lat) - f.fw * 0.55 + f.uu * 0.02
-			p.direction = (-f.fw * 0.8 + f.uu * 0.9).normalized()
-			p.initial_velocity_max = 3.0 + float(o.spd) * 0.25
-	# Wal: einmal pro Runde springt er neben der Strecke aus dem Wasser (wenn der Spieler auf den See fährt)
+			var sv = clampf(float(o.spd) / 40.0, 0.3, 1.6)   # Tempo-Anteil: schneller = höhere Fontäne, breiterer Fächer
+			hn.global_transform = Transform3D(Basis(f.rr, f.uu, -f.fw), f.c + f.rr * float(o.lat) - f.fw * 0.5 - f.uu * 0.04)
+			var tl: CPUParticles3D = pa[0]
+			tl.initial_velocity_min = 2.5 + 3.0 * sv
+			tl.initial_velocity_max = 4.5 + 5.0 * sv
+			for k in [1, 2]:
+				var s2: CPUParticles3D = pa[k]
+				s2.initial_velocity_max = 2.5 + 3.5 * sv
+		# Wal: einmal pro Runde springt er neben der Strecke aus dem Wasser (wenn der Spieler auf den See fährt)
 	var g: Dictionary = ships[0]
 	var lzg = T.lz(float(g.z))
 	var lapn = int(floor((float(g.z) - 20.0) / T.LAP))
@@ -14153,14 +14368,19 @@ func _camera(dt: float) -> void:
 	if OS.get_environment("VIEWCAM") != "":
 		# nur zum Testen: freie Kamera „z,seitlich,Höhe,Drehung(Grad)“ – schaut längs der Strecke, gedreht um die Hochachse
 		var vp = OS.get_environment("VIEWCAM").split(",")
+		var rel = vp[0].begins_with("s")   # „s…“ = relativ zum Spieler, Schiffe bleiben sichtbar
+		if rel:
+			vp[0] = str(float(ships[0].z) + float(vp[0].substr(1)))
+			vp[1] = str(float(ships[0].lat) + float(vp[1]))
 		var vf = T.frame(float(vp[0]))
 		var ya = deg_to_rad(float(vp[3]))
 		cam.global_position = vf.c + vf.rr * float(vp[1]) + vf.uu * float(vp[2])
 		var pt = float(vp[4]) if vp.size() > 4 else -0.08
 		cam.look_at(cam.global_position + vf.fw * cos(ya) + vf.rr * sin(ya) + vf.uu * pt, vf.uu)
 		cam.fov = 60.0
-		for o in ships:
-			(o.node as Node3D).visible = false
+		if not rel:
+			for o in ships:
+				(o.node as Node3D).visible = false
 		return
 	if OS.get_environment("TOPCAM") != "":
 		# nur zum Testen: Blick senkrecht von oben auf die Strecke
