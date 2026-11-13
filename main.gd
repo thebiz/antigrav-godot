@@ -1716,6 +1716,7 @@ uniform float z0=%f;
 uniform float z1=%f;
 uniform sampler2D scr : hint_screen_texture, filter_linear;
 uniform vec4 shp[4];          // Gleiter: Weltposition xyz, w = Stärke (0 = nicht auf dem Wasser)
+uniform vec4 shz[4];          // Gleiter für die Schneise: Seitenlage, Strecken-z, Stärke, Tempo
 varying vec3 wp;
 float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
 float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hs(i),hs(i+vec2(1,0)),f.x),mix(hs(i+vec2(0,1)),hs(i+1.),f.x),f.y);}
@@ -1727,18 +1728,31 @@ void fragment(){
 	vec2 p=wp.xz;
 	float lod=length(fwidth(p));   // wie viel Wasser ein Pixel abdeckt: feine Wellen in der Ferne weglassen, sonst flimmert es
 	// Dünung + Kräuselwellen aus verschiedenen Richtungen
-	vec2 g=wv(p,vec2(.287,.958),.7,.12,1.4,t,lod);
-	g+=wv(p,vec2(-.6,.8),1.3,.06,2.,t,lod);
-	g+=wv(p,vec2(.914,.406),2.6,.026,3.1,t,lod);
-	g+=wv(p,vec2(-.196,-.981),4.4,.012,4.2,t,lod);
-	vec2 q=p*2.4+vec2(t*.45,t*.3);
+	// stiller Stadtsee: kaum Dünung, nur feines Windkräuseln (fast ein Spiegel)
+	vec2 g=wv(p,vec2(.287,.958),.6,.018,1.1,t,lod);
+	g+=wv(p,vec2(-.6,.8),1.5,.008,1.7,t,lod);
+	g+=wv(p,vec2(.914,.406),3.4,.004,2.6,t,lod);
+	vec2 q=p*2.4+vec2(t*.3,t*.2);
 	float n0=vn(q);
-	g+=vec2(vn(q+vec2(.08,0.))-n0,vn(q+vec2(0.,.08))-n0)*.12*clamp(1.-lod*6.,0.,1.);
+	g+=vec2(vn(q+vec2(.08,0.))-n0,vn(q+vec2(0.,.08))-n0)*.03*clamp(1.-lod*6.,0.,1.);
+	// Schneise: wo ein Gleiter durch ist, ist das Wasser aufgewühlt (wird hinter ihm breiter und beruhigt sich)
+	float churn=0.;
+	for(int i=0;i<4;i++){
+		float dz=shz[i].y-UV.y;
+		if(shz[i].z>0. && dz>-1. && dz<40.){
+			float w=.35+max(dz,0.)*.07;
+			float ac=(UV.x-shz[i].x)/w;
+			float m=exp(-ac*ac*1.6)*exp(-max(dz,0.)/(7.+shz[i].w*6.))*smoothstep(-1.,.3,dz)*shz[i].z;
+			vec2 qq=p*3.2+vec2(t*2.1,-t*1.7);
+			g+=(vec2(vn(qq),vn(qq.yx*1.13+4.))-.5)*m*1.4;
+			churn=max(churn,m);
+		}
+	}
 	// Wellenringe rund um die Gleiter, nach hinten gezogen (Luftkissen drückt aufs Wasser)
 	for(int i=0;i<4;i++){
 		vec2 d=p-shp[i].xz;
 		float r=length(d*vec2(1.,.55))+.001;
-		g+=(d/r)*sin(r*5.-t*11.)*shp[i].w*exp(-r*1.3)*.16*clamp(1.-lod*4.,0.,1.);
+		g+=(d/r)*sin(r*5.-t*11.)*shp[i].w*exp(-r*1.3)*.1*clamp(1.-lod*4.,0.,1.);
 	}
 	vec3 nw=normalize((INV_VIEW_MATRIX*vec4(NORMAL,0.)).xyz);
 	nw*=sign(nw.y+.0001);
@@ -1766,6 +1780,8 @@ void fragment(){
 	float crest=clamp(length(g)*1.6,0.,1.);
 	vec3 deep=mix(vec3(.0,.02,.045),vec3(.0,.09,.12),crest*.6);
 	vec3 c=mix(deep,refl,clamp(fr*1.25,0.,1.));
+	float fo=smoothstep(.45,.75,vn(p*5.5+vec2(t*1.5,0.)))*churn;   // aufgewühlter Schaum in der Schneise
+	c=mix(c,vec3(.55,.7,.8)*(.5+.5*fr),clamp(fo*.55,0.,1.));
 	// Glitzern: winzige Funken, wo die Kräuselwellen das Licht kippen
 	float sp=pow(vn(p*14.+vec2(t*1.3,-t))*vn(p*9.-t*.7),6.)*fr*5.*clamp(1.-lod*5.,0.,1.);
 	c+=vec3(.7,.85,1.)*sp;
@@ -1777,6 +1793,61 @@ void fragment(){
 	ALBEDO=c;
 	ALPHA=fade;
 }""" % [w0 - 16.0, w1 + 16.0])
+		# Kraftfeldwände über dem See: unsichtbar, bis Wasser dagegenklatscht (Shader „wwall“)
+		var zq = w0 - 2.0
+		while zq < w1 + 6.0 - 0.001:
+			st_z = zq
+			var qst = _st("wwall")
+			var qa = T.frame(zq)
+			var qb = T.frame(zq + 1.0)
+			for sd in [-1.0, 1.0]:
+				var la = sd * WWALL
+				var vo = 0.0 if sd < 0 else 2.0
+				_quad(qst, qa.c + qa.rr * la - qa.uu * 0.05, qb.c + qb.rr * la - qb.uu * 0.05, qb.c + qb.rr * la + qb.uu * 2.6, qa.c + qa.rr * la + qa.uu * 2.6, -qa.rr * sd,
+					Vector2(zq, vo), Vector2(zq + 1.0, vo), Vector2(zq + 1.0, vo + 1.0), Vector2(zq, vo + 1.0))
+			zq += 1.0
+		mats["wwall"] = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,cull_disabled,blend_mix,depth_draw_never,shadows_disabled;
+uniform sampler2D scr : hint_screen_texture, filter_linear;
+uniform vec4 src[8];   // Spritzquelle: Strecken-z des Gleiters, Stärke, Tempo, Seite (-1/1)
+float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hs(i),hs(i+vec2(1,0)),f.x),mix(hs(i+vec2(0,1)),hs(i+1.),f.x),f.y);}
+void fragment(){
+	float side=UV.y>1.5?1.:-1.;
+	float v=UV.y-(side>0.?2.:0.);      // 0 = Wasserlinie, 1 = 2,6 m hoch
+	float z=UV.x;
+	float cover=0.,crest=0.,riv=0.;
+	for(int i=0;i<8;i++){
+		if(src[i].y<=0. || src[i].w!=side) continue;
+		float dz=src[i].x-z;
+		float age=dz/max(src[i].z,5.)-.06;   // Wasser braucht kurz, bis es an der Wand ist
+		if(age<0. || age>2.2) continue;
+		float top=mix(.08,.78*src[i].y+.12,smoothstep(0.,.16,age))-age*.26;   // schießt hoch, sackt dann ab
+		float body=smoothstep(top+.02,top-.1,v)*smoothstep(0.,.05,age);
+		float fade=pow(1.-age/2.2,1.6)*src[i].y;
+		// Rinnsale: senkrechte Bahnen, die nach unten laufen und mit der Zeit dünner werden
+		float r=vn(vec2(z*5.5+float(i)*3.1,v*1.4+age*1.8))*.7+vn(vec2(z*13.,v*3.+age*3.))*.3;
+		float thr=.15+age*.32;
+		float film=mix(smoothstep(thr,thr+.18,r),1.,clamp(1.-age*3.,0.,1.));
+		float ci=body*fade*film;
+		if(ci>cover){cover=ci;riv=r;}
+		crest=max(crest,exp(-pow((v-top)/.035,2.))*clamp(1.-age*1.8,0.,1.)*src[i].y*smoothstep(0.,.05,age));
+	}
+	if(cover+crest<.005) discard;
+	// Wasserfilm bricht das Licht dahinter (Stadt, Neon) wie eine nasse Scheibe
+	vec2 off=vec2(vn(vec2(z*4.,v*6.))-.5,riv-.5)*.045*cover;
+	vec3 bg=texture(scr,SCREEN_UV+off).rgb;
+	// das getroffene Kraftfeld leuchtet in Waben auf
+	vec2 hx=vec2(z*2.4,v*5.2);
+	hx.x+=step(1.,mod(floor(hx.y),2.))*.5;
+	vec2 fh=abs(fract(hx)-.5);
+	float grid=1.-smoothstep(.0,.06,.5-max(fh.x,fh.y));
+	vec3 fc=side<0.?vec3(.2,.85,1.):vec3(1.,.3,.85);
+	vec3 c=bg*1.1+vec3(.55,.8,1.)*(.12+.25*riv)*cover+fc*grid*cover*.55+vec3(.85,.95,1.)*crest*.8;
+	ALBEDO=c;
+	ALPHA=clamp(cover*.85+crest*.6+grid*cover*.3,0.,1.);
+}""")
 		# Bojen: kleine Leuchtkörper alle 2 Einheiten auf Höhe der Bande, links Cyan, rechts Magenta
 		var zb = w0 + 1.0
 		while zb < w1 - 0.5:
@@ -4219,6 +4290,7 @@ var wake = []        # je Schiff: {"mi": MeshInstance3D, "im": ImmediateMesh, "p
 var wake_t = 0.0
 var wake_gen = -1
 const WAKE_LIFE = 1.7
+const WWALL = 2.55   # seitlicher Abstand der Kraftfeldwand über dem See
 const WAKE_STEP = 1.2
 var wake_mat: ShaderMaterial
 
@@ -4304,6 +4376,60 @@ func _wake_tick(dt: float, i: int, o: Dictionary, on: bool) -> void:
 		_wake_draw(w)
 
 
+var sheet_mesh: ArrayMesh
+var sheet_mat: ShaderMaterial
+
+
+# Seitlicher Wasserschleier (wie die „Flügel“ beim Jetboot): gebogene Fläche vom Rumpf nach außen-oben-hinten,
+# nah am Schiff geschlossen, außen reißt sie in Fetzen auf; dahinter wird das Licht gebrochen
+func _sheet_mesh() -> ArrayMesh:
+	if sheet_mesh == null:
+		var st = SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var NU = 14
+		var NV = 8
+		var pts = []
+		for iv in range(NV + 1):
+			var row = []
+			for iu in range(NU + 1):
+				var u = float(iu) / NU
+				var v = float(iv) / NV
+				var x = 0.22 + u * 1.9
+				var y = 0.02 + 1.05 * sin(u * PI * 0.8) * (0.55 + 0.45 * (1.0 - v)) + u * u * 0.1
+				var z = -0.55 + v * 2.4 + u * 1.1
+				row.append([Vector3(x, y, z), Vector2(u, v)])
+			pts.append(row)
+		for iv in range(NV):
+			for iu in range(NU):
+				var q = [pts[iv][iu], pts[iv][iu + 1], pts[iv + 1][iu + 1], pts[iv + 1][iu]]
+				for k in [0, 1, 2, 0, 2, 3]:
+					st.set_uv(q[k][1])
+					st.add_vertex(q[k][0])
+		sheet_mesh = st.commit()
+		sheet_mat = _shader_mat("""
+shader_type spatial;
+render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled;
+uniform sampler2D scr : hint_screen_texture, filter_linear;
+float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hs(i),hs(i+vec2(1,0)),f.x),mix(hs(i+vec2(0,1)),hs(i+1.),f.x),f.y);}
+void fragment(){
+	float u=UV.x,v=UV.y,t=TIME;
+	vec2 q=vec2(u*4.5-t*8.,v*2.6+u*1.5);
+	float n=vn(q)*.55+vn(q*2.3+vec2(-t*11.,1.7))*.3+vn(q*5.1+vec2(-t*15.,0.))*.15;
+	float thr=mix(.12,.78,u)+v*.22;                 // am Rumpf geschlossen, außen in Fetzen
+	float a=smoothstep(thr,thr+.12,n);
+	a*=smoothstep(0.,.06,u)*smoothstep(1.,.7,u)*smoothstep(0.,.08,v)*smoothstep(1.,.45,v);
+	a*=smoothstep(.6,2.4,length(VERTEX));             // nicht direkt vor der Kamera
+	float ln=.5+.5*sin(v*38.+n*7.-u*6.);               // Schlieren im Wasserfilm
+	vec2 off=(vec2(n,vn(q.yx))-.5)*.05*a;
+	vec3 bg=texture(scr,SCREEN_UV+off).rgb;
+	ALBEDO=bg*1.05+vec3(.62,.86,1.)*(.18+.3*ln*smoothstep(thr+.05,thr+.3,n));
+	ALPHA=clamp(a*.8,0.,1.);
+}""")
+		sheet_mat.render_priority = 1
+	return sheet_mesh
+
+
 func _spray_node() -> Node3D:
 	var h = Node3D.new()
 	h.set_meta("keep", true)
@@ -4349,7 +4475,7 @@ func _spray_node() -> Node3D:
 	# Tropfenschleier links/rechts
 	var sides = []
 	for sd in [-1.0, 1.0]:
-		var s2 = _spray_part(80, 0.6, 0.025, dot, false, true)
+		var s2 = _spray_part(50, 0.6, 0.025, dot, false, true)
 		s2.position = Vector3(sd * 0.3, 0.0, -0.15)
 		s2.direction = Vector3(sd * 0.9, 0.75, 0.45)
 		s2.spread = 14.0
@@ -4387,6 +4513,17 @@ func _spray_node() -> Node3D:
 	ms.color_ramp = _sgrad([0.0, 0.15, 1.0], [Color(0.8, 0.9, 1.0, 0.0), Color(0.75, 0.88, 1.0, 0.16), Color(0.55, 0.7, 1.0, 0.0)])
 	h.add_child(ms)
 	h.set_meta("parts", [tl, sides[0], sides[1], ms, bd])
+	var shs = []
+	for sd in [-1.0, 1.0]:
+		var mi = MeshInstance3D.new()
+		mi.mesh = _sheet_mesh()
+		mi.material_override = sheet_mat
+		mi.scale = Vector3(sd, 1, 1)
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.visible = false
+		h.add_child(mi)
+		shs.append(mi)
+	h.set_meta("sheets", shs)
 	return h
 
 
@@ -4431,6 +4568,29 @@ func _water_update(dt: float) -> void:
 					v4 = Vector4(c2.x, c2.y, c2.z, clampf(float(o2.spd) / 30.0, 0.3, 1.0) * (0.4 if bool(o2.get("air", false)) else 1.0))
 			sh.append(v4)
 		(mats["water"] as ShaderMaterial).set_shader_parameter("shp", sh)
+		# Schneise und Spritzwasser an den Wänden: gelten auch noch ein Stück nach dem See, damit die Spur ausläuft
+		var sz = []
+		var sw = []
+		for i in range(4):
+			var a4 = Vector4(0, 0, 0, 0)
+			if i < ships.size():
+				var o3: Dictionary = ships[i]
+				var zl = T.lz(float(o3.z))
+				if racing_w and not o3.out and zl > float(T.WAT[0]) and zl < float(T.WAT[1]) + 40.0:
+					var on3 = T.in_water(zl) and not bool(o3.get("air", false))
+					var stg = clampf(float(o3.spd) / 14.0, 0.3, 1.3) * (1.0 if on3 else 0.75)
+					a4 = Vector4(float(o3.lat), zl, stg, clampf(float(o3.spd) / 16.0, 0.0, 1.5))
+					for sd in [-1.0, 1.0]:
+						var dist = WWALL - sd * float(o3.lat)
+						sw.append(Vector4(zl, clampf(1.55 - dist * 0.28, 0.3, 1.0) * stg, maxf(float(o3.spd), 5.0), sd))
+			sz.append(a4)
+		while sw.size() < 8:
+			sw.append(Vector4(0, 0, 10, 0))
+		(mats["water"] as ShaderMaterial).set_shader_parameter("shz", sz)
+		if mats.has("wwall"):
+			(mats["wwall"] as ShaderMaterial).set_shader_parameter("src", sw)
+			if OS.get_environment("WWDBG") != "" and Engine.get_process_frames() % 20 == 0:
+				print("WWDBG ", sw)
 	for i in range(ships.size()):
 		var o: Dictionary = ships[i]
 		if not is_instance_valid(wsp[i]):   # erst prüfen, dann zuweisen (gelöschtes Objekt in typisierter Variable = Absturz auf dem Handy)
@@ -4442,6 +4602,9 @@ func _water_update(dt: float) -> void:
 		for q in pa:
 			if is_instance_valid(q):
 				q.emitting = on
+		for q in hn.get_meta("sheets", []):
+			if is_instance_valid(q):
+				q.visible = on
 		if on:
 			var f = T.frame(float(o.z))
 			var sv = clampf(float(o.spd) / 40.0, 0.3, 1.6)   # Tempo-Anteil: schneller = höhere Fontäne, breiterer Fächer
@@ -4572,6 +4735,9 @@ func _whale_splash(pos: Vector3, big: float) -> void:
 	mm.vertex_color_use_as_albedo = true
 	mm.albedo_texture = _soft_dot()
 	qm.material = mm
+	qm.material = _streak_mat()   # Tropfenstriche statt Kügelchen
+	qm.size = Vector2(0.07, 0.07)
+	p.particle_flag_align_y = true
 	p.mesh = qm
 	p.amount = int(150 * big)
 	p.lifetime = 1.8
@@ -4597,6 +4763,29 @@ func _whale_splash(pos: Vector3, big: float) -> void:
 	p.global_position = pos
 	p.emitting = true
 	get_tree().create_timer(2.5).timeout.connect(func(): _qf(p))
+	# Wasserwolke dazu, damit es kein Punkteregen ist
+	var pf = _spray_part(int(36 * big), 1.7, 1.3, _puff_tex(), false)
+	pf.one_shot = true
+	pf.explosiveness = 0.8
+	pf.direction = Vector3.UP
+	pf.spread = 30.0
+	pf.gravity = Vector3(0, -6.0, 0)
+	pf.initial_velocity_min = 2.0 * big
+	pf.initial_velocity_max = 8.0 * big
+	pf.damping_min = 0.8
+	pf.damping_max = 1.6
+	pf.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	pf.emission_sphere_radius = 1.8
+	pf.angle_min = 0.0
+	pf.angle_max = 360.0
+	pf.scale_amount_curve = _scurve([[0.0, 0.5], [1.0, 2.0]])
+	pf.color_ramp = _sgrad([0.0, 0.12, 1.0], [Color(0.9, 0.97, 1.0, 0.0), Color(0.85, 0.95, 1.0, 0.5), Color(0.6, 0.8, 1.0, 0.0)])
+	pf.set_meta("deb", true)
+	pf.set_meta("rfx", true)
+	add_child(pf)
+	pf.global_position = pos
+	pf.emitting = true
+	get_tree().create_timer(2.5).timeout.connect(func(): _qf(pf))
 	_snd("splash", -2.0 + 4.0 * big, randf_range(0.9, 1.05), pos)
 
 
