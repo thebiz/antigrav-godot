@@ -68,17 +68,18 @@ var ui = {}
 var menu_t = 0.0
 var last_c = 99
 # Waffen und Energie (wie im alten Spiel)
-const WP = [["rak", 0.2], ["lenk", 0.2], ["mine", 0.12], ["schild", 0.09], ["turbo", 0.11], ["beben", 0.08], ["auto", 0.05], ["wand", 0.07], ["orbs", 0.08]]
-const WP_AI = [["lenk", 0.35], ["rak", 0.25], ["mine", 0.2], ["schild", 0.1], ["turbo", 0.1]]
+const WP = [["rak", 0.17], ["lenk", 0.17], ["mine", 0.12], ["schild", 0.09], ["turbo", 0.11], ["beben", 0.08], ["auto", 0.05], ["wand", 0.07], ["blk", 0.06], ["orbs", 0.08]]
+const WP_AI = [["lenk", 0.33], ["rak", 0.23], ["mine", 0.19], ["schild", 0.1], ["turbo", 0.1], ["blk", 0.05]]
 # eigene Farbe je Waffe, damit man sie im Augenwinkel unterscheiden kann
 const WC = {"rak": Color(1.0, 0.55, 0.12), "lenk": Color(1.0, 0.18, 0.22), "mine": Color(1.0, 0.86, 0.1), "orbs": Color(0.3, 0.6, 1.0),
-	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95)}
+	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95), "blk": Color(0.72, 1.0, 0.12)}
 # kurze Erklärung je Waffe (Hinweise beim ersten Mal und „How to play“)
 const WD = {"rak": "Flies straight ahead – aim by steering.", "lenk": "Locks onto the rival ahead and hits for sure.",
 	"mine": "Drops mines behind you.", "schild": "Protects you from two hits.", "turbo": "A big burst of speed.",
 	"beben": "A shock wave rolls ahead and throws rivals off course.", "auto": "Autopilot for 5 seconds – steers for you.",
-	"wand": "An energy wall ahead – rivals flying through it get zapped.", "orbs": "Glowing orbs circle you and hit anyone close."}
-const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS"}
+	"wand": "An energy wall ahead – rivals flying through it get zapped.", "orbs": "Glowing orbs circle you and hit anyone close.",
+	"blk": "Lights out! For 5 seconds rivals only see the neon lines – they wobble, brake and bump into walls."}
+const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS", "blk": "BLACKOUT"}
 var shots = []
 var mines = []
 var fxs = []
@@ -467,7 +468,7 @@ func _sounds() -> void:
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
-			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "minewarn.wav", "hover.wav", "ignite.wav",
+			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "blackout.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
@@ -685,6 +686,7 @@ uniform float asp=.46;
 uniform float shp=.6;
 uniform float grn=.035;
 uniform int vm=0;   // Cockpit-Sicht: 0 normal, 1 Infrarot, 2 Gitter
+uniform float bo=0.;   // Blackout: alles schwarz, nur Neon leuchtet weiter
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 // Filmkorn-Zufall ohne sin(): bleibt auch bei großen Pixelzahlen gleichmäßig (sin großer Werte wird auf Handy-GPUs ungenau → Muster)
 float hg(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
@@ -769,6 +771,14 @@ void fragment(){
 		gcol+=vec3(0.,.12,.07)*(step(gq.x,.03)+step(gq.y,.03));
 		col=gcol;
 	}
+	// Blackout: nur kräftig farbig leuchtende Stellen (Neon) und sehr Helles (Antriebe) überleben
+	if(bo>0.){
+		float mx=max(col.r,max(col.g,col.b)),mn=min(col.r,min(col.g,col.b));
+		float sat=(mx-mn)/max(mx,.001);
+		float neon=max(smoothstep(.6,.9,mx)*smoothstep(.5,.75,sat),smoothstep(.86,1.,mx));
+		vec3 dk=col*clamp(neon,0.,1.)*1.2+col*.012;
+		col=mix(col,dk,bo);
+	}
 	// Vignette bei Tempo
 	col*=1.-spd*.25*smoothstep(.3,.9,length(cd*vec2(asp,1.))*1.4);
 	COLOR=vec4(col,1.);
@@ -800,6 +810,33 @@ func _post_update(dt: float) -> void:
 	if OS.get_environment("VMODE") != "":
 		cfg.vmode = int(OS.get_environment("VMODE"))   # nur zum Testen
 	_sp(post, "vm", int(cfg.get("vmode", 0)) if _ck_on() else 0)
+	# Blackout: flackert beim Ausgehen kurz, bleibt dunkel, kommt am Ende flackernd zurück (wie Neonröhren)
+	if OS.get_environment("BLKT") != "" and state == "race" and blk_t <= 0.0 and race_t > float(OS.get_environment("BLKT")) and race_t < float(OS.get_environment("BLKT")) + 0.1:
+		blk_t = 5.0
+		blk_d = 5.0
+	var bt = 0.0
+	if blk_t > 0.0 and state in ["race", "count"]:
+		if not get_tree().paused:
+			blk_t = maxf(0.0, blk_t - dt)
+		var el = blk_d - blk_t
+		bt = clampf(el / 0.35, 0.0, 1.0) * clampf(blk_t / 0.7, 0.0, 1.0)
+		if el < 0.35 or blk_t < 0.7:
+			bt *= 0.55 + (0.45 if fposmod(sin(el * 47.0) * 43758.5, 1.0) > 0.35 else 0.0)
+		if blk_t <= 0.0:
+			_snd("neon_buzz", -6.0, 1.2)
+	elif state not in ["race", "count"]:
+		blk_t = 0.0
+	blk_v = bt
+	if city_root != null and is_instance_valid(city_root):
+		city_root.visible = blk_v < 0.7
+	if sky_m != null:
+		sky_m.set_shader_parameter("bk", blk_v)
+	_sp(post, "bo", blk_v)
+	if ck.has("body") and is_instance_valid(ck.body):
+		var dm = 1.0 - 0.85 * blk_v   # Cockpit wird dunkel, nur seine Leuchten bleiben
+		(ck.body as CanvasItem).self_modulate = Color(dm, dm, dm)
+		if ck.has("hands") and is_instance_valid(ck.hands):
+			(ck.hands as CanvasItem).self_modulate = Color(dm, dm, dm)
 	if fwd_cam:
 		post_spd += (sp - post_spd) * (1.0 - exp(-dt / 0.25))
 	else:
@@ -1165,6 +1202,7 @@ func _env() -> void:
 	sky_mat.shader.code = _nz("""
 shader_type sky;
 uniform float sb=1.;uniform float st=1.;uniform float sl=1.;uniform float mn=1.;uniform float hu=0.;uniform float hz=1.;
+uniform float bk=0.;   // Blackout: Himmel und Skyline aus
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 vec3 hr(vec3 c,float a){vec3 k=vec3(.57735);float ca=cos(a);return c*ca+cross(k,c)*sin(a)+k*dot(k,c)*(1.-ca);}
 float vn(vec2 p){vec2 i=floor(p);vec2 f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x),mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.)),f.x),f.y);}
@@ -1191,7 +1229,7 @@ void sky(){
 			if(h>bh-.0025)c+=(h21(vec2(bx,9.))>.5?vec3(0.,.78,1.):vec3(1.,.06,.42))*1.5;}}
 	c+=hr(vec3(.5,.12,.45)*exp(-abs(h)*22.)*.22,hu*6.2832)*sb*hz;   // Dunst über der Skyline (Regler)
 	if(h<-.04)c=mix(c,vec3(.006,.005,.012),smoothstep(-.04,-.15,h));
-	COLOR=c;
+	COLOR=c*(1.-bk);
 }
 """, [["vec3(.04,.02,.07),vec3(.002,.003,.012)", "vec3(.05),vec3(.004)"], ["vec3(.3,.8,1.):vec3(1.,.7,.45)", "vec3(.9):vec3(.7)"],
 		["(h21(vec2(bx,9.))>.5?vec3(0.,.78,1.):vec3(1.,.06,.42))", "(h21(vec2(bx,9.))>.7?vec3(1.,.36,.03):vec3(.55))"],
@@ -4152,6 +4190,9 @@ var whale = {}        # laufender Wal-Sprung
 var whale_lap = -1
 var wet = 0.0         # wie nass die Scheibe ist
 var blind = 0.0       # Gischtwand auf der Scheibe (durch fremde Fahne gefahren)
+var blk_t = 0.0       # Blackout gegen dich: Restzeit
+var blk_d = 1.0       # … Gesamtdauer
+var blk_v = 0.0       # wie dunkel es gerade ist (0 … 1)
 
 
 # Gischt je Gleiter: ein Halter (folgt Schiff + Fahrbahnlage) mit fünf Emittern, Partikel bleiben in der Welt liegen
@@ -9225,6 +9266,10 @@ func _drop_one(o: Dictionary, k: int, lat_o := 999.0, back := 0.0, gid := 0) -> 
 # Gegner sammeln an den Waffenfeldern auch etwas ein und setzen es klug ein
 func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 	o.shield = maxf(0.0, o.shield - dt)
+	if float(o.get("blk", 0.0)) > 0.0:
+		o.blk = maxf(0.0, float(o.blk) - dt)
+		if racing and not o.out:
+			o.slow = minf(float(o.slow), 0.8)   # im Dunkeln: Fuß vom Gas
 	if not racing or o.out:
 		return
 	if o.turbo > 0.0:
@@ -9273,6 +9318,13 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 			for x in ships:
 				if x.idx != o.idx and not x.out and o.z - x.z > 2.0 and o.z - x.z < 14.0:
 					_drop_mines(o, sup)
+					o.wpn = ""
+					break
+		"blk":
+			# Licht aus, sobald jemand in der Nähe ist (vor oder hinter ihm)
+			for x in ships:
+				if x.idx != o.idx and not x.out and absf(x.z - o.z) < 35.0:
+					_blackout(o, 7.0 if sup else 5.0)
 					o.wpn = ""
 					break
 		_:
@@ -9474,6 +9526,26 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			g.ahold = false
 			g.sauto = sup
 			_snd("shield")
+		"blk":
+			_blackout(g, 7.0 if sup else 5.0)
+
+
+# Blackout: allen anderen geht das Licht aus – nur Neon bleibt. Gegner fahren unsicher, du (als Opfer) siehst fast nichts mehr.
+func _blackout(src: Dictionary, dur: float) -> void:
+	_snd("blackout", 2.0)
+	for x in ships:
+		if x.idx == src.idx or x.out:
+			continue
+		if x.idx == 0:
+			blk_t = maxf(blk_t, dur)
+			blk_d = maxf(blk_t, 0.1)
+			_msg("BLACKOUT", Color(0.72, 1.0, 0.12))
+			_vib(80, 0.7)
+		else:
+			x.blk = maxf(float(x.get("blk", 0.0)), dur)
+	if src.idx == 0:
+		_msg("LIGHTS OUT FOR THEM", Color(0.72, 1.0, 0.12))
+		_flash(Color(0.0, 0.0, 0.0), 0.25)
 
 
 # MEGA: jede Waffe hat ihre eigene, große Wirkung – stark, aber kein Sofortsieg (höchstens ~40 % Schaden je Gegner)
@@ -9528,6 +9600,9 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 			g.shield = maxf(g.shield, 8.0)
 			g.mshield = 8.0
 			_snd("shield")
+		"blk":
+			# 9 s Blackout für alle anderen
+			_blackout(g, 9.0)
 		"wand":
 			# zwei Barrieren hintereinander: bremsen deutlich, je 20 % Schaden (zusammen 40 %)
 			for dz in [20.0, 30.0]:
@@ -9850,6 +9925,12 @@ func _wicon(c: CanvasItem, p: Vector2, s: float, w: String, col: Color) -> void:
 				var x = -s * 0.75 + i * s * 0.5
 				c.draw_line(p + Vector2(x, -s * 0.8), p + Vector2(x, s * 0.8), col, lw, true)
 			c.draw_line(p + Vector2(-s * 0.9, -s * 0.8), p + Vector2(s * 0.9, -s * 0.8), col, lw, true)
+		"blk":
+			# Auge mit Strich: Licht aus
+			c.draw_arc(p + Vector2(0, s * 0.55), s * 0.95, -PI * 0.8, -PI * 0.2, 20, col, lw, true)
+			c.draw_arc(p - Vector2(0, s * 0.55), s * 0.95, PI * 0.2, PI * 0.8, 20, col, lw, true)
+			c.draw_circle(p, s * 0.22, col)
+			c.draw_line(p + Vector2(-s * 0.8, s * 0.8), p + Vector2(s * 0.8, -s * 0.8), col, lw, true)
 		"orbs":
 			c.draw_arc(p, s * 0.7, 0.0, TAU, 32, Color(col.r, col.g, col.b, col.a * 0.5), lw * 0.7, true)
 			for i in range(3):
@@ -9925,7 +10006,7 @@ func _show_help(on: bool) -> void:
 		["wpad", "Weapon pad", "A spinning ring. Fly through it to pick up a random weapon."],
 		["fire", "Fire", "Tap the round FIRE button at the bottom to use your weapon."],
 		["#", "Weapons", ""]]
-	for w in ["rak", "lenk", "mine", "orbs", "wand", "beben", "schild", "turbo", "auto"]:
+	for w in ["rak", "lenk", "mine", "orbs", "wand", "beben", "schild", "turbo", "auto", "blk"]:
 		rows.append([w, WN[w].capitalize(), WD[w]])
 	rows += [["#", "Power-ups", ""],
 		["super", "Super", "Keep your weapon and fly over 2 more weapon pads – it turns SUPER: stronger and gold."],
@@ -12727,7 +12808,11 @@ func _ai_inp(o: Dictionary, t: float, dt: float) -> float:
 	var tg = o.lane + signf(d2) * minf(0.5, absf(d2) * 45.0)
 	if T.pipe_k(zz + 14.0) > 0.9:
 		tg = 0.75 * PI * T.PR * sin(zz * 0.03 + float(o.ai) * 1.7)   # in der Röhre: Gegner kreisen an Wände und Decke
-	o.tl += (tg - o.tl) * (1.0 - exp(-dt / 1.2))
+	var bk = float(o.get("blk", 0.0))
+	if bk > 0.0:
+		# geblendet: schlingert unsicher hin und her und trifft öfter die Bande
+		tg += (sin(race_t * 1.25 + float(o.ai)) * 1.4 + sin(race_t * 2.9 + float(o.ai) * 2.3) * 0.7) * clampf(bk, 0.0, 1.0)
+	o.tl += (tg - o.tl) * (1.0 - exp(-dt / (0.5 if bk > 0.0 else 1.2)))
 	var turn: float = T.kap(zz) * spd
 	var vd = clampf((o.tl - o.lat) / 0.9, -3.0, 3.0)
 	var vdes = asin(clampf(vd / spd, -0.3, 0.3))
@@ -14217,6 +14302,11 @@ func _shot() -> void:
 						ships[1].z = ships[0].z + float(OS.get_environment("PLUMET"))
 						ships[1].lat = ships[0].lat
 						ships[1].spd = ships[0].spd
+				if OS.get_environment("BLKFIRE") != "":   # Test: du feuerst Blackout
+					if shot_n == 40:
+						_blackout(ships[0], 5.0)
+					if shot_n % 10 == 0:
+						print("BLK n=", shot_n, " ", ships.map(func(x): return [snappedf(float(x.lat), 0.01), snappedf(float(x.get("blk", 0.0)), 0.1), snappedf(float(x.spd), 0.1)]))
 				if OS.get_environment("MAGT") != "" and shot_n % 5 == 0:
 					print("MAG z=", snappedf(float(ships[0].z), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " wpn=", ships[0].wpn)
 				if OS.get_environment("PLUMET") != "" and shot_n % 10 == 0:
@@ -17128,7 +17218,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
-	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet", "blind", "radio", "radio_cd", "radio_side"]
+	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet", "blind", "blk_t", "blk_v", "radio", "radio_cd", "radio_side"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
