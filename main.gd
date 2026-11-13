@@ -2135,7 +2135,8 @@ void fragment(){
 		for wp in wpads:
 			var bm = _pillar_node()
 			var f = T.sframe(wp[0], wp[1])
-			bm.transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.uu * 1.1)
+			var wsc = 1.0 + 0.8 * T.pipe_k(wp[0])   # in der Röhre breiter, passend zur größeren Trefferbreite
+			bm.transform = Transform3D(Basis(f.rr * wsc, f.uu, f.fw * wsc), f.c + f.uu * 1.1)
 			n.add_child(bm)
 			beam_n.append(bm)
 		laps.append(n)
@@ -4150,6 +4151,7 @@ var wsp = []          # Gischt je Schiff
 var whale = {}        # laufender Wal-Sprung
 var whale_lap = -1
 var wet = 0.0         # wie nass die Scheibe ist
+var blind = 0.0       # Gischtwand auf der Scheibe (durch fremde Fahne gefahren)
 
 
 # Gischt je Gleiter: ein Halter (folgt Schiff + Fahrbahnlage) mit fünf Emittern, Partikel bleiben in der Welt liegen
@@ -4289,7 +4291,7 @@ func _foam_tex() -> ImageTexture:
 var wake = []        # je Schiff: {"mi": MeshInstance3D, "im": ImmediateMesh, "pts": [[pos, rr, uu, t], ...]}
 var wake_t = 0.0
 var wake_gen = -1
-const WAKE_LIFE = 1.7
+const WAKE_LIFE = 3.0
 const WWALL = 2.55   # seitlicher Abstand der Kraftfeldwand über dem See
 const WAKE_STEP = 1.2
 var wake_mat: ShaderMaterial
@@ -4341,8 +4343,8 @@ func _wake_draw(w: Dictionary) -> void:
 		for q in pts:
 			var age = clampf((wake_t - float(q[3])) / WAKE_LIFE, 0.0, 1.0)
 			var a = 1.0 - age
-			var off = arm * (0.32 + age * 2.6)
-			var hw = (0.22 + age * 0.35) if arm == 0.0 else (0.14 + age * 0.55)
+			var off = arm * (0.38 + age * 1.6)
+			var hw = (0.42 + age * 0.9) if arm == 0.0 else (0.18 + age * 0.45)
 			var c: Vector3 = q[0] + q[1] * off + q[2] * (0.012 + age * 0.004)
 			var br = 1.0 if arm == 0.0 else 0.9
 			im.surface_set_color(Color(br, br, br, a))
@@ -4512,7 +4514,28 @@ func _spray_node() -> Node3D:
 	ms.scale_amount_curve = _scurve([[0.0, 0.4], [1.0, 2.2]])
 	ms.color_ramp = _sgrad([0.0, 0.15, 1.0], [Color(0.8, 0.9, 1.0, 0.0), Color(0.75, 0.88, 1.0, 0.16), Color(0.55, 0.7, 1.0, 0.0)])
 	h.add_child(ms)
-	h.set_meta("parts", [tl, sides[0], sides[1], ms, bd])
+	# Gischtfahne: dichte, weiße Wolkenbank, die lange hinter dem Gleiter über dem Wasser stehen bleibt und verweht
+	var pl = _spray_part(80, 3.0, 1.5, puff, false)
+	pl.position = Vector3(0, 0.25, 0.9)
+	pl.direction = Vector3(0, 0.6, 1.0)
+	pl.spread = 35.0
+	pl.gravity = Vector3(0, 0.15, 0)
+	pl.initial_velocity_min = 0.8
+	pl.initial_velocity_max = 2.6
+	pl.damping_min = 0.6
+	pl.damping_max = 1.2
+	pl.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	pl.emission_box_extents = Vector3(0.45, 0.2, 0.3)
+	pl.angle_min = 0.0
+	pl.angle_max = 360.0
+	pl.angular_velocity_min = -20.0
+	pl.angular_velocity_max = 20.0
+	pl.scale_amount_min = 0.8
+	pl.scale_amount_max = 1.3
+	pl.scale_amount_curve = _scurve([[0.0, 0.35], [0.25, 1.1], [1.0, 2.6]])
+	pl.color_ramp = _sgrad([0.0, 0.05, 0.35, 1.0], [Color(0.95, 0.98, 1.0, 0.0), Color(0.95, 0.98, 1.0, 0.62), Color(0.85, 0.92, 1.0, 0.4), Color(0.7, 0.8, 0.95, 0.0)])
+	h.add_child(pl)
+	h.set_meta("parts", [tl, sides[0], sides[1], ms, bd, pl])
 	var shs = []
 	for sd in [-1.0, 1.0]:
 		var mi = MeshInstance3D.new()
@@ -4634,13 +4657,29 @@ func _water_update(dt: float) -> void:
 		wtar = 1.0 if _ck_on() else 0.45
 	if not whale.is_empty() and float(whale.t) > 2.4 and float(whale.t) < 3.2 and absf(float(whale.z) - float(g.z)) < 26.0:
 		wtar = maxf(wtar, 1.0 if _ck_on() else 0.7)   # der Wal klatscht zurück: Wasser bis auf die Scheibe
+	# durch fremde Gischtfahne: Scheibe kurz zu, dann reißt der Fahrtwind das Wasser zu den Seiten weg
+	var btar = 0.0
+	if state == "race" and not g.out and not g.air and lzg > float(T.WAT[0]) - 2.0 and lzg < float(T.WAT[1]) + 6.0:
+		var fg = T.frame(float(g.z))
+		var gp: Vector3 = fg.c + fg.rr * float(g.lat)
+		for i in range(1, mini(wake.size(), ships.size())):
+			for q in wake[i].pts:
+				var ag = wake_t - float(q[3])
+				if ag > 0.15 and ag < 2.4 and (q[0] as Vector3).distance_to(gp) < 1.5:
+					btar = maxf(btar, 1.0 - ag / 3.0)
+	if OS.get_environment("BLIND") != "":
+		btar = float(OS.get_environment("BLIND"))
+	blind = move_toward(blind, btar, dt * (6.0 if btar > blind else 0.75))
+	if btar > 0.3:
+		wtar = maxf(wtar, 1.0)
 	wet = move_toward(wet, wtar, dt * (2.0 if wtar > wet else 0.45))
 	if OS.get_environment("WET") != "":
 		wet = float(OS.get_environment("WET"))
 	if hud.has("drops") and is_instance_valid(hud.drops):
-		hud.drops.visible = wet > 0.01
-		if wet > 0.01:
+		hud.drops.visible = wet > 0.01 or blind > 0.01
+		if hud.drops.visible:
 			_sp(hud.drops.material, "wet", wet)
+			_sp(hud.drops.material, "fog", blind)
 
 
 # Wal: dunkler Körper mit Neon-Saum, aus Ringen gebaut; Schwanzflosse und Brustflossen als flache Flächen
@@ -6827,7 +6866,9 @@ func _hud() -> void:
 shader_type canvas_item;
 uniform sampler2D scr:hint_screen_texture,filter_linear_mipmap;
 uniform float wet=0.;
+uniform float fog=0.;
 float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+1.),f.x),f.y);}
 void fragment(){
 	vec2 uv=SCREEN_UV;
 	vec2 off=vec2(0.);
@@ -6860,7 +6901,24 @@ void fragment(){
 		}
 	}
 	vec3 col=textureLod(scr,uv-off*.4,1.).rgb*1.05+hi*.5+vec3(.6,.8,1.)*m*.22;   // helle, gischtige Schlieren
-	COLOR=vec4(col,clamp(m*1.2,0.,1.)*clamp(wet*1.5,0.,1.));
+	float al=clamp(m*1.2,0.,1.)*clamp(wet*1.5,0.,1.);
+	if(fog>.005){
+		// Wasserwand auf der Scheibe: weißlich, verschwommen; wird von der Mitte aus nach außen weggeblasen
+		vec2 d=(uv-vec2(.5,.45))*vec2(1.,.62);
+		float r=length(d);
+		vec2 dir=d/max(r,.001);
+		float ang=atan(d.y,d.x);
+		float strk=vn(vec2(ang*9.,r*3.-TIME*5.))*.6+vn(vec2(ang*23.,r*8.-TIME*9.))*.4;   // radiale Schlieren nach außen
+		float clr=(1.-fog)*.75;
+		float fm=smoothstep(clr-.08,clr+.18,r+(strk-.5)*.2)*smoothstep(0.,.25,fog);
+		fm=max(fm,smoothstep(.55,1.,fog)*.9);
+		vec2 wo=dir*(strk-.5)*.05*fog;
+		vec3 blur=textureLod(scr,uv+wo,3.5).rgb;
+		vec3 fc=mix(blur*1.2,vec3(.82,.9,.98),.55+.25*strk)+vec3(1.)*pow(strk,4.)*.35;
+		col=mix(col,fc,fm);
+		al=max(al,fm*.93);
+	}
+	COLOR=vec4(col,al);
 }""")
 	cl.add_child(drops)
 	hud.drops = drops
@@ -10739,7 +10797,20 @@ func _weapons(dt: float, racing: bool) -> void:
 	var wz = (zz - _wzp(wk)) / 35.0
 	if wz < 0.0 or not _pad_ok(_wzp(wk)):
 		wz = 9.0
-	if racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < float(fx.pillar.get("hitw", 0.5)) and wk != g.wpK and (g.wpn == "" or not g.get("mega", false)):
+	# Magnet: kurz vor einer Waffensäule zieht sie dich sanft auf ihre Spur (danebenzielen wird verziehen, hinsteuern musst du trotzdem)
+	var can_pick = g.wpn == "" or not g.get("mega", false)
+	if racing and can_pick and not g.air:
+		for kk in [wk, wk + 1]:
+			if posmod(kk, 2) != 0 or kk == g.wpK or not _pad_ok(_wzp(kk)):
+				continue
+			var dz = _wzp(kk) - zz
+			var dl = _wpx(kk) - float(g.lat)
+			var reach = 1.5 + 0.9 * T.pipe_k(zz)
+			if dz > -0.5 and dz < 16.0 and absf(dl) < reach:
+				var pull = (1.0 - clampf(dz / 16.0, 0.0, 1.0)) * (3.2 + 2.0 * T.pipe_k(zz))
+				g.lat = float(g.lat) + dl * clampf(pull * dt, 0.0, 0.5)
+	var hitw = float(fx.pillar.get("hitw", 0.5)) * (1.0 + 0.8 * T.pipe_k(zz))   # in der Röhre breiter
+	if racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < hitw and wk != g.wpK and (g.wpn == "" or not g.get("mega", false)):
 		g.wpK = wk
 		if g.wpn == "":
 			g.wpn = _pick_w()
@@ -14136,6 +14207,20 @@ func _shot() -> void:
 			if p.size() > 3 and p[3].begins_with("go"):
 				if shot_n == 3 and float(p[1]) > 0.0:
 					ships[0].z = float(p[1])
+					if OS.get_environment("MAGT") != "":   # Test: neben die nächste Waffensäule setzen (Magnet)
+						var mk = int(ceil((float(ships[0].z) - 17.0) / 35.0))
+						if posmod(mk, 2) != 0:
+							mk += 1
+						ships[0].lat = _wpx(mk) + float(OS.get_environment("MAGT"))
+						print("MAGT pad z=", _wzp(mk), " lat=", _wpx(mk))
+					if OS.get_environment("PLUMET") != "":   # Test: Gegner direkt vor dich setzen (Gischtfahne)
+						ships[1].z = ships[0].z + float(OS.get_environment("PLUMET"))
+						ships[1].lat = ships[0].lat
+						ships[1].spd = ships[0].spd
+				if OS.get_environment("MAGT") != "" and shot_n % 5 == 0:
+					print("MAG z=", snappedf(float(ships[0].z), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " wpn=", ships[0].wpn)
+				if OS.get_environment("PLUMET") != "" and shot_n % 10 == 0:
+					print("PLUME z=", snappedf(float(ships[0].z), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " ai z=", snappedf(float(ships[1].z), 0.1), " lat=", snappedf(float(ships[1].lat), 0.01), " blind=", snappedf(blind, 0.01))
 				return
 			if shot_s.contains("resbtest") and shot_n % 50 == 0 and hud.has("resb"):
 				print("RESB n=", shot_n, " a=", (hud.resb as CanvasItem).modulate.a, " armed=", resb_armed, " t=", resb_t, " fingers=", fingers.size(), " vis=", hud.resb.visible)
@@ -17043,7 +17128,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
-	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet", "radio", "radio_cd", "radio_side"]
+	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet", "blind", "radio", "radio_cd", "radio_side"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
