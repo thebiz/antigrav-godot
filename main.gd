@@ -57,7 +57,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "view": 0, "vmode": 0, "trk": 1}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -7910,6 +7910,13 @@ func _menu() -> void:
 		_save_cfg()
 		bkc.text = "Kill cam: " + ("On" if int(cfg.kcam) == 1 else "Off"))
 	sp.add_child(bkc)
+	var bmc = _btn("Missile cam: " + ("On" if int(cfg.get("mcam", 1)) == 1 else "Off"))
+	bmc.add_theme_font_size_override("font_size", 30)
+	bmc.pressed.connect(func():
+		cfg.mcam = 1 - int(cfg.get("mcam", 1))
+		_save_cfg()
+		bmc.text = "Missile cam: " + ("On" if int(cfg.mcam) == 1 else "Off"))
+	sp.add_child(bmc)
 	var HN = ["Classic", "Dragon gauge", "Gothic altar"]
 	var bhd = _btn("HUD style: " + HN[clampi(int(cfg.get("hud", 2)), 0, 2)])
 	bhd.add_theme_font_size_override("font_size", 30)
@@ -9100,7 +9107,7 @@ func _shield_break(o: Dictionary) -> void:
 
 
 func _prot(o: Dictionary) -> bool:
-	return o.shield > 0.0 or o.orbs > 0.0 or (o.idx == 0 and o.auto > 0.0)
+	return o.shield > 0.0 or o.orbs > 0.0 or (o.idx == 0 and (o.auto > 0.0 or not mc.is_empty()))
 
 
 func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
@@ -9486,6 +9493,8 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			_add_shot(g, false, true, 1.0, false, sup)
 			if sup:
 				_braid(shots[shots.size() - 1], 2)
+			if g.idx == 0:
+				_mc_start(shots[shots.size() - 1])
 		"mine":
 			_drop_mines(g, sup)
 		"orbs":
@@ -12684,7 +12693,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	s.vpsi = clampf(s.vpsi + ((s.psi - s.vpsi) * grip + turn) * dt, -0.9, 0.9)
 	if is_p and not s.air and racing and not s.out:
 		_assist(s, dt)
-	var ap = is_p and (s.auto > 0.0 or state == "done" or state == "replay") and not s.out
+	var ap = is_p and (s.auto > 0.0 or state == "done" or state == "replay" or not mc.is_empty()) and not s.out
 	if ap:
 		# Autopilot wie im alten Spiel: ruhig auf die Mittellinie gleiten, dann schnurgerade, nichts bremst ihn
 		s.u = 0.0
@@ -14302,6 +14311,13 @@ func _shot() -> void:
 						ships[1].z = ships[0].z + float(OS.get_environment("PLUMET"))
 						ships[1].lat = ships[0].lat
 						ships[1].spd = ships[0].spd
+				if OS.get_environment("MCT") != "":   # Test: Gegner vor dich setzen und Lenkrakete feuern (Raketenkamera)
+					if shot_n == 30:
+						ships[1].z = ships[0].z + float(OS.get_environment("MCT"))
+						ships[1].lat = ships[0].lat + 0.8
+						_fire_w(ships[0], "lenk", false)
+					if shot_n % 4 == 0:
+						print("MC n=", shot_n, " on=", not mc.is_empty(), " hold=", snappedf(float(mc.get("hold", -9.0)), 0.01), " camd=", snappedf(cam.global_position.distance_to((ships[0].node as Node3D).global_position), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " shots=", shots.size())
 				if OS.get_environment("BLKFIRE") != "":   # Test: du feuerst Blackout
 					if shot_n == 40:
 						_blackout(ships[0], 5.0)
@@ -14803,11 +14819,98 @@ func _pose_all(dt: float) -> void:
 
 
 # Kamera: hinter dem Gleiter, folgt der Nase gedämpft, bleibt beim Boost kurz zurück
+# ---------------------------------------------------------------- Raketenkamera
+# Feuerst du eine Lenkrakete, fliegt die Kamera mit ihr bis zum Einschlag, bleibt danach noch gut eine Sekunde
+# auf der Explosion und springt dann zurück. Solange steuert der Autopilot (und du bist geschützt).
+var mc = {}
+
+
+func _mc_start(sh: Dictionary) -> void:
+	if int(cfg.get("mcam", 1)) != 1 or state != "race" or sh.get("tg") == null:
+		return
+	mc = {"sh": sh, "t": 0.0, "hold": -1.0, "p": Vector3.ZERO, "l": Vector3.ZERO, "pm": Vector3.ZERO, "up": Vector3.UP, "new": true}
+	_flash(Color(1, 1, 1), 0.12)
+	if hud.has("mcl") and is_instance_valid(hud.mcl):
+		hud.mcl.queue_free()
+	var lb = Label.new()
+	lb.text = "●  MISSILE CAM"
+	lb.add_theme_font_size_override("font_size", 26)
+	lb.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+	lb.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	lb.add_theme_constant_override("outline_size", 6)
+	lb.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lb.offset_top = get_viewport().get_visible_rect().size.y * 0.165
+	lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.layer.add_child(lb)
+	hud.mcl = lb
+
+
+func _mc_end() -> void:
+	if mc.is_empty():
+		return
+	mc = {}
+	if hud.has("mcl") and is_instance_valid(hud.mcl):
+		hud.mcl.queue_free()
+	hud.erase("mcl")
+	if state == "race":
+		_flash(Color(1, 1, 1), 0.1)
+
+
+func _mc_cam(dt: float) -> bool:
+	if mc.is_empty():
+		if hud.has("mcl"):   # nach Neustart übrig gebliebene Anzeige wegräumen
+			if is_instance_valid(hud.mcl):
+				hud.mcl.queue_free()
+			hud.erase("mcl")
+		return false
+	if state != "race" or ships.is_empty() or ships[0].out:
+		_mc_end()
+		return false
+	mc.t += dt
+	if hud.has("mcl") and is_instance_valid(hud.mcl):
+		(hud.mcl as Label).modulate.a = 0.55 + 0.45 * (1.0 if fmod(mc.t, 0.8) < 0.5 else 0.0)
+	var sh: Dictionary = mc.sh
+	if mc.hold < 0.0:
+		if shots.has(sh) and is_instance_valid(sh.n) and mc.t < 6.0:
+			var P: Vector3 = (sh.n as Node3D).global_position
+			var f = T.sframe(float(sh.z), float(sh.lat))
+			var fw: Vector3 = f.fw * float(sh.dir)
+			var look = P + fw * 9.0
+			var tg = sh.get("tg")
+			if tg != null and not tg.out:
+				look = look.lerp((tg.node as Node3D).global_position, 0.55)
+			var want = P - fw * 1.5 + f.uu * 0.42
+			mc.p = want if mc.new else (mc.p as Vector3).lerp(want, 1.0 - exp(-dt * 20.0))
+			mc.l = look if mc.new else (mc.l as Vector3).lerp(look, 1.0 - exp(-dt * 14.0))
+			mc.pm = P
+			mc.up = f.uu
+			mc.new = false
+		else:
+			mc.hold = 1.2   # Einschlag: noch kurz draufhalten
+			mc.l = mc.pm
+	else:
+		mc.hold -= dt
+		# langsam zurückweichen und etwas steigen, Blick bleibt auf der Explosion
+		var back: Vector3 = ((mc.p as Vector3) - (mc.pm as Vector3)).normalized()
+		mc.p = (mc.p as Vector3) + (back * 2.2 + (mc.up as Vector3) * 0.8) * dt
+		if mc.hold <= 0.0:
+			_mc_end()
+			return false
+	cam.global_position = mc.p
+	if ((mc.l as Vector3) - (mc.p as Vector3)).length() > 0.01:
+		cam.look_at(mc.l, mc.up)
+	cam.fov = 74.0
+	return true
+
+
 func _camera(dt: float) -> void:
 	_ck_update(dt)
 	if state == "replay" and _rp_cam(dt):
 		return
 	if state == "kill" and _kc_cam():
+		return
+	if _mc_cam(dt):
 		return
 	if state == "done" and _fly_cam(dt):
 		return
@@ -15395,7 +15498,7 @@ func _ck_on() -> bool:
 	if ships.is_empty():
 		return false
 	if state == "race" or state == "count":
-		return int(cfg.get("view", 0)) >= 1 and not ships[0].out
+		return int(cfg.get("view", 0)) >= 1 and not ships[0].out and mc.is_empty()
 	return state == "replay" and not rp.is_empty() and RP_CAMS[rp.ci][0] == "cock"
 
 
@@ -17218,7 +17321,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
 	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
-	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet", "blind", "blk_t", "blk_v", "radio", "radio_cd", "radio_side"]
+	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet", "blind", "blk_t", "blk_v", "mc", "radio", "radio_cd", "radio_side"]
 var race0 = {}
 var ships0 = []
 var race_kids = []
