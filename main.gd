@@ -77,7 +77,7 @@ const WC = {"rak": Color(1.0, 0.55, 0.12), "lenk": Color(1.0, 0.18, 0.22), "mine
 const WD = {"rak": "Flies straight ahead – aim by steering.", "lenk": "Locks onto the rival ahead and hits for sure.",
 	"mine": "Drops mines behind you.", "schild": "Protects you from two hits.", "turbo": "A big burst of speed.",
 	"beben": "A shock wave rolls ahead and throws rivals off course.", "auto": "Autopilot for 5 seconds – steers for you.",
-	"wand": "An energy wall ahead – rivals flying through it get zapped.", "orbs": "Glowing orbs circle you and hit anyone close.",
+	"wand": "An energy wall ahead – rivals flying through it get zapped, and it stops rockets coming from behind.", "orbs": "Glowing orbs circle you and hit anyone close.",
 	"blk": "Lights out! For 5 seconds rivals only see the neon lines – they wobble, brake and bump into walls."}
 const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS", "blk": "BLACKOUT"}
 var shots = []
@@ -7228,8 +7228,8 @@ void fragment(){
 	var bx = VBoxContainer.new()
 	bx.anchor_left = 0.5
 	bx.anchor_right = 0.5
-	bx.anchor_top = 0.66
-	bx.anchor_bottom = 0.66
+	bx.anchor_top = 0.62
+	bx.anchor_bottom = 0.62
 	bx.offset_left = -230
 	bx.offset_right = 230
 	bx.offset_top = 0
@@ -7237,12 +7237,24 @@ void fragment(){
 	bx.add_theme_constant_override("separation", 22)
 	bx.visible = false
 	cl.add_child(bx)
-	var b1 = _btn("REPLAY", true)
+	var b1 = _solid(_btn("REPLAY"))
 	b1.pressed.connect(_replay_start)
 	bx.add_child(b1)
-	var b2 = _solid(_btn("RACE AGAIN"))
+	# „Nochmal“ liegt genau da, wo vorher SKIP war: mit schnellem Tippen ist man sofort im nächsten Rennen
+	var b2 = _btn("RACE AGAIN  ▶▶", true)
+	b2.anchor_left = 0.3
+	b2.anchor_right = 0.7
+	b2.anchor_top = 1.0
+	b2.anchor_bottom = 1.0
+	b2.offset_left = -40
+	b2.offset_right = 40
+	b2.offset_top = -190
+	b2.offset_bottom = -90
+	b2.add_theme_font_size_override("font_size", 28)
 	b2.pressed.connect(func(): _race_again())
-	bx.add_child(b2)
+	b2.visible = false
+	cl.add_child(b2)
+	hud.again = b2
 	var b3 = _solid(_btn("MENU"))
 	b3.pressed.connect(func(): _to_menu())
 	bx.add_child(b3)
@@ -7258,7 +7270,7 @@ void fragment(){
 	bx.offset_bottom = 470
 	hud.perfbtn = b4
 	hud.resb = bx
-	hud.resbtn = [b1, b2, b3, b4]
+	hud.resbtn = [b1, b3, b4]
 	# Ergebnistafel: alle vier Fahrer – erst Zeiten, dann abwechselnd ausgeteilter Schaden
 	# auf eigener dunkler Tafel, damit nichts vom Rennbild durchscheint
 	var bpn = PanelContainer.new()
@@ -7477,15 +7489,21 @@ func _show_resb() -> void:
 
 
 func _resb_arm(dt: float) -> void:
+	if hud.has("again") and is_instance_valid(hud.again):
+		hud.again.visible = hud.resb.visible
 	if not hud.resb.visible:
 		if hud.has("ga") and hud.ga != null:
 			(hud.ga as CanvasItem).modulate.a = 1.0
 		return
 	resb_t += dt
-	if not resb_armed and resb_t > 1.3 and fingers.is_empty():
+	# kurze Pause (ein noch liegender Lenk-Finger löst nichts aus), dann sofort bedienbar
+	if not resb_armed and resb_t > 0.35 and fingers.is_empty():
 		resb_armed = true
-	var a = clampf((resb_t - 1.3) / 0.35, 0.0, 1.0) if resb_armed else 0.0
+	var a = clampf((resb_t - 0.35) / 0.15, 0.0, 1.0) if resb_armed else 0.0
 	hud.resb.modulate.a = a
+	if hud.has("again") and is_instance_valid(hud.again):
+		hud.again.modulate.a = a
+		hud.again.mouse_filter = Control.MOUSE_FILTER_STOP if resb_armed else Control.MOUSE_FILTER_IGNORE
 	# Altar-Anzeige unten ausblenden, solange die Ergebnis-Knöpfe da sind (sonst liegen sie übereinander)
 	if hud.has("ga") and hud.ga != null:
 		(hud.ga as CanvasItem).modulate.a = 1.0 - a
@@ -11072,6 +11090,26 @@ func _weapons(dt: float, racing: bool) -> void:
 			sh.lat = signf(sh.lat) * slim
 			if not sh.hm and not sh.pl:
 				sh.dl = 0.0
+		# Kraftfeldwand hält fremde Raketen auf: wer durch seine eigene Wand gefahren ist, hat sie als Schild im Rücken
+		var walled = false
+		for w in walls:
+			if int(w.get("own", -1)) == int(sh.own):
+				continue
+			var wzz = float(w.z) + T.LAP * round((float(sh.z) - float(w.z)) / T.LAP)
+			if (z0 - wzz) * (float(sh.z) - wzz) <= 0.0 and z0 != float(sh.z):
+				walled = true
+				w.hf = 1.0
+				_explode(wzz - 0.3 * sdir, sh.lat, false, 0.6)
+				_snd("zap", 1.0, 1.2, (w.n as Node3D).global_position if is_instance_valid(w.n) else null)
+				if int(w.get("own", -1)) == 0 and state == "race":
+					_msg("BLOCKED", Color(0.1, 0.95, 0.85))
+				break
+		if walled:
+			_qf(sh.n)
+			for e in sh.get("ex", []):
+				_qf(e)
+			shots.remove_at(i)
+			continue
 		# Treffer: Weg der Rakete in diesem Bild (von z0 nach z) kreuzt das Schiff
 		var hit = null
 		var zlo = minf(z0, sh.z) - 0.6
@@ -11565,6 +11603,8 @@ func _replay_start() -> void:
 	_rp_follow_lbl()
 	state = "replay"
 	hud.resb.visible = false
+	if hud.has("again") and is_instance_valid(hud.again):
+		hud.again.visible = false
 	hud.res.visible = false
 	hud.rpx.visible = true
 	hud.camrow.visible = true
@@ -14370,6 +14410,16 @@ func _shot() -> void:
 							_fire_w(ships[0], "lenk", false)
 					if shot_n % 4 == 0:
 						print("MC n=", shot_n, " on=", not mc.is_empty(), " hold=", snappedf(float(mc.get("hold", -9.0)), 0.01), " camd=", snappedf(cam.global_position.distance_to((ships[0].node as Node3D).global_position), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " shots=", shots.size(), " spd=", snappedf(float(ships[0].spd), 0.1), "/", snappedf(float(ships[1].spd), 0.1), " dz=", snappedf(float(ships[1].z) - (float(shots[0].z) if shots.size() > 0 else 0.0), 0.1), " base=", base_spd)
+				if OS.get_environment("WALLT") != "":   # Test: eigene Wand, durchfahren, dann Rakete von hinten
+					if shot_n == 20:
+						_fire_w(ships[0], "wand", false)
+					if shot_n == int(OS.get_environment("WALLT")):
+						ships[1].z = ships[0].z - 8.0
+						ships[1].lat = ships[0].lat
+						_add_shot(ships[1], false, true)
+						print("WALLT fire z=", ships[0].z, " wall=", walls[0].z if not walls.is_empty() else -1)
+					if shot_n % 5 == 0:
+						print("WALLT n=", shot_n, " pz=", snappedf(float(ships[0].z), 0.1), " shots=", shots.size(), " en=", snappedf(float(ships[0].en), 0.01))
 				if OS.get_environment("BLKFIRE") != "":   # Test: du feuerst Blackout
 					if shot_n == 40:
 						_blackout(ships[0], 5.0)
@@ -17487,6 +17537,8 @@ func _soft_reset() -> bool:
 		lk_txt.visible = false
 	# Anzeige zurück
 	hud.resb.visible = false
+	if hud.has("again") and is_instance_valid(hud.again):
+		hud.again.visible = false
 	hud.board.visible = false
 	hud.rdim.visible = false
 	hud.res.text = ""
