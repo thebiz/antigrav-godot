@@ -6885,13 +6885,26 @@ func _edge_btn(txt: String, right: bool, pri := false) -> Button:
 	var b = _btn(txt, pri)
 	if not pri:
 		_solid(b)
+	# Halbkreis, der am Bildschirmrand angeschnitten ist: nur die Innenseite rund, außen bündig ohne Rand
+	var h = 246.0
 	for st in ["normal", "hover", "focus", "pressed"]:
 		var sbx = (b.get_theme_stylebox(st) as StyleBoxFlat).duplicate()
-		sbx.set_corner_radius_all(64)
+		sbx.set_corner_radius_all(0)
 		sbx.set_border_width_all(3)
+		if right:
+			sbx.corner_radius_top_left = int(h * 0.5)
+			sbx.corner_radius_bottom_left = int(h * 0.5)
+			sbx.border_width_right = 0
+		else:
+			sbx.corner_radius_top_right = int(h * 0.5)
+			sbx.corner_radius_bottom_right = int(h * 0.5)
+			sbx.border_width_left = 0
+		sbx.corner_detail = 16
+		sbx.content_margin_left = 22.0 if right else 4.0   # Schrift etwas zur Rundung hin, weg vom Rand
+		sbx.content_margin_right = 4.0 if right else 22.0
 		b.add_theme_stylebox_override(st, sbx)
-	var w = 104.0
-	var m = 10.0
+	var w = h * 0.5
+	var m = 0.0
 	b.anchor_left = 1.0 if right else 0.0
 	b.anchor_right = b.anchor_left
 	b.offset_left = (-w - m) if right else m
@@ -8304,8 +8317,7 @@ func _input(ev: InputEvent) -> void:
 	if ev is InputEventScreenTouch:
 		if ev.pressed and state == "done" and hud.board.visible and (hud.board as Control).get_global_rect().grow(30).has_point(ev.position):
 			# Tafel antippen: zwischen Ergebnis und Schaden umschalten, danach kein automatischer Wechsel mehr
-			var cur_dmg = fmod(board_t, 9.0) > 5.0 if board_man < 0 else board_man == 1
-			board_man = 0 if cur_dmg else 1
+			board_man = (_board_page() + 1) % 4
 		if ev.pressed:
 			if state == "kill":
 				if kco.has("skip") and (kco.skip as Control).get_global_rect().grow(40).has_point(ev.position):
@@ -12589,7 +12601,23 @@ func _mine_warn(dt: float, racing: bool) -> void:
 
 # Ergebnistafel nach dem Rennen
 var board_t = 0.0
-var board_man = -1   # -1 = wechselt von selbst; 0/1 = von Hand gewählt (Ergebnis/Schaden), bleibt dann stehen
+var board_man = -1   # -1 = wechselt von selbst; 0–3 = von Hand gewählte Seite, bleibt dann stehen
+var board_pg = -1    # zuletzt gezeigte Seite (Bestenliste nur beim Umblättern neu laden)
+var board_hs = []    # Bestenliste „Fastest race“ für die Tafel
+const BOARD_DUR = [5.0, 4.0, 4.0, 4.0]   # Ergebnis, Schaden, Bestenliste 1–4, Bestenliste 5–8
+
+
+func _board_page() -> int:
+	if OS.get_environment("BOARDPG") != "":   # Test: Seite fest einstellen
+		return int(OS.get_environment("BOARDPG"))
+	if board_man >= 0:
+		return board_man
+	var t = fmod(board_t, 17.0)
+	for i in range(4):
+		if t < BOARD_DUR[i]:
+			return i
+		t -= BOARD_DUR[i]
+	return 0
 
 
 func _board_update(dt: float) -> void:
@@ -12604,7 +12632,32 @@ func _board_update(dt: float) -> void:
 		board_man = -1
 		return
 	board_t += dt
-	var dmg_mode = fmod(board_t, 9.0) > 5.0 if board_man < 0 else board_man == 1
+	var pg = _board_page()
+	if pg >= 2:
+		if board_pg != pg:
+			var c = ConfigFile.new()
+			c.load(REC_PATH)
+			board_hs = _rec_list(c, _rec_key(), "total")
+		board_pg = pg
+		var a0 = (pg - 2) * 4
+		hud.boardt.text = "HIGHSCORE  %d–%d" % [a0 + 1, a0 + 4]
+		for i in range(4):
+			var cols2: Array = hud.rows[i]
+			var r = a0 + i
+			cols2[0].text = "%d." % (r + 1)
+			if r < board_hs.size():
+				cols2[1].text = str(board_hs[r][1]).to_upper()
+				cols2[2].text = _fmt(float(board_hs[r][0]))
+			else:
+				cols2[1].text = "—"
+				cols2[2].text = ""
+			# eigene Zeit aus diesem Rennen hervorheben
+			var mine = r < board_hs.size() and ships[0].fin > 0.0 and absf(float(board_hs[r][0]) - float(ships[0].fin)) < 0.005
+			for l in cols2:
+				l.modulate = Color(1, 0.85, 0.4) if mine else Color(1, 1, 1)
+		return
+	board_pg = pg
+	var dmg_mode = pg == 1
 	var list = ships.duplicate()
 	if dmg_mode:
 		hud.boardt.text = "DAMAGE DEALT"
@@ -13157,10 +13210,10 @@ const REC_PATH = "user://records.cfg"
 
 
 func _rec_key() -> String:
-	return "speed%d" % int(round(float(cfg.speed) * 100.0)) + ("x" if T.X else "")   # Extreme hat eigene Bestenlisten
+	return "speed%d" % int(round(float(cfg.speed) * 100.0)) + ("x" if T.X else "") + ("" if T.LAPS == 3 else "_l%d" % T.LAPS)   # Extreme und 5-Runden-Rennen haben eigene Bestenlisten
 
 
-const REC_N = 5   # Plätze je Liste
+const REC_N = 8   # Plätze je Liste (auf der Ergebnistafel als zwei Seiten à vier)
 const REC_CATS = [["lap", "Fastest lap"], ["total", "Fastest race"], ["dmg", "Most damage"]]
 
 
@@ -17434,7 +17487,7 @@ const RACE_VARS = ["shots", "mines", "fxs", "walls", "quake", "quake2", "bwaves"
 	"last_steer", "touches", "cam_psi", "cam_d", "post_spd", "scr_v", "gl_v", "expo_v", "kmax", "sg_a",
 	"resb_t", "resb_armed", "msg_t", "last_place", "pl_flash", "big_t", "shake", "live_bursts", "fx_age", "mine_grp",
 	"lk_tg", "lk_k", "lk_bt", "lk_t", "zaps", "rec", "rec_ev", "rec_clk", "rec_acc", "rec_pl", "rp", "kc", "kc_pending", "mine_bt",
-	"en_low", "board_t", "board_man", "fin", "ga_rl", "ga_last",
+	"en_low", "board_t", "board_man", "board_pg", "fin", "ga_rl", "ga_last",
 	"last_c", "tun_k", "cm", "debris", "scorch", "col_pairs", "whale", "whale_lap", "wet", "blind", "blk_t", "blk_v", "mc", "radio", "radio_cd", "radio_side"]
 var race0 = {}
 var ships0 = []

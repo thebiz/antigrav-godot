@@ -4,7 +4,7 @@ extends RefCounted
 
 const LAP := 700.0
 const ZST := 20.0
-const LAPS := 3
+const LAPS := 5
 const TW := 2.4  # halbe Fahrbahnbreite
 const W := 0.0089759790  # 2π / 700
 # Neon Night wie im alten Spiel: wenige lange, runde Kurven, sanfte Hügel
