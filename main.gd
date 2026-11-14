@@ -6879,17 +6879,36 @@ void fragment(){
 	kco.skip = sk
 
 
-# SKIP-Knopf: überall gleich – unten mittig, gut mit dem Daumen erreichbar, zwischen den Lenkzonen links und rechts
+# Daumen-Knöpfe am Bildschirmrand (auf Höhe von REPLAY): Handy bleibt in der Spielhaltung.
+# Links SKIP, rechts RACE AGAIN – abwechselnd tippen, schon ist man im nächsten Rennen.
+func _edge_btn(txt: String, right: bool, pri := false) -> Button:
+	var b = _btn(txt, pri)
+	if not pri:
+		_solid(b)
+	for st in ["normal", "hover", "focus", "pressed"]:
+		var sbx = (b.get_theme_stylebox(st) as StyleBoxFlat).duplicate()
+		sbx.set_corner_radius_all(64)
+		sbx.set_border_width_all(3)
+		b.add_theme_stylebox_override(st, sbx)
+	var w = 104.0
+	var m = 10.0
+	b.anchor_left = 1.0 if right else 0.0
+	b.anchor_right = b.anchor_left
+	b.offset_left = (-w - m) if right else m
+	b.offset_right = -m if right else (m + w)
+	b.anchor_top = 0.62
+	b.anchor_bottom = 0.62
+	b.offset_top = -6
+	b.offset_bottom = 240
+	b.custom_minimum_size = Vector2(w, 246)
+	b.add_theme_font_size_override("font_size", 25)
+	for fc in ["font_color", "font_pressed_color", "font_hover_color", "font_focus_color"]:
+		b.add_theme_color_override(fc, Color(1, 1, 1))
+	return b
+
+
 func _skip_btn() -> Button:
-	var sb = _solid(_btn("SKIP  ▶▶"))
-	sb.anchor_left = 0.3
-	sb.anchor_right = 0.7
-	sb.anchor_top = 1.0
-	sb.anchor_bottom = 1.0
-	sb.offset_top = -190
-	sb.offset_bottom = -90
-	sb.add_theme_font_size_override("font_size", 30)
-	return sb
+	return _edge_btn("SKIP\n▶▶", false)
 
 
 var kco = {}
@@ -7230,8 +7249,8 @@ void fragment(){
 	bx.anchor_right = 0.5
 	bx.anchor_top = 0.62
 	bx.anchor_bottom = 0.62
-	bx.offset_left = -230
-	bx.offset_right = 230
+	bx.offset_left = -150   # schmal, damit links und rechts die Daumen-Knöpfe Platz haben
+	bx.offset_right = 150
 	bx.offset_top = 0
 	bx.offset_bottom = 380
 	bx.add_theme_constant_override("separation", 22)
@@ -7240,17 +7259,8 @@ void fragment(){
 	var b1 = _solid(_btn("REPLAY"))
 	b1.pressed.connect(_replay_start)
 	bx.add_child(b1)
-	# „Nochmal“ liegt genau da, wo vorher SKIP war: mit schnellem Tippen ist man sofort im nächsten Rennen
-	var b2 = _btn("RACE AGAIN  ▶▶", true)
-	b2.anchor_left = 0.3
-	b2.anchor_right = 0.7
-	b2.anchor_top = 1.0
-	b2.anchor_bottom = 1.0
-	b2.offset_left = -40
-	b2.offset_right = 40
-	b2.offset_top = -190
-	b2.offset_bottom = -90
-	b2.add_theme_font_size_override("font_size", 28)
+	# „Nochmal“ als Daumen-Knopf am rechten Rand (SKIP sitzt gegenüber am linken)
+	var b2 = _edge_btn("RACE\nAGAIN\n▶▶", true, true)
 	b2.pressed.connect(func(): _race_again())
 	b2.visible = false
 	cl.add_child(b2)
@@ -14437,6 +14447,8 @@ func _shot() -> void:
 				state = "done"
 				t_state = 0.0
 				_show_resb()
+				if OS.get_environment("SKIPVIEW") != "":   # Test: SKIP-Knopf dazu, um beide Randknöpfe zu sehen
+					hud.layer.add_child(_skip_btn())
 			if shot_s.contains("locktest") and shot_n >= 41:
 				ships[0].wpn = "lenk"
 				ships[1].z = ships[0].z + 7.0
