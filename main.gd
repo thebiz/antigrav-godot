@@ -9225,6 +9225,7 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 
 
 var rocket_ps: PackedScene
+const RK_DROP = 0.48   # Rakete klinkt aus, sackt ab und zündet nach dieser Zeit (passend zum Startsound)
 
 
 # Raketenmodell (Tripo) als Kind des Schusses: Spitze zeigt in Flugrichtung (lokal +Y), Oberseite zur Fahrbahn-Normale (lokal −Z)
@@ -9253,6 +9254,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	fl.material_override = mi.material_override
 	fl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	fl.position = Vector3(0, -rl * 0.5 - cap.height * 0.35, 0)
+	fl.set_meta("y0", fl.position.y)
 	mi.add_child(fl)
 	mi.set_meta("fl", fl)
 	mi.add_child(_rocket_model(rl))
@@ -9261,6 +9263,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	lt.omni_range = 4.0 * sqrt(float(X.size))
 	lt.light_energy = 3.0 * float(X.light)
 	mi.add_child(lt)
+	mi.set_meta("lt", lt)
 	var tg = null
 	if homing and from.idx == 0 and dir > 0.0 and lk_k >= 1.0 and lk_tg != null and not lk_tg.out:
 		tg = lk_tg   # eingerastetes Ziel
@@ -9273,7 +9276,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	if tg != null and tg.idx == 0 and from.idx != 0 and state == "race":
 		_snd("incoming", -1.0)   # Warnung: Lenkrakete kommt auf dich zu
 	shots.append({"z": from.z + 1.0 * dir, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) * dir if not at_player else 0.0, "n": mi, "own": from.idx, "dir": dir, "cl": cl, "sup": sp or cl,
-		"z0": from.z + 1.0 * dir, "lap1": not homing and not at_player and not cl and dir > 0.0})   # normale Rakete: eine ganze Runde auf ihrer Spur
+		"ov": float(from.spd), "z0": from.z + 1.0 * dir, "lap1": not homing and not at_player and not cl and dir > 0.0})   # normale Rakete: eine ganze Runde auf ihrer Spur
 	if cl or sp:
 		# Superwaffe: gold, größer, heller
 		(mi.material_override as StandardMaterial3D).albedo_color = Color(1.0, 0.78, 0.2)
@@ -11116,9 +11119,14 @@ func _weapons(dt: float, racing: bool) -> void:
 			vs = base_spd * (1.82 if sh.get("sup", false) else 1.68) * float(fx.rak.speed)
 		elif sh.get("mega", false):
 			vs = base_spd * 3.75 * float(fx.rak.speed)   # Mega: ein Blitz – selbst eine ganze Runde dauert nur Sekunden
+		var dropping = sh.t < RK_DROP
+		if dropping:
+			vs = float(sh.get("ov", spd)) * 0.9   # ausgeklinkt: fällt mit dem Schiff, bleibt etwas zurück
 		sh.z += vs * dt * sdir
 		sh.vs = vs
-		if sh.pl:
+		if dropping:
+			pass   # erst nach der Zündung lenken
+		elif sh.pl:
 			sh.lat += (g.lat - sh.lat) * minf(1.0, dt * 3.0)
 		elif sh.hm:
 			var mg = sh.get("mega", false)
@@ -11217,7 +11225,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			# Lenkrakete: nach 5 s ist der Sprit alle – sie verpufft ohne Schaden
 			_explode(sh.z, sh.lat, false, 0.45)
 			dead = true
-		elif (sh.t > 6.0 and not sh.get("mega", false) and not sh.get("lap1", false)) or (sh.get("mega", false) and sh.t > 40.0) or (sh.get("lap1", false) and absf(float(sh.z) - float(sh.z0)) > T.LAP) or (sh.cl and sh.t > 0.42) or (state == "lab" and absf(sh.z - LZ) > 18.0):
+		elif (sh.t > 6.0 and not sh.get("mega", false) and not sh.get("lap1", false)) or (sh.get("mega", false) and sh.t > 40.0) or (sh.get("lap1", false) and absf(float(sh.z) - float(sh.z0)) > T.LAP) or (sh.cl and sh.t > 0.42 + RK_DROP) or (state == "lab" and absf(sh.z - LZ) > 18.0):
 			if sh.get("mega", false):
 				_explode(sh.z, sh.lat, false, 0.8)   # Mega-Salve: daneben = nur ein Knall, kein Loch
 			else:
@@ -11242,13 +11250,40 @@ func _weapons(dt: float, racing: bool) -> void:
 		else:
 			var f = T.sframe(sh.z, sh.lat)
 			var bn: int = sh.get("br", 1)
-			var bp: Vector3 = f.c + f.uu * 0.25
+			# Höhe: unter dem Schiff ausgeklinkt, sackt ab, nach der Zündung zurück auf Flughöhe
+			var hy = 0.25
+			var ig = sh.t - RK_DROP
+			if ig < 0.0:
+				var u = sh.t / RK_DROP
+				hy = 0.34 - 0.24 * u * u
+			elif ig < 0.25:
+				hy = lerpf(0.10, 0.25, ig / 0.25)
+			var bp: Vector3 = f.c + f.uu * hy
+			# klinkt seitlich unter dem Rumpf aus (sichtbar), nach der Zündung zurück auf die Spur
+			var sx = clampf(sh.t / 0.2, 0.0, 1.0) * clampf(1.0 - ig / 0.3, 0.0, 1.0) if ig < 0.3 else 0.0
+			bp += f.rr * 0.5 * sx
 			var bb = Basis(f.rr, f.fw, -f.uu)
+			if ig < 0.0:
+				bb = bb * Basis(Vector3.RIGHT, -0.18 * sh.t / RK_DROP)   # Nase kippt beim Fallen leicht nach unten
 			sh.n.global_transform = Transform3D(bb, bp + _braid_off(f, bn, 0, sh.t))
 			var fln = sh.n.get_meta("fl", null)
 			if fln != null and is_instance_valid(fln):
 				var fk = 0.75 + 0.5 * randf()   # Antrieb flackert
-				(fln as Node3D).scale = Vector3(fk * 0.9, fk, fk * 0.9)
+				var olt = sh.n.get_meta("lt", null)
+				if olt != null and is_instance_valid(olt):
+					if not (olt as OmniLight3D).has_meta("e0"):
+						(olt as OmniLight3D).set_meta("e0", (olt as OmniLight3D).light_energy)
+					var e0 = float((olt as OmniLight3D).get_meta("e0"))
+					(olt as OmniLight3D).light_energy = e0 * (0.08 if ig < 0.0 else (1.0 + 2.0 * clampf(1.0 - ig / 0.4, 0.0, 1.0)))
+				if ig < 0.0:
+					(fln as Node3D).scale = Vector3.ONE * 0.001   # noch nicht gezündet
+				elif ig < 0.4:
+					var bst = 1.0 + 2.2 * (1.0 - ig / 0.4)   # Zündung: kräftiger, langer Plasma-Stoß
+					(fln as Node3D).scale = Vector3(fk * 0.9 * (1.0 + (bst - 1.0) * 0.6), fk * bst, fk * 0.9 * (1.0 + (bst - 1.0) * 0.6))
+					(fln as Node3D).position.y = -(fln as Node3D).get_meta("y0", (fln as Node3D).position.y) * 0.0 + float((fln as Node3D).get_meta("y0", (fln as Node3D).position.y)) * (1.0 + (bst - 1.0) * 0.5)
+				else:
+					(fln as Node3D).scale = Vector3(fk * 0.9, fk, fk * 0.9)
+					(fln as Node3D).position.y = float((fln as Node3D).get_meta("y0", (fln as Node3D).position.y))
 			for k in range(1, bn):
 				(sh.ex[k - 1] as Node3D).global_transform = Transform3D(bb, bp + _braid_off(f, bn, k, sh.t))
 	# Minen
@@ -15153,6 +15188,10 @@ func _mc_cam(dt: float) -> bool:
 			var f2 = T.sframe(float(sh.z) + 10.0 * float(sh.dir), float(sh.lat))
 			var look: Vector3 = f2.c + f2.uu * 0.3
 			var want = P - fw * 1.5 + f.uu * 0.42
+			if float(sh.t) < RK_DROP + 0.15:
+				# Ausklinken: schräg hinten seitlich, etwas tiefer – man sieht sie absacken und zünden
+				want = P - fw * 2.0 + f.rr * 1.35 + f.uu * 0.6
+				look = P + fw * 0.9
 			mc.p = want if mc.new else (mc.p as Vector3).lerp(want, 1.0 - exp(-dt * 20.0))
 			mc.l = look if mc.new else (mc.l as Vector3).lerp(look, 1.0 - exp(-dt * 14.0))
 			mc.pm = P
