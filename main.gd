@@ -9613,6 +9613,7 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 		"auto":
 			g.auto = 5.0
 			g.ahold = false
+			g.acut = false
 			g.sauto = sup
 			_snd("shield")
 		"blk":
@@ -11024,6 +11025,13 @@ func _weapons(dt: float, racing: bool) -> void:
 		fire_req = false
 		if g.wpn != "" and racing:
 			_fire()
+		elif racing and g.auto > 0.0 and mc.is_empty():
+			# Autopilot läuft: nochmal auf den Waffenknopf = sofort selbst übernehmen
+			g.auto = 0.0
+			g.ahold = false
+			g.acut = true
+			_snd("click", 0.0, 0.8)
+			_msg("MANUAL", Color(0.92, 0.92, 0.95))
 	# Namen aus zwei Wörtern (FORCE FIELD) untereinander, damit sie in den runden Knopf passen
 	var fn: String = str(WN.get(g.wpn, "empty")).replace(" ", "\n")
 	var pre = (("MEGA\n" if g.get("mega", false) else "SUPER\n") if g.get("sup", false) and g.wpn != "" else "")
@@ -11109,6 +11117,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		elif sh.get("mega", false):
 			vs = base_spd * 3.75 * float(fx.rak.speed)   # Mega: ein Blitz – selbst eine ganze Runde dauert nur Sekunden
 		sh.z += vs * dt * sdir
+		sh.vs = vs
 		if sh.pl:
 			sh.lat += (g.lat - sh.lat) * minf(1.0, dt * 3.0)
 		elif sh.hm:
@@ -13622,7 +13631,7 @@ func _process(delta: float) -> void:
 		steer = 0.0
 		g.auto -= dt
 		# Autopilot geht nur auf gerader Strecke aus: in Kurven oder im Sprung hält er noch
-		g.ahold = g.auto <= 0.05 and (g.air or _curvy(g.z))
+		g.ahold = g.auto <= 0.05 and (g.air or _curvy(g.z)) and not g.get("acut", false)
 		if g.ahold:
 			g.auto = 0.05
 		if g.get("sauto", false):
@@ -14516,7 +14525,7 @@ func _shot() -> void:
 						else:
 							_fire_w(ships[0], "lenk", false)
 					if shot_n % 4 == 0:
-						print("MC n=", shot_n, " on=", not mc.is_empty(), " hold=", snappedf(float(mc.get("hold", -9.0)), 0.01), " camd=", snappedf(cam.global_position.distance_to((ships[0].node as Node3D).global_position), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " shots=", shots.size(), " spd=", snappedf(float(ships[0].spd), 0.1), "/", snappedf(float(ships[1].spd), 0.1), " dz=", snappedf(float(ships[1].z) - (float(shots[0].z) if shots.size() > 0 else 0.0), 0.1), " base=", base_spd)
+						print("MC n=", shot_n, " ts=", snappedf(Engine.time_scale, 0.01), " ci=", snappedf(float(mc.get("ci", -1.0)), 0.01), " on=", not mc.is_empty(), " hold=", snappedf(float(mc.get("hold", -9.0)), 0.01), " camd=", snappedf(cam.global_position.distance_to((ships[0].node as Node3D).global_position), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " shots=", shots.size(), " spd=", snappedf(float(ships[0].spd), 0.1), "/", snappedf(float(ships[1].spd), 0.1), " dz=", snappedf(float(ships[1].z) - (float(shots[0].z) if shots.size() > 0 else 0.0), 0.1), " base=", base_spd)
 				if OS.get_environment("WALLT") != "":   # Test: eigene Wand, durchfahren, dann Rakete von hinten
 					if shot_n == 20:
 						_fire_w(ships[0], "wand", false)
@@ -14527,6 +14536,14 @@ func _shot() -> void:
 						print("WALLT fire z=", ships[0].z, " wall=", walls[0].z if not walls.is_empty() else -1)
 					if shot_n % 5 == 0:
 						print("WALLT n=", shot_n, " pz=", snappedf(float(ships[0].z), 0.1), " shots=", shots.size(), " en=", snappedf(float(ships[0].en), 0.01))
+				if OS.get_environment("APC") != "":   # Test: Autopilot starten, dann per Waffenknopf abbrechen
+					if shot_n == 20:
+						ships[0].wpn = "auto"
+						_fire()
+					if shot_n == 40:
+						fire_req = true
+					if shot_n % 5 == 0 and shot_n <= 60:
+						print("APC n=", shot_n, " auto=", snappedf(float(ships[0].auto), 0.01), " hold=", ships[0].get("ahold", false))
 				if OS.get_environment("BLKFIRE") != "":   # Test: du feuerst Blackout
 					if shot_n == 40:
 						_blackout(ships[0], 5.0)
@@ -15072,6 +15089,9 @@ func _mc_start(sh: Dictionary) -> void:
 func _mc_end() -> void:
 	if mc.is_empty():
 		return
+	if mc.has("ci") and state != "kill":
+		Engine.time_scale = 1.0
+		AudioServer.playback_speed_scale = 1.0
 	mc = {}
 	if hud.has("mcl") and is_instance_valid(hud.mcl):
 		hud.mcl.queue_free()
@@ -15094,6 +15114,36 @@ func _mc_cam(dt: float) -> bool:
 	if hud.has("mcl") and is_instance_valid(hud.mcl):
 		(hud.mcl as Label).modulate.a = 0.55 + 0.45 * (1.0 if fmod(mc.t, 0.8) < 0.5 else 0.0)
 	var sh: Dictionary = mc.sh
+	# Einschlag in Zeitlupe: kurz vor dem Ziel schwenkt die Kamera seitlich heran (Nahaufnahme), danach langsam wieder Normaltempo
+	var tg0 = sh.get("tg")
+	var near = false
+	if mc.hold < 0.0 and shots.has(sh) and tg0 != null and not tg0.out:
+		var dzi = fposmod(float(tg0.z) - float(sh.z), T.LAP)
+		var clo = maxf(1.5, float(sh.get("vs", 20.0)) - float(tg0.spd))   # Annäherungstempo
+		near = dzi < 7.0 and dzi / clo < 0.32   # gut ein Drittel Sekunde vor dem Einschlag
+	if near and not mc.has("ci"):
+		mc.ci = 0.0
+		mc.side = 1.0 if randf() < 0.5 else -1.0
+	if mc.has("ci"):
+		mc.ci = float(mc.ci) + dt / maxf(0.05, Engine.time_scale)   # echte Sekunden seit Beginn der Nahaufnahme
+		var slo = 0.22 if mc.hold < 0.0 else lerpf(0.2, 1.0, clampf((1.4 - float(mc.hold)) / 1.0, 0.0, 1.0))
+		Engine.time_scale = slo
+		AudioServer.playback_speed_scale = clampf(slo * 1.5, 0.5, 1.0)
+	if mc.has("ci") and mc.hold < 0.0 and shots.has(sh) and is_instance_valid(sh.n):
+		var P2: Vector3 = (sh.n as Node3D).global_position
+		var f3 = T.sframe(float(sh.z), float(sh.lat))
+		var TP: Vector3 = (tg0.node as Node3D).global_position if tg0 != null and is_instance_valid(tg0.node) else P2 + f3.fw * 3.0
+		var mid = P2.lerp(TP, 0.5)
+		var want2 = mid + f3.rr * (1.25 * float(mc.side)) + f3.uu * 1.05 - f3.fw * 0.9
+		mc.p = (mc.p as Vector3).lerp(want2, 1.0 - exp(-dt / maxf(0.05, Engine.time_scale) * 7.0))
+		mc.l = (mc.l as Vector3).lerp(mid, 1.0 - exp(-dt / maxf(0.05, Engine.time_scale) * 9.0))
+		mc.pm = P2
+		mc.tp = TP
+		mc.up = f3.uu
+		cam.global_position = mc.p
+		cam.look_at(mc.l, mc.up)
+		cam.fov = 62.0
+		return true
 	if mc.hold < 0.0:
 		if shots.has(sh) and is_instance_valid(sh.n) and mc.t < (41.0 if sh.get("mega", false) else 6.0):
 			var P: Vector3 = (sh.n as Node3D).global_position
@@ -15109,13 +15159,14 @@ func _mc_cam(dt: float) -> bool:
 			mc.up = f.uu
 			mc.new = false
 		else:
-			mc.hold = 1.2   # Einschlag: noch kurz draufhalten
-			mc.l = mc.pm
+			mc.hold = 1.6 if mc.has("ci") else 1.2   # Einschlag: noch kurz draufhalten
+			mc.l = mc.get("tp", mc.pm) if mc.has("ci") else mc.pm
 	else:
-		mc.hold -= dt
+		var rdt = dt / maxf(0.05, Engine.time_scale) if mc.has("ci") else dt
+		mc.hold -= rdt
 		# langsam zurückweichen und etwas steigen, Blick bleibt auf der Explosion
 		var back: Vector3 = ((mc.p as Vector3) - (mc.pm as Vector3)).normalized()
-		mc.p = (mc.p as Vector3) + (back * 2.2 + (mc.up as Vector3) * 0.8) * dt
+		mc.p = (mc.p as Vector3) + (back * (0.9 if mc.has("ci") else 2.2) + (mc.up as Vector3) * 0.5) * rdt
 		if mc.hold <= 0.0:
 			_mc_end()
 			return false
