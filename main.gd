@@ -7304,8 +7304,11 @@ void fragment(){
 	bsb.set_corner_radius_all(22)
 	bsb.content_margin_left = 30
 	bsb.content_margin_right = 30
-	bsb.content_margin_top = 20
+	bsb.content_margin_top = 64   # Platz für das Symbol, das oben zur Hälfte herausragt
 	bsb.content_margin_bottom = 24
+	bsb.shadow_color = Color(0, 0, 0, 0.65)   # Tafel schwebt mit weichem Schatten über dem Rennbild
+	bsb.shadow_size = 26
+	bsb.shadow_offset = Vector2(0, 10)
 	bpn.add_theme_stylebox_override("panel", bsb)
 	bpn.anchor_left = 0.06
 	bpn.anchor_right = 0.94
@@ -7317,6 +7320,16 @@ void fragment(){
 	bd.add_theme_constant_override("separation", 10)
 	bpn.add_child(bd)
 	hud.board = bpn
+	# Symbol der Seite (Pokal / Explosion / Krone), ragt oben zur Hälfte aus der Tafel und geht in sie über
+	var emb = Control.new()
+	emb.custom_minimum_size = Vector2(EMB_R * 2.0, EMB_R * 2.0)
+	emb.size = emb.custom_minimum_size
+	emb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	emb.visible = false
+	emb.set_meta("pg", 0)
+	emb.draw.connect(func(): _emb_draw(emb))
+	cl.add_child(emb)
+	hud.emb = emb
 	var bt = mk.call(24, HORIZONTAL_ALIGNMENT_CENTER)
 	bt.reparent(bd)
 	bt.modulate = Color(1, 0.75, 0.4)
@@ -12694,6 +12707,49 @@ var board_hs = []    # Bestenliste „Fastest race“ für die Tafel
 const BOARD_DUR = [5.0, 4.0, 4.0, 4.0]   # Ergebnis, Schaden, Bestenliste 1–4, Bestenliste 5–8
 
 
+const EMB_R = 54.0
+
+
+# Neon-Symbol der Tafelseite: Scheibe in Tafelfarbe, oberer Rand mit Tafelrahmen verschmolzen, Symbol mit Glühen
+func _emb_draw(c: Control) -> void:
+	var o = Vector2(EMB_R, EMB_R)
+	var R = EMB_R
+	c.draw_circle(o + Vector2(0, 7), R + 3, Color(0, 0, 0, 0.35))   # Schatten
+	c.draw_circle(o, R, Color(0.03, 0.03, 0.06, 1.0))
+	c.draw_arc(o, R - 1, PI * 1.02, PI * 1.98, 40, Color(1, 0.55, 0.15, 0.55), 2.0, true)   # oberer Rand wie die Tafel
+	c.draw_arc(o, R - 7, 0, TAU, 48, Color(1, 0.55, 0.15, 0.18), 1.5, true)
+	var k = int(c.get_meta("pg"))
+	var col = Color(1.0, 0.72, 0.3)
+	var s = R * 0.5
+	for pass_i in range(3):
+		var w = [7.0, 4.0, 2.2][pass_i]
+		var cc = Color(col.r, col.g, col.b, [0.12, 0.25, 1.0][pass_i])
+		match k:
+			0:   # Pokal
+				var cup = PackedVector2Array([o + Vector2(-s * 0.75, -s * 0.8), o + Vector2(s * 0.75, -s * 0.8), o + Vector2(s * 0.55, -s * 0.1), o + Vector2(s * 0.2, s * 0.25), o + Vector2(-s * 0.2, s * 0.25), o + Vector2(-s * 0.55, -s * 0.1), o + Vector2(-s * 0.75, -s * 0.8)])
+				c.draw_polyline(cup, cc, w, true)
+				c.draw_arc(o + Vector2(-s * 0.72, -s * 0.45), s * 0.32, PI * 0.5, PI * 1.5, 12, cc, w, true)
+				c.draw_arc(o + Vector2(s * 0.72, -s * 0.45), s * 0.32, -PI * 0.5, PI * 0.5, 12, cc, w, true)
+				c.draw_line(o + Vector2(0, s * 0.25), o + Vector2(0, s * 0.6), cc, w, true)
+				c.draw_line(o + Vector2(-s * 0.45, s * 0.75), o + Vector2(s * 0.45, s * 0.75), cc, w, true)
+				c.draw_line(o + Vector2(-s * 0.3, s * 0.6), o + Vector2(s * 0.3, s * 0.6), cc, w, true)
+			1:   # Explosion
+				var st = PackedVector2Array()
+				for i in range(21):
+					var a = TAU * i / 20.0 - PI * 0.5
+					var r = s * (1.0 if i % 2 == 0 else 0.48) * (0.85 + 0.15 * sin(i * 2.3))
+					st.append(o + Vector2(cos(a), sin(a)) * r)
+				c.draw_polyline(st, cc, w, true)
+				c.draw_circle(o, s * 0.18, Color(cc.r, cc.g, cc.b, cc.a * 0.6))
+			_:   # Krone
+				var cr = PackedVector2Array([o + Vector2(-s * 0.8, s * 0.45), o + Vector2(-s * 0.85, -s * 0.45), o + Vector2(-s * 0.4, -s * 0.05), o + Vector2(0, -s * 0.7), o + Vector2(s * 0.4, -s * 0.05), o + Vector2(s * 0.85, -s * 0.45), o + Vector2(s * 0.8, s * 0.45), o + Vector2(-s * 0.8, s * 0.45)])
+				c.draw_polyline(cr, cc, w, true)
+				c.draw_line(o + Vector2(-s * 0.8, s * 0.7), o + Vector2(s * 0.8, s * 0.7), cc, w, true)
+				if pass_i == 2:
+					for q in [Vector2(-s * 0.85, -s * 0.45), Vector2(0, -s * 0.7), Vector2(s * 0.85, -s * 0.45)]:
+						c.draw_circle(o + q + Vector2(0, -s * 0.14), s * 0.11, col)
+
+
 func _board_page() -> int:
 	if OS.get_environment("BOARDPG") != "":   # Test: Seite fest einstellen
 		return int(OS.get_environment("BOARDPG"))
@@ -12720,6 +12776,16 @@ func _board_update(dt: float) -> void:
 		return
 	board_t += dt
 	var pg = _board_page()
+	if hud.has("emb") and is_instance_valid(hud.emb):
+		var em: Control = hud.emb
+		var bp2: Control = hud.board
+		em.visible = bp2.visible
+		em.modulate.a = bp2.modulate.a
+		em.position = bp2.position + Vector2(bp2.size.x * 0.5 - EMB_R, -EMB_R * 0.95)
+		var ek = 0 if pg == 0 else (1 if pg == 1 else 2)
+		if int(em.get_meta("pg")) != ek:
+			em.set_meta("pg", ek)
+			em.queue_redraw()
 	if pg >= 2:
 		if board_pg != pg:
 			var c = ConfigFile.new()
