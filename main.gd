@@ -9195,7 +9195,8 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 				tg = o
 	if tg != null and tg.idx == 0 and from.idx != 0 and state == "race":
 		_snd("incoming", -1.0)   # Warnung: Lenkrakete kommt auf dich zu
-	shots.append({"z": from.z + 1.0 * dir, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) * dir if not at_player else 0.0, "n": mi, "own": from.idx, "dir": dir, "cl": cl, "sup": sp or cl})
+	shots.append({"z": from.z + 1.0 * dir, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) * dir if not at_player else 0.0, "n": mi, "own": from.idx, "dir": dir, "cl": cl, "sup": sp or cl,
+		"z0": from.z + 1.0 * dir, "lap1": not homing and not at_player and not cl and dir > 0.0})   # normale Rakete: eine ganze Runde auf ihrer Spur
 	if cl or sp:
 		# Superwaffe: gold, größer, heller
 		(mi.material_override as StandardMaterial3D).albedo_color = Color(1.0, 0.78, 0.2)
@@ -9568,7 +9569,10 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 			_add_shot(g, false, true, 1.0, false, true)
 			var ms: Dictionary = shots[shots.size() - 1]
 			ms.mega = true
+			ms.lap1 = false
 			_braid(ms, 3)
+			if g.idx == 0 and w == "lenk":
+				_mc_start(ms)
 		"mine":
 			# zwei Minenteppiche hintereinander über die ganze Breite
 			_drop_mines(g, true)
@@ -11023,11 +11027,25 @@ func _weapons(dt: float, racing: bool) -> void:
 		var vs = spd
 		if hmk:
 			vs = base_spd * (1.82 if sh.get("sup", false) else 1.68) * float(fx.rak.speed)
+		elif sh.get("mega", false):
+			vs = base_spd * 5.0 * float(fx.rak.speed)   # Mega: ein Blitz – selbst eine ganze Runde dauert nur Sekunden
 		sh.z += vs * dt * sdir
 		if sh.pl:
 			sh.lat += (g.lat - sh.lat) * minf(1.0, dt * 3.0)
 		elif sh.hm:
-			if sh.tg == null or sh.tg.out or (sh.tg.z - sh.z) * sdir < -1.5:
+			var mg = sh.get("mega", false)
+			if mg:
+				# Mega-Lenkrakete: jagt über die ganze Runde (auch wer hinter ihr ist, wird nach einer Runde eingeholt), bis sie trifft
+				if sh.tg == null or sh.tg.out or fposmod(float(sh.tg.z) - float(sh.z), T.LAP) > T.LAP - 1.5:
+					sh.tg = null
+					var bm = T.LAP + 1.0
+					for o in ships:
+						if o.idx != sh.own and not o.out:
+							var dm = fposmod(float(o.z) - float(sh.z) + 1.0, T.LAP)
+							if dm < bm:
+								bm = dm
+								sh.tg = o
+			elif sh.tg == null or sh.tg.out or (sh.tg.z - sh.z) * sdir < -1.5:
 				sh.tg = null
 				var bd = 200.0
 				for o in ships:
@@ -11066,7 +11084,10 @@ func _weapons(dt: float, racing: bool) -> void:
 			if sh.get("only", false) and sh.tg != null and o != sh.tg:
 				continue
 			var lw = 0.4 if sh.pl else (0.75 if sh.hm and sh.tg == o else 0.6)
-			if o.z > zlo and o.z < zhi and absf(sh.lat - o.lat) < lw:
+			var oz = float(o.z)
+			if sh.get("mega", false) or sh.get("lap1", false):
+				oz += T.LAP * round((float(sh.z) - oz) / T.LAP)   # Rakete kann eine Runde weiter sein: gleiche Stelle der Strecke zählt
+			if oz > zlo and oz < zhi and absf(sh.lat - o.lat) < lw:
 				hit = o
 				if sh.has("grp"):
 					sh.grp[o.idx] = true
@@ -11088,7 +11109,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			# Lenkrakete: nach 5 s ist der Sprit alle – sie verpufft ohne Schaden
 			_explode(sh.z, sh.lat, false, 0.45)
 			dead = true
-		elif sh.t > 6.0 or (sh.cl and sh.t > 0.42) or (state == "lab" and absf(sh.z - LZ) > 18.0):
+		elif (sh.t > 6.0 and not sh.get("mega", false) and not sh.get("lap1", false)) or (sh.get("mega", false) and sh.t > 40.0) or (sh.get("lap1", false) and absf(float(sh.z) - float(sh.z0)) > T.LAP) or (sh.cl and sh.t > 0.42) or (state == "lab" and absf(sh.z - LZ) > 18.0):
 			if sh.get("mega", false):
 				_explode(sh.z, sh.lat, false, 0.8)   # Mega-Salve: daneben = nur ein Knall, kein Loch
 			else:
@@ -14341,7 +14362,12 @@ func _shot() -> void:
 						ships[1].lat = ships[0].lat + float(OS.get_environment("MCL")) if OS.get_environment("MCL") != "" else ships[0].lat + 0.8
 						if OS.get_environment("MCB") != "":
 							ships[1].boost = float(OS.get_environment("MCB"))
-						_fire_w(ships[0], "lenk", false)
+						if OS.get_environment("MCRAK") != "":
+							_fire_w(ships[0], "rak", false)
+						elif OS.get_environment("MCMEGA") != "":
+							_fire_mega(ships[0], "lenk")
+						else:
+							_fire_w(ships[0], "lenk", false)
 					if shot_n % 4 == 0:
 						print("MC n=", shot_n, " on=", not mc.is_empty(), " hold=", snappedf(float(mc.get("hold", -9.0)), 0.01), " camd=", snappedf(cam.global_position.distance_to((ships[0].node as Node3D).global_position), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " shots=", shots.size(), " spd=", snappedf(float(ships[0].spd), 0.1), "/", snappedf(float(ships[1].spd), 0.1), " dz=", snappedf(float(ships[1].z) - (float(shots[0].z) if shots.size() > 0 else 0.0), 0.1), " base=", base_spd)
 				if OS.get_environment("BLKFIRE") != "":   # Test: du feuerst Blackout
@@ -14852,7 +14878,7 @@ var mc = {}
 
 
 func _mc_start(sh: Dictionary) -> void:
-	if int(cfg.get("mcam", 1)) != 1 or state != "race" or sh.get("tg") == null:
+	if int(cfg.get("mcam", 1)) != 1 or state != "race" or (sh.get("tg") == null and not sh.get("mega", false)):
 		return
 	mc = {"sh": sh, "t": 0.0, "hold": -1.0, "p": Vector3.ZERO, "l": Vector3.ZERO, "pm": Vector3.ZERO, "up": Vector3.UP, "new": true}
 	_flash(Color(1, 1, 1), 0.12)
@@ -14898,7 +14924,7 @@ func _mc_cam(dt: float) -> bool:
 		(hud.mcl as Label).modulate.a = 0.55 + 0.45 * (1.0 if fmod(mc.t, 0.8) < 0.5 else 0.0)
 	var sh: Dictionary = mc.sh
 	if mc.hold < 0.0:
-		if shots.has(sh) and is_instance_valid(sh.n) and mc.t < 6.0:
+		if shots.has(sh) and is_instance_valid(sh.n) and mc.t < (41.0 if sh.get("mega", false) else 6.0):
 			var P: Vector3 = (sh.n as Node3D).global_position
 			var f = T.sframe(float(sh.z), float(sh.lat))
 			var fw: Vector3 = f.fw * float(sh.dir)
