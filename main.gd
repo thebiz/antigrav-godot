@@ -9022,7 +9022,8 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	var sz = float(X.size) * sc
 	var k = (2.2 if big else 1.5) * sz
 	var f = T.frame(z)
-	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.35
+	var sf0 = T.sframe(z, lat)   # folgt auch der Röhrenwand
+	var pos: Vector3 = sf0.c + sf0.uu * 0.35
 	# Nachexplosionen: zwei, drei kleinere Feuerbälle rundherum, kurz versetzt
 	var fa = float(X.fire)
 	for j in range(int(round((2 if big else 1) * float(X.after)))):
@@ -11017,7 +11018,12 @@ func _weapons(dt: float, racing: bool) -> void:
 		sh.t += dt
 		var sdir: float = sh.get("dir", 1.0)
 		var z0: float = sh.z
-		sh.z += spd * dt * sdir
+		# Lenkrakete: nur etwas schneller als ein Gleiter in Normalfahrt – mit Boost und sauberer Linie entkommt man ihr
+		var hmk = sh.hm and not sh.pl and not sh.get("mega", false)
+		var vs = spd
+		if hmk:
+			vs = base_spd * (1.82 if sh.get("sup", false) else 1.68) * float(fx.rak.speed)
+		sh.z += vs * dt * sdir
 		if sh.pl:
 			sh.lat += (g.lat - sh.lat) * minf(1.0, dt * 3.0)
 		elif sh.hm:
@@ -11031,9 +11037,23 @@ func _weapons(dt: float, racing: bool) -> void:
 			if sh.tg != null:
 				# je näher, desto härter auf die Spur des Ziels – die Lenkrakete schlägt direkt ein
 				var dzt = absf(sh.tg.z - sh.z)
-				sh.lat += (sh.tg.lat - sh.lat) * minf(1.0, dt * (5.0 + 60.0 / maxf(1.0, dzt)))
+				var dlat = float(sh.tg.lat) - float(sh.lat)
+				if T.pipe_full(sh.z):   # geschlossene Röhre: kürzester Weg rundherum
+					var cc = TAU * T.PR
+					dlat = wrapf(dlat, -cc * 0.5, cc * 0.5)
+				sh.lat += dlat * minf(1.0, dt * (5.0 + 60.0 / maxf(1.0, dzt)))
 		else:
 			sh.lat += sh.dl * spd * dt
+		# Raketen bleiben immer auf der Fahrbahn: an der Bande entlang gleiten, in der Röhre einmal rundherum
+		var slim = T.lim(sh.z) - 0.2
+		if T.pipe_full(sh.z):
+			var circ2 = TAU * T.PR
+			if absf(sh.lat) > circ2 * 0.5:
+				sh.lat -= signf(sh.lat) * circ2
+		elif absf(sh.lat) > slim:
+			sh.lat = signf(sh.lat) * slim
+			if not sh.hm and not sh.pl:
+				sh.dl = 0.0
 		# Treffer: Weg der Rakete in diesem Bild (von z0 nach z) kreuzt das Schiff
 		var hit = null
 		var zlo = minf(z0, sh.z) - 0.6
@@ -11064,11 +11084,15 @@ func _weapons(dt: float, racing: bool) -> void:
 				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
 			dead = true
-		elif absf(sh.lat) > T.TW - 0.05 or sh.t > 6.0 or (sh.cl and sh.t > 0.42) or (state == "lab" and absf(sh.z - LZ) > 18.0):
+		elif hmk and sh.t > 5.0:
+			# Lenkrakete: nach 5 s ist der Sprit alle – sie verpufft ohne Schaden
+			_explode(sh.z, sh.lat, false, 0.45)
+			dead = true
+		elif sh.t > 6.0 or (sh.cl and sh.t > 0.42) or (state == "lab" and absf(sh.z - LZ) > 18.0):
 			if sh.get("mega", false):
-				_explode(sh.z, clampf(sh.lat, -T.TW, T.TW), false, 0.8)   # Mega-Salve: daneben = nur ein Knall, kein Loch
+				_explode(sh.z, sh.lat, false, 0.8)   # Mega-Salve: daneben = nur ein Knall, kein Loch
 			else:
-				_shot_boom(sh, sh.z, clampf(sh.lat, -T.TW, T.TW), -1)
+				_shot_boom(sh, sh.z, sh.lat, -1)
 			dead = true
 		else:
 			# Annäherungszünder: fliegt die Rakete dicht an einem Gegner vorbei, geht sie sofort hoch
@@ -14314,10 +14338,12 @@ func _shot() -> void:
 				if OS.get_environment("MCT") != "":   # Test: Gegner vor dich setzen und Lenkrakete feuern (Raketenkamera)
 					if shot_n == 30:
 						ships[1].z = ships[0].z + float(OS.get_environment("MCT"))
-						ships[1].lat = ships[0].lat + 0.8
+						ships[1].lat = ships[0].lat + float(OS.get_environment("MCL")) if OS.get_environment("MCL") != "" else ships[0].lat + 0.8
+						if OS.get_environment("MCB") != "":
+							ships[1].boost = float(OS.get_environment("MCB"))
 						_fire_w(ships[0], "lenk", false)
 					if shot_n % 4 == 0:
-						print("MC n=", shot_n, " on=", not mc.is_empty(), " hold=", snappedf(float(mc.get("hold", -9.0)), 0.01), " camd=", snappedf(cam.global_position.distance_to((ships[0].node as Node3D).global_position), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " shots=", shots.size())
+						print("MC n=", shot_n, " on=", not mc.is_empty(), " hold=", snappedf(float(mc.get("hold", -9.0)), 0.01), " camd=", snappedf(cam.global_position.distance_to((ships[0].node as Node3D).global_position), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " shots=", shots.size(), " spd=", snappedf(float(ships[0].spd), 0.1), "/", snappedf(float(ships[1].spd), 0.1), " dz=", snappedf(float(ships[1].z) - (float(shots[0].z) if shots.size() > 0 else 0.0), 0.1), " base=", base_spd)
 				if OS.get_environment("BLKFIRE") != "":   # Test: du feuerst Blackout
 					if shot_n == 40:
 						_blackout(ships[0], 5.0)
