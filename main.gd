@@ -14929,7 +14929,7 @@ var mc = {}
 
 
 func _mc_start(sh: Dictionary) -> void:
-	if int(cfg.get("mcam", 1)) != 1 or state != "race" or (sh.get("tg") == null and not sh.get("mega", false)):
+	if int(cfg.get("mcam", 1)) != 1 or state != "race":   # immer mitfliegen – auch ohne Ziel, bis sie verpufft
 		return
 	mc = {"sh": sh, "t": 0.0, "hold": -1.0, "p": Vector3.ZERO, "l": Vector3.ZERO, "pm": Vector3.ZERO, "up": Vector3.UP, "new": true}
 	_flash(Color(1, 1, 1), 0.12)
