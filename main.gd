@@ -466,7 +466,7 @@ func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "engine.wav", "idle.wav", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
 			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
-			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "minedrop.wav",
+			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "vo_blk.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
 			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "blackout.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
@@ -571,7 +571,7 @@ void fragment(){
 
 
 # Ansagen des Bordcomputers (Waffen und Warnungen) – die Sprecher-Ansagen (Runde, Platz, Start) bleiben natürlich
-const BOARD_VO = ["vo_rak", "vo_lenk", "vo_mine", "vo_orbs", "vo_wand", "vo_beben", "vo_schild", "vo_auto", "vo_turbo", "vo_super", "vo_mega", "vo_enlow", "incoming"]
+const BOARD_VO = ["vo_rak", "vo_lenk", "vo_mine", "vo_orbs", "vo_wand", "vo_beben", "vo_schild", "vo_auto", "vo_turbo", "vo_blk", "vo_super", "vo_mega", "vo_enlow", "incoming"]
 
 
 func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
@@ -9570,6 +9570,7 @@ func _blackout(src: Dictionary, dur: float) -> void:
 			blk_d = maxf(blk_t, 0.1)
 			_msg("BLACKOUT", Color(0.72, 1.0, 0.12))
 			_vib(80, 0.7)
+			_after(0.35, func(): _snd("vo_blk", 3.0))   # geflüstert, während das Licht ausgeht
 		else:
 			x.blk = maxf(float(x.get("blk", 0.0)), dur)
 	if src.idx == 0:
