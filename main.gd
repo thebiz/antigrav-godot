@@ -9213,12 +9213,38 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 		_msg("HIT · %s %d %%" % [nm, int(round(o.en * 100.0))], Color(1, 0.75, 0.5))
 
 
+var rocket_ps: PackedScene
+
+
+# Raketenmodell (Tripo) als Kind des Schusses: Spitze zeigt in Flugrichtung (lokal +Y), Oberseite zur Fahrbahn-Normale (lokal −Z)
+func _rocket_model(sc: float) -> Node3D:
+	if rocket_ps == null:
+		rocket_ps = load("res://ships/rocket.glb")
+	var m: Node3D = rocket_ps.instantiate()
+	var bs = Basis(Vector3(0, -1, 0), Vector3(0, 0, -1), Vector3(1, 0, 0)).scaled(Vector3.ONE * sc)
+	m.transform = Transform3D(bs, -(bs * Vector3(0, 0.21, 0)))
+	m.set_meta("rkm", true)
+	for c in m.find_children("*", "GeometryInstance3D", true, false):
+		(c as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return m
+
+
 func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0, cl := false, sp := false) -> void:
 	var X: Dictionary = fx.rak
-	var cap = CapsuleMesh.new()
-	cap.radius = 0.06 * float(X.size)
-	cap.height = 0.5 * float(X.size)
+	var cap = CapsuleMesh.new()   # Plasma-Flamme am Heck (glüht, flackert)
+	cap.radius = 0.028 * float(X.size)
+	cap.height = 0.2 * float(X.size)
 	var mi = _glow_node(cap, _hs(Color(1.0, 0.6, 0.2), float(X.hue)), 8.0)
+	var rl = 0.72 * float(X.size) * (1.35 if (cl or sp) else 1.0)   # Länge des Modells
+	mi.mesh = null
+	var fl = MeshInstance3D.new()
+	fl.mesh = cap
+	fl.material_override = mi.material_override
+	fl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	fl.position = Vector3(0, -rl * 0.5 - cap.height * 0.35, 0)
+	mi.add_child(fl)
+	mi.set_meta("fl", fl)
+	mi.add_child(_rocket_model(rl))
 	var lt = OmniLight3D.new()
 	lt.light_color = _hs(Color(1.0, 0.55, 0.2), float(X.hue))
 	lt.omni_range = 4.0 * sqrt(float(X.size))
@@ -9242,8 +9268,8 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 		(mi.material_override as StandardMaterial3D).albedo_color = Color(1.0, 0.78, 0.2)
 		(mi.material_override as StandardMaterial3D).emission = Color(1.0, 0.78, 0.2)
 		(mi.material_override as StandardMaterial3D).emission_energy_multiplier = 16.0
-		cap.radius *= 1.6
-		cap.height *= 1.6
+		cap.radius *= 1.4
+		cap.height *= 1.4
 		lt.light_color = Color(1.0, 0.75, 0.25)
 		lt.light_energy *= 2.5
 	_snd("rak", -2.0, 1.0, (from.node as Node3D).global_position if from.idx != 0 else null)
@@ -9264,10 +9290,11 @@ func _braid(sh: Dictionary, n: int) -> void:
 	sh.ex = []
 	var src: MeshInstance3D = sh.n
 	for k in range(1, n):
-		var mi = MeshInstance3D.new()
-		mi.mesh = src.mesh
-		mi.material_override = src.material_override
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var mi = Node3D.new()
+		for c in src.get_children():
+			if c is OmniLight3D:
+				continue   # Licht nur einmal pro Zopf
+			mi.add_child(c.duplicate())
 		add_child(mi)
 		sh.ex.append(mi)
 
@@ -11198,6 +11225,10 @@ func _weapons(dt: float, racing: bool) -> void:
 			var bp: Vector3 = f.c + f.uu * 0.25
 			var bb = Basis(f.rr, f.fw, -f.uu)
 			sh.n.global_transform = Transform3D(bb, bp + _braid_off(f, bn, 0, sh.t))
+			var fln = sh.n.get_meta("fl", null)
+			if fln != null and is_instance_valid(fln):
+				var fk = 0.75 + 0.5 * randf()   # Antrieb flackert
+				(fln as Node3D).scale = Vector3(fk * 0.9, fk, fk * 0.9)
 			for k in range(1, bn):
 				(sh.ex[k - 1] as Node3D).global_transform = Transform3D(bb, bp + _braid_off(f, bn, k, sh.t))
 	# Minen
