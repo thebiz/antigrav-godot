@@ -11096,7 +11096,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		if hmk:
 			vs = base_spd * (1.82 if sh.get("sup", false) else 1.68) * float(fx.rak.speed)
 		elif sh.get("mega", false):
-			vs = base_spd * 5.0 * float(fx.rak.speed)   # Mega: ein Blitz – selbst eine ganze Runde dauert nur Sekunden
+			vs = base_spd * 3.75 * float(fx.rak.speed)   # Mega: ein Blitz – selbst eine ganze Runde dauert nur Sekunden
 		sh.z += vs * dt * sdir
 		if sh.pl:
 			sh.lat += (g.lat - sh.lat) * minf(1.0, dt * 3.0)
@@ -13742,7 +13742,7 @@ func _process(delta: float) -> void:
 		get_tree().create_timer(0.9).timeout.connect(func(): _snd("vo_p1", 3.0))
 		hud.res.text = "1st  ·  LAST ONE STANDING\n%s" % _fmt(race_t)
 		_fin_flow(1)
-		_records_end(false)
+		_records_end(true)   # alle ausgeschaltet: die Zeit zählt für die Bestenliste
 	elif racing and g.z >= finish and not free_ride:
 		state = "done"
 		t_state = 0.0
