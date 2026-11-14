@@ -14978,10 +14978,9 @@ func _mc_cam(dt: float) -> bool:
 			var P: Vector3 = (sh.n as Node3D).global_position
 			var f = T.sframe(float(sh.z), float(sh.lat))
 			var fw: Vector3 = f.fw * float(sh.dir)
-			var look = P + fw * 9.0
-			var tg = sh.get("tg")
-			if tg != null and not tg.out:
-				look = look.lerp((tg.node as Node3D).global_position, 0.55)
+			# Blick stur in Flugrichtung (Rakete wie mit Kamera auf dem Rücken), nur leicht mit der Seitenlage der Rakete
+			var f2 = T.sframe(float(sh.z) + 10.0 * float(sh.dir), float(sh.lat))
+			var look: Vector3 = f2.c + f2.uu * 0.3
 			var want = P - fw * 1.5 + f.uu * 0.42
 			mc.p = want if mc.new else (mc.p as Vector3).lerp(want, 1.0 - exp(-dt * 20.0))
 			mc.l = look if mc.new else (mc.l as Vector3).lerp(look, 1.0 - exp(-dt * 14.0))
@@ -15641,8 +15640,8 @@ func _ck_update(dt: float) -> void:
 		var brs = 0.2 + 0.5 * clampf((0.4 - en) / 0.35, 0.0, 1.0)   # schneller und stärker, wenn's eng wird
 		_sp(ck.visor.material, "br", (0.12 + 0.35 * brs) * (0.5 + 0.5 * sin(brt * (1.3 + 2.0 * brs))))
 		_sp(ck.visor.material, "dm", clampf((0.3 - en) / 0.25, 0.0, 1.0) if state in ["race", "count"] else 0.0)
-	# Rückspiegel: nur im Cockpit, jedes zweite Bild neu (spart Rechenzeit auf dem Handy)
-	var mon = not vis and state in ["race", "count"]
+	# Rückspiegel: auf Wunsch abgeschaltet (auf dem Handy kaum zu erkennen) – wird nie gezeigt und nie gerendert
+	var mon = false
 	ck.mir.visible = mon
 	ck.mfr.visible = mon
 	if mon:
