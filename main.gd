@@ -8315,9 +8315,20 @@ func _input(ev: InputEvent) -> void:
 	if state == "replay" and vx.is_empty() and not rp.is_empty():
 		_rp_input(ev)
 	if ev is InputEventScreenTouch:
-		if ev.pressed and state == "done" and hud.board.visible and (hud.board as Control).get_global_rect().grow(30).has_point(ev.position):
-			# Tafel antippen: zwischen Ergebnis und Schaden umschalten, danach kein automatischer Wechsel mehr
-			board_man = (_board_page() + 1) % 4
+		if state == "done" and hud.board.visible:
+			# Tafel: nach links wischen oder antippen = weiterblättern, nach rechts wischen = zurück; danach kein automatischer Wechsel mehr
+			if ev.pressed and (hud.board as Control).get_global_rect().grow(30).has_point(ev.position):
+				board_sw = ev.position
+			elif not ev.pressed and board_sw.x > -1.0:
+				var dx = ev.position.x - board_sw.x
+				var dy = absf(ev.position.y - board_sw.y)
+				if dx < -50.0 and absf(dx) > dy:
+					board_man = (_board_page() + 1) % 4
+				elif dx > 50.0 and absf(dx) > dy:
+					board_man = (_board_page() + 3) % 4
+				elif absf(dx) < 25.0 and dy < 25.0:
+					board_man = (_board_page() + 1) % 4
+				board_sw = Vector2(-9, -9)
 		if ev.pressed:
 			if state == "kill":
 				if kco.has("skip") and (kco.skip as Control).get_global_rect().grow(40).has_point(ev.position):
@@ -12633,6 +12644,7 @@ func _mine_warn(dt: float, racing: bool) -> void:
 # Ergebnistafel nach dem Rennen
 var board_t = 0.0
 var board_man = -1   # -1 = wechselt von selbst; 0–3 = von Hand gewählte Seite, bleibt dann stehen
+var board_sw = Vector2(-9, -9)   # wo ein Wisch auf der Tafel begonnen hat
 var board_pg = -1    # zuletzt gezeigte Seite (Bestenliste nur beim Umblättern neu laden)
 var board_hs = []    # Bestenliste „Fastest race“ für die Tafel
 const BOARD_DUR = [5.0, 4.0, 4.0, 4.0]   # Ergebnis, Schaden, Bestenliste 1–4, Bestenliste 5–8
@@ -14533,6 +14545,18 @@ func _shot() -> void:
 				_show_resb()
 				if OS.get_environment("SKIPVIEW") != "":   # Test: SKIP-Knopf dazu, um beide Randknöpfe zu sehen
 					hud.layer.add_child(_skip_btn())
+			if OS.get_environment("SWT") != "" and shot_s.contains("resbtest") and shot_n >= 60 and shot_n <= 89 and shot_n % 5 < 2:
+				# Test: Wischen auf der Tafel (links, links, rechts, rechts, tippen)
+				var bc = (hud.board as Control).get_global_rect().get_center()
+				var k = (shot_n - 60) / 5
+				var dxs = [-160.0, -160.0, 160.0, 160.0, 0.0, 0.0]
+				var te = InputEventScreenTouch.new()
+				te.index = 0
+				te.pressed = shot_n % 5 == 0
+				te.position = bc if te.pressed else bc + Vector2(dxs[k], 4.0)
+				_input(te)
+				if not te.pressed:
+					print("SWT k=", k, " dx=", dxs[k], " page=", _board_page())
 			if shot_s.contains("locktest") and shot_n >= 41:
 				ships[0].wpn = "lenk"
 				ships[1].z = ships[0].z + 7.0
