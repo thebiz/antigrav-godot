@@ -9004,7 +9004,7 @@ func _rp_shots(F: Array, i: int, u: float) -> Array:
 	for w in f0.w:
 		var a: Array = w
 		if a.size() < 8 or int(a[7]) <= 0 or u <= 0.0:
-			out.append(a)
+			out.append(a.duplicate())
 			continue
 		var key = int(a[7]) * 16 + int(a[5])
 		var r = a.duplicate()
@@ -9022,6 +9022,13 @@ func _rp_shots(F: Array, i: int, u: float) -> Array:
 				r[1] = float(a[1]) + (float(a[1]) - float(c[1])) * k
 			r[6] = float(a[6]) + u * dt1
 		out.append(r)
+	# Raketen, die eine Runde weiter sind (Mega, Runden-Rakete: Treffer zählt an derselben Stelle der Strecke),
+	# auf die Runde des Geschehens holen – sonst flogen sie in der Wiederholung 700 m weiter vorn, unsichtbar
+	var ref = float(ships[kc.victim].z) if (state == "kill" and not kc.is_empty()) else float(ships[0].z)
+	for r in out:
+		var d = float(r[0]) - ref
+		if absf(d) > T.LAP * 0.5:
+			r[0] = float(r[0]) - T.LAP * round(d / T.LAP)
 	return out
 
 
@@ -9036,6 +9043,7 @@ func _kc_diag() -> String:
 		if int(w[2]) == 0:
 			nown += 1
 			var d = float(w[0]) - float(ships[kc.victim].z)
+			d -= T.LAP * round(d / T.LAP)
 			if absf(d) < absf(best):
 				best = d
 				bw = w
@@ -9061,6 +9069,46 @@ func _kc_diag() -> String:
 		("%.1f m" % best).replace(".", ",").replace("-", "−") if best < 1e8 else "–", vis]
 
 
+# Einschlag-Wiederholung an die Rakete anpassen: aus der Aufnahme suchen, wann sie 45 m bzw. 12 m hinter dem
+# Ziel war. Schnelle Raketen (Mega, Runden-Rakete) brauchen dafür nur Sekundenbruchteile – dann stärkere Zeitlupe,
+# damit der Anflug immer gut 2 s dauert.
+func _kc_passes(t0: float, vi: int, sid: int) -> Array:
+	var P = KC_PASS.duplicate(true)
+	if sid <= 0 or vi < 0:
+		return P
+	var t45 = t0
+	var t12 = t0
+	for k in range(rec.size() - 1, -1, -1):
+		var f: Dictionary = rec[k]
+		if float(f.t) > t0 + 0.05:
+			continue
+		if float(f.t) < t0 - 6.0:
+			break
+		var found = false
+		var vz = float(f.s[vi][0])
+		for w in f.w:
+			if (w as Array).size() >= 8 and int(w[7]) == sid:
+				var d = float(w[0]) - vz
+				d -= T.LAP * round(d / T.LAP)
+				found = true
+				if absf(d) <= 45.0:
+					t45 = float(f.t)
+				if absf(d) <= 12.0:
+					t12 = float(f.t)
+				break
+		if not found and float(f.t) < t0 - 0.2:
+			break
+	var a45 = clampf(t0 - t45, 0.25, 4.0)   # so lange vor dem Treffer war die Rakete 45 m entfernt
+	var a12 = clampf(t0 - t12, 0.1, 2.0)
+	# Durchgang 1 (hinter der Rakete): letzte ~12 m, Durchgang 2 (von vorn): die ganzen 45 m, je etwa 2 s lang
+	a12 = minf(a12, 1.4)
+	a45 = minf(a45, 2.0)   # langsame Rakete: nicht ewig zuschauen
+	P[0] = [-maxf(a12 + 0.5, 0.8), -0.05, clampf((a12 + 0.45) / 2.2, 0.08, 0.8)]
+	P[1] = [-(a45 + 0.3), 0.5, clampf((a45 + 0.8) / 4.0, 0.08, 0.6)]
+	_bc("kc passes a45=%.2f a12=%.2f p=%s" % [a45, a12, str(P)])
+	return P
+
+
 func _kc_cap(pos: Vector3, r: float, fr := 0.3) -> float:
 	if state != "kill" or not kc.get("ir", false) or r <= 0.001:
 		return 1.0
@@ -9069,6 +9117,13 @@ func _kc_cap(pos: Vector3, r: float, fr := 0.3) -> float:
 
 
 func _gb_update(e: Dictionary, dt: float) -> bool:
+	# Teile schon weggeräumt (z. B. beim Wechsel der Kill-Cam-Blickwinkel): Rest aufräumen, Eintrag entfernen
+	for nk in ["core", "ring", "sw", "l"]:
+		if e.has(nk) and not is_instance_valid(e[nk]):
+			for nk2 in ["core", "ring", "sw", "l", "sph"]:
+				if e.has(nk2) and is_instance_valid(e[nk2]):
+					_qf(e[nk2])
+			return true
 	e.t += dt / e.get("ts", 1.0)
 	var gz: float = e.get("sz", 1.0)
 	var t: float = e.t
@@ -11520,10 +11575,13 @@ func _weapons(dt: float, racing: bool) -> void:
 			else:
 				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
+			# welche Rakete getroffen hat (die Einschlag-Wiederholung richtet sich nach ihr)
+			if not kc_pending.is_empty() and int(kc_pending.get("idx", -1)) == int(hit.idx) and not kc_pending.has("sid"):
+				kc_pending.sid = int(sh.get("id", 0))
 			# Raketenkamera dabei: den Einschlag gleich noch einmal zeigen – Zeitlupe aus drei Blickwinkeln
 			if int(sh.own) == 0 and not mc.is_empty() and mc.sh == sh and kc.is_empty() and state == "race" and not free_ride:
 				if kc_pending.is_empty():
-					kc_pending = {"idx": hit.idx, "t0": rec_clk, "kind": "rocket"}
+					kc_pending = {"idx": hit.idx, "t0": rec_clk, "kind": "rocket", "sid": int(sh.get("id", 0))}
 				kc_pending.force = true
 			dead = true
 		elif hmk and sh.t > 5.0:
@@ -12670,7 +12728,8 @@ func _kc_start() -> void:
 	var t0: float = kc_pending.t0
 	var F = rec
 	var imp = str(kc_pending.get("kind", "")) == "rocket"   # Rakete: Einschlag-Wiederholung aus drei Blickwinkeln
-	var ts = t0 + float(KC_PASS[0][0]) if imp else t0 - 5.0   # sonst gut 5 s vorher einsteigen: man sieht, wie es dazu kam
+	var passes = _kc_passes(t0, int(kc_pending.get("idx", -1)), int(kc_pending.get("sid", 0))) if imp else []
+	var ts = t0 + float(passes[0][0]) if imp else t0 - 5.0   # sonst gut 5 s vorher einsteigen: man sieht, wie es dazu kam
 	var i = 0
 	while i < F.size() - 2 and F[i + 1].t <= ts:
 		i += 1
@@ -12706,7 +12765,7 @@ func _kc_start() -> void:
 						qdir = qk[1]
 	kc = {"qd": qdir, "t0": t0, "end": t0 + 2.4, "victim": kc_pending.idx, "imp": dzl, "kind": kc_pending.kind, "saved": saved, "hidden": hidden,
 		"before": get_children(), "fxs": fxs.duplicate(), "zaps": zaps.duplicate(), "top": hud.top.text, "side": 1.0 if randf() < 0.5 else -1.0,
-		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0, "ir": imp, "pass": 0, "kill": ships[kc_pending.idx].out}
+		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0, "ir": imp, "passes": passes, "pass": 0, "kill": ships[kc_pending.idx].out}
 	if OS.get_environment("KCDBG") != "":
 		print("KCDBG imp=", dzl, " lz=", wrapf(dzl.x, T.ZST, T.ZST + T.LAP), " tun=", T.in_tun(wrapf(dzl.x, T.ZST, T.ZST + T.LAP), 8.0))
 	kc_pending = {}
@@ -12756,7 +12815,8 @@ func _kc_clean() -> void:
 
 func _kc_step(dt: float) -> void:
 	if kc.get("ir", false):
-		var ps: Array = KC_PASS[int(kc.pass)]
+		var PS: Array = kc.get("passes", KC_PASS)
+		var ps: Array = PS[int(kc.pass)]
 		Engine.time_scale = float(ps[2])
 		AudioServer.playback_speed_scale = clampf(float(ps[2]) * 1.3, 0.45, 1.0)
 		_replay(dt)
@@ -12772,11 +12832,11 @@ func _kc_step(dt: float) -> void:
 		kco.ts.text = "%s   ×%.2f" % [_fmt(maxf(0.0, rp.t)), float(ps[2])] + _kc_diag()
 		hud.top.text = kc.top
 		if rp.t - kc.t0 >= float(ps[1]):
-			if int(kc.pass) < KC_PASS.size() - 1:
+			if int(kc.pass) < PS.size() - 1:
 				kc.pass = int(kc.pass) + 1
 				kco.title.text = "REC   IMPACT  %d/3" % (int(kc.pass) + 1)
 				_kc_clean()
-				_kc_rewind(kc.t0 + float(KC_PASS[int(kc.pass)][0]))
+				_kc_rewind(kc.t0 + float(PS[int(kc.pass)][0]))
 				kc.side = -float(kc.side)
 				_flash(Color(1, 1, 1), 0.12)
 			else:
