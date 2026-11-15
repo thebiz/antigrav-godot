@@ -939,7 +939,7 @@ const FXS = {
 		["wob", "Lean wobble (look)", 0.0, 2.0, 0.0], ["nosev", "Nose turn (look)", 0.0, 1.5, 1.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
-		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["haze", "Skyline haze", 0.0, 3.0, 0.6], ["skyl", "Skyline", 0.0, 5.0, 1.0],
+		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["haze", "Skyline haze", 0.0, 3.0, 1.1], ["skyl", "Skyline", 0.0, 5.0, 1.0],
 		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
 		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections", 0.0, 6.0, 1.0],
 		["gloss", "Road gloss", 0.0, 4.0, 2.0], ["wet", "Wet road", 0.0, 4.0, 1.0]],
@@ -1268,9 +1268,9 @@ void sky(){
 	env.ssao_enabled = _fplus()
 	env.ssao_intensity = 1.6
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.045, 0.045, 0.05) if _noir() else (Color(0.025, 0.07, 0.06) if _jungle() else Color(0.05, 0.03, 0.09))
+	env.fog_light_color = Color(0.045, 0.045, 0.05) if _noir() else (Color(0.025, 0.07, 0.06) if _jungle() else Color(0.06, 0.058, 0.14))   # Film noir: kühler blauvioletter Dunst
 	fog_c = env.fog_light_color
-	env.fog_density = 0.012
+	env.fog_density = 0.012 if (_noir() or _jungle()) else 0.016
 	env.fog_sky_affect = 0.0
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.15
@@ -2880,7 +2880,16 @@ func _city_fill() -> void:
 				var Hm = (130.0 + pow(rm.randf(), 1.3) * 210.0) * (0.55 + 0.45 * mk)
 				var wm = 14.0 + rm.randf() * 22.0
 				var posm = Vector3(fm.c.x - latm, -42.0 + Hm / 2.0, zm + (rm.randf() - 0.5) * 20.0)
-				items.append([Transform3D(Basis.from_scale(Vector3(wm / 2.0, Hm / 2.0, wm / 2.0)), posm), _neo(rm.randf()), posm.y + Hm / 2.0])
+				var cm = _neo(rm.randf())
+				items.append([Transform3D(Basis.from_scale(Vector3(wm / 2.0, Hm / 2.0, wm / 2.0)), posm), cm, posm.y + Hm / 2.0])
+				# jeder dritte Turm mit überstehendem Pilzdach (wie die Türme in Blade Runner): zwei breite Platten oben drauf
+				if rm.randf() < 0.34:
+					var top = posm.y + Hm / 2.0
+					for cp in [[1.55, 0.05, 0.0], [1.9, 0.045, 0.05]]:
+						var cw = wm * float(cp[0])
+						var ch = Hm * float(cp[1])
+						var cy = top + ch * 0.5 + Hm * float(cp[2])
+						items.append([Transform3D(Basis.from_scale(Vector3(cw / 2.0, ch / 2.0, cw / 2.0 * 0.85)), Vector3(posm.x, cy, posm.z)), cm, cy + ch / 2.0])
 			zm += 62.0 / clampf(mk, 0.3, 3.0)
 	bld_mm.instance_count = 0
 	bld_mm.instance_count = items.size()
@@ -5144,7 +5153,11 @@ func _tribunes() -> void:
 		var zax2: Vector3 = (-f.fw * 0.75 - f.rr * sd2 * 0.65).normalized()
 		zax2 = (zax2 - f.uu * zax2.dot(f.uu)).normalized()
 		var c2 = OR if _noir() else [Color(1.0, 0.2, 0.55), Color(0.3, 0.95, 1.0), Color(0.75, 0.35, 1.0)][neon_signs.size() % 3]
-		_neon_sign(f.c + f.rr * (sd2 * (T.TW + 7.5)) + f.uu * 7.0, Basis(f.uu.cross(zax2).normalized(), f.uu, zax2), sp[2], c2, 2.4 if sp[2] == "ANTIGRAV" else 1.8)
+		var bsg = Basis(f.uu.cross(zax2).normalized(), f.uu, zax2)
+		if _noir() or _jungle():
+			_neon_sign(f.c + f.rr * (sd2 * (T.TW + 7.5)) + f.uu * 7.0, bsg, sp[2], c2, 2.4 if sp[2] == "ANTIGRAV" else 1.8)
+		else:
+			_light_panel(f.c + f.rr * (sd2 * (T.TW + 8.5)) + f.uu * 8.0, bsg, sp[2], c2, 2.6 if sp[2] == "ANTIGRAV" else 2.0)
 	# Jubel als Schleife an der Ziellinie, Sprecher-Lautsprecher daneben (beide mit Dopplereffekt)
 	var f0 = T.frame(20.0)
 	crowd_p = AudioStreamPlayer3D.new()
@@ -5283,6 +5296,88 @@ func _crowd(z0: float, z1: float, sd: float, L0: float) -> void:
 	smi.material_override = stick_mat
 	smi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	deco.add_child(smi)
+
+
+# Leuchttafel wie in Blade Runner: großes, flimmerndes Bildschirmfeld mit Lamellen, die Schrift darauf
+# leuchtet heller, ringsum ein weicher Schein im Dunst. Liegt im Nebel – wird mit der Entfernung blau verwaschen.
+const PANEL_SH = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+uniform vec3 col=vec3(.3,.9,1.);
+uniform float seed=0.;
+uniform float halo=0.;
+float h1(float x){return fract(sin(x*91.7+seed*13.1)*43758.5);}
+void fragment(){
+	vec2 uv=UV;
+	if(halo>.5){
+		vec2 d=(uv-.5)*vec2(1.,1.6);
+		float g=exp(-dot(d,d)*7.);
+		ALBEDO=col*g*.35;
+	}else{
+		float lam=.62+.38*step(.38,fract(uv.y*70.));                       // waagrechte Lamellen
+		float band=.85+.15*sin(uv.x*23.+seed*5.)*sin(uv.x*7.1+TIME*.3);     // ungleichmäßig helle Spalten
+		float t=floor(TIME*14.);
+		float fl=.82+.18*h1(t)+(h1(t*.37)>.96?-.45:0.);                    // Flimmern, selten kurzer Aussetzer
+		float roll=.9+.1*smoothstep(.0,.08,abs(fract(uv.y-TIME*.11)-.5));   // langsamer Bildlauf-Streifen
+		float edge=smoothstep(0.,.04,uv.x)*smoothstep(0.,.04,1.-uv.x)*smoothstep(0.,.06,uv.y)*smoothstep(0.,.06,1.-uv.y);
+		vec3 c=mix(col,vec3(1.),.25)*.55;
+		ALBEDO=c*lam*band*fl*roll*edge;
+	}
+}
+"""
+var panel_shader: Shader
+
+
+func _light_panel(pos: Vector3, b: Basis, txt: String, col: Color, hgt: float) -> void:
+	if neon_font == null:
+		neon_font = load("res://art/Inter-Light.otf")
+	if panel_shader == null:
+		panel_shader = Shader.new()
+		panel_shader.code = PANEL_SH
+	var root = Node3D.new()
+	deco.add_child(root)
+	root.transform = Transform3D(b, pos)
+	var fs = 128
+	var px = hgt / float(fs) * 1.25
+	var tw = neon_font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * px * 1.08
+	var W = tw + hgt * 0.9
+	var H = hgt * 1.7
+	for hl in [1.0, 0.0]:
+		var q = QuadMesh.new()
+		q.size = Vector2(W, H) * (2.2 if hl > 0.5 else 1.0)
+		var m = ShaderMaterial.new()
+		m.shader = panel_shader
+		m.set_shader_parameter("col", Vector3(col.r, col.g, col.b))
+		m.set_shader_parameter("seed", randf() * 10.0)
+		m.set_shader_parameter("halo", hl)
+		var mi = MeshInstance3D.new()
+		mi.mesh = q
+		mi.material_override = m
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = Vector3(0, 0, -0.05 if hl > 0.5 else 0.0)
+		root.add_child(mi)
+	# Rahmen-Träger: dunkler Kasten dahinter, damit die Tafel an etwas hängt
+	var bx = BoxMesh.new()
+	bx.size = Vector3(W * 1.04, H * 1.06, 0.3)
+	var bm = StandardMaterial3D.new()
+	bm.albedo_color = Color(0.03, 0.03, 0.05)
+	var bmi = MeshInstance3D.new()
+	bmi.mesh = bx
+	bmi.material_override = bm
+	bmi.position = Vector3(0, 0, -0.2)
+	root.add_child(bmi)
+	var l = Label3D.new()
+	l.text = txt
+	l.font = neon_font
+	l.font_size = fs
+	l.pixel_size = px
+	l.outline_size = 10
+	l.modulate = Color(col.r * 0.35 + 0.65, col.g * 0.35 + 0.65, col.b * 0.35 + 0.65) * 1.7
+	l.outline_modulate = Color(col.r, col.g, col.b, 0.35)
+	l.shaded = false
+	l.double_sided = false
+	l.position = Vector3(0, 0, 0.03)
+	root.add_child(l)
 
 
 # Neon-Schriftzug aus einzelnen Buchstaben (Röhren-Look: dünne Schrift, heller Kern, farbiger Schein);
@@ -15729,7 +15824,7 @@ func _tunnel(dt: float) -> void:
 		k = maxf(k, clampf(minf(zl - tu[0] + 2.0, tu[1] - zl + 2.0) / 7.0, 0.0, 1.0))
 	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
 	wenv.ambient_light_energy = lerpf(0.35 * _newr("amb", 1.0), 0.02, tun_k)
-	wenv.fog_density = lerpf((0.03 if _jungle() else 0.012) * float(fx.env.fog), 0.0, tun_k)
+	wenv.fog_density = lerpf((0.03 if _jungle() else (0.012 if _noir() else 0.016)) * float(fx.env.fog), 0.0, tun_k)
 	var fog_on = float(fx.env.fog) > 0.01
 	if wenv.fog_enabled != fog_on:
 		wenv.fog_enabled = fog_on
