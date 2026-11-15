@@ -12148,7 +12148,8 @@ func _replay(dt: float) -> void:
 			hy = lerpf(0.10, 0.25, (st - RK_DROP) / 0.25)
 		var bkw = wv.size() >= 4 and float(wv[3]) < 0.0
 		var rb = Basis(-fr.rr, -fr.fw, -fr.uu) if bkw else Basis(fr.rr, fr.fw, -fr.uu)
-		ps[i].global_transform = Transform3D(rb, fr.c + fr.uu * hy + wo)
+		var rsc = 1.6 if state == "kill" else 1.0   # in der Wiederholung etwas größer, damit man sie anfliegen sieht
+		ps[i].global_transform = Transform3D(rb.scaled(Vector3(rsc, rsc, rsc)), fr.c + fr.uu * hy + wo)
 	var pm = _pool("mines", f0.m.size(), func():
 		return _glow_node(_lowsphere(0.12, 12, 6), Color(1, 0.15, 0.1), 6.0))
 	for i in range(f0.m.size()):
@@ -12626,7 +12627,7 @@ func _kc_start() -> void:
 	AudioServer.playback_speed_scale = 0.75
 
 
-const KC_PASS = [[-1.7, -0.05, 0.8], [-0.5, 0.75, 0.28], [-0.35, 1.15, 0.5]]   # Einschlag-Wiederholung: von, bis (s zum Treffer), Tempo
+const KC_PASS = [[-1.7, -0.05, 0.8], [-0.85, 0.6, 0.38], [-0.35, 1.15, 0.5]]   # Einschlag-Wiederholung: von, bis (s zum Treffer), Tempo
 
 
 func _kc_rewind(t: float) -> void:
@@ -12872,17 +12873,16 @@ func _kc_cam_imp() -> bool:
 				ta = V
 				up = fv.uu
 		1:
-			# Einschlag von der Seite, starke Zeitlupe: Kamera auf der Fahrbahn neben dem Treffpunkt, leicht davor
-			# fährt mit dem Ziel mit (bei einem Abschuss bleibt sie an der Absturzstelle stehen)
-			var lc = vl + sd * (1.5 if inpipe else (2.1 if tight else 3.2))
+			# Schräg von vorn: Kamera ein paar Schiffslängen vor dem Ziel, seitlich und erhöht, schaut zurück –
+			# vorn das Schiff, dahinter jagt die Rakete heran bis zum Einschlag (fährt mit dem Ziel mit)
+			var lc = vl + sd * (1.2 if inpipe else (1.1 if tight else 1.7))
 			if not pf:
-				if absf(clampf(lc, -lim, lim) - vl) < 1.2:
-					lc = vl - sd * (2.0 if tight else 2.8)   # auf dieser Seite kein Platz: andere Seite
 				lc = clampf(lc, -lim, lim)
-			var cs = T.sframe(vz + 3.2, lc)
-			ro = cs.c + cs.uu * (1.75 if inpipe else (0.95 if tight else 1.35))   # Röhre: Richtung Mitte, weg von den Leuchtrippen
-			ta = V - fv.fw * 0.3
-			fov = 60.0
+			var cs = T.sframe(vz + 6.0, lc)
+			ro = cs.c + cs.uu * (1.25 if inpipe else (1.0 if tight else 1.35))
+			var tb = T.sframe(vz - 5.0, vl)
+			ta = V.lerp(tb.c + tb.uu * 0.3, 0.35)
+			fov = 40.0   # leichtes Tele: Schiff groß, die anfliegende Rakete dahinter gut zu sehen
 		_:
 			# noch einmal von schräg hinten oben: Rakete fliegt ins Heck, Explosion vor der Kamera
 			var lc2 = vl - sd * 0.7
@@ -12928,6 +12928,11 @@ func _kc_cam_imp() -> bool:
 				kc.isk = kk + 1
 				var kpath = OS.get_environment("SHOTPATH").replace(".png", "_i%d.png" % kk)
 				get_tree().process_frame.connect(func(): get_viewport().get_texture().get_image().save_png(kpath), CONNECT_ONE_SHOT)
+	if OS.get_environment("KCDBG") != "" and int(kc.pass) == 1:
+		for w in rp.get("w", []):
+			var fw2 = T.sframe(float(w[0]), float(w[1]))
+			var wp: Vector3 = fw2.c + fw2.uu * 0.25
+			print("KCRK own=", w[2], " dz=", snappedf(float(w[0]) - vz, 0.1), " scr=", cam.unproject_position(wp), " inf=", cam.is_position_in_frustum(wp), " shipscr=", cam.unproject_position(V))
 	if OS.get_environment("KCDBG") != "":
 		print("KCIMP pass=", kc.pass, " rel=", snappedf(rel, 0.01), " camfw·toImpact=", snappedf((-cam.global_transform.basis.z).dot((I - ro).normalized()), 0.02), " dist=", snappedf(ro.distance_to(I), 0.1), " tight=", tight, " pipe=", pf)
 	return true
