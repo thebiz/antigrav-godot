@@ -9109,6 +9109,58 @@ func _kc_passes(t0: float, vi: int, sid: int) -> Array:
 	return P
 
 
+# Rauchfahne der Raketen in der Einschlag-Wiederholung: graue Wölkchen an den Stellen, an denen dieselbe
+# Rakete in den Aufnahmebildern davor war – folgt also der echten Flugbahn, wird nach hinten breiter und blasser
+const SMOKE_N = 12
+func _rp_smoke(F: Array, W: Array) -> void:
+	var on = state == "kill" and kc.get("ir", false)
+	var n = W.size() * SMOKE_N if on else 0
+	var pz = _pool("smoke", n, func():
+		var q = QuadMesh.new()
+		q.size = Vector2(1, 1)
+		var m = StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		m.albedo_texture = _puff_tex()
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+		var mi = MeshInstance3D.new()
+		mi.mesh = q
+		mi.material_override = m
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+		return mi)
+	if n == 0:
+		return
+	var ref = float(ships[kc.victim].z)
+	var i0: int = rp.i
+	for j in range(W.size()):
+		var wv: Array = W[j]
+		var key = int(wv[7]) * 16 + int(wv[5]) if wv.size() >= 8 else -1
+		for k in range(SMOKE_N):
+			var mi: MeshInstance3D = pz[j * SMOKE_N + k]
+			var fi = i0 - (k + 1) * 2   # alle 2 Aufnahmebilder (1/15 s) ein Wölkchen
+			var hp = null
+			if key >= 0 and fi >= 0 and fi < F.size():
+				for w in F[fi].w:
+					if (w as Array).size() >= 8 and int(w[7]) * 16 + int(w[5]) == key:
+						hp = w
+						break
+			if hp == null or float(hp[6]) < RK_DROP + 0.05:
+				mi.visible = false
+				continue
+			var hz = float(hp[0])
+			hz -= T.LAP * round((hz - ref) / T.LAP)
+			var hf = T.sframe(hz, float(hp[1]))
+			var age = float(k + 1) / SMOKE_N
+			mi.global_position = hf.c + hf.uu * (0.27 + 0.25 * age)
+			var sz = 0.22 + 0.9 * age
+			mi.scale = Vector3(sz, sz, sz)
+			var gr = 0.62 - 0.2 * age
+			((mi.material_override) as StandardMaterial3D).albedo_color = Color(gr, gr, gr * 1.04, 0.6 * (1.0 - age))
+
+
 func _kc_cap(pos: Vector3, r: float, fr := 0.3) -> float:
 	if state != "kill" or not kc.get("ir", false) or r <= 0.001:
 		return 1.0
@@ -12233,7 +12285,7 @@ func _replay(dt: float) -> void:
 		# damit man sie auch von Weitem anfliegen sieht
 		var tr = Node3D.new()
 		tr.name = "trail"
-		for q in [[0.035, 3.2, Color(1.0, 0.9, 0.6), 9.0, 1.0], [0.11, 3.6, Color(1.0, 0.45, 0.15), 4.0, 0.45], [0.26, 4.2, Color(1.0, 0.3, 0.1), 2.0, 0.16]]:
+		for q in [[0.025, 0.55, Color(1.0, 0.85, 0.5), 6.0, 1.0], [0.06, 0.8, Color(1.0, 0.45, 0.15), 2.5, 0.4]]:   # kleine Flamme
 			var cm = CapsuleMesh.new()
 			cm.radius = q[0]
 			cm.height = q[1]
@@ -12261,8 +12313,8 @@ func _replay(dt: float) -> void:
 		# heller Kopf-Glanz, sieht man auch als winzigen Punkt
 		var hd = MeshInstance3D.new()
 		var hs = SphereMesh.new()
-		hs.radius = 0.16
-		hs.height = 0.32
+		hs.radius = 0.07
+		hs.height = 0.14
 		hs.radial_segments = 10
 		hs.rings = 5
 		hd.mesh = hs
@@ -12273,7 +12325,7 @@ func _replay(dt: float) -> void:
 		hm.albedo_color = Color(1.0, 0.75, 0.4)
 		hm.emission_enabled = true
 		hm.emission = Color(1.0, 0.75, 0.4)
-		hm.emission_energy_multiplier = 6.0
+		hm.emission_energy_multiplier = 3.0
 		hm.no_depth_test = true
 		hm.render_priority = 11
 		hd.material_override = hm
@@ -12293,14 +12345,15 @@ func _replay(dt: float) -> void:
 			hy = lerpf(0.10, 0.25, (st - RK_DROP) / 0.25)
 		var bkw = wv.size() >= 4 and float(wv[3]) < 0.0
 		var rb = Basis(-fr.rr, -fr.fw, -fr.uu) if bkw else Basis(fr.rr, fr.fw, -fr.uu)
-		var rsc = 1.6 if state == "kill" else 1.0   # in der Wiederholung etwas größer, damit man sie anfliegen sieht
+		var rsc = 1.0
 		var trn = ps[i].get_node_or_null("trail")
 		if trn != null:
 			# Schweif erst nach dem Zünden, kurz nach dem Start noch kurz
 			# nur im Blick von vorn – bei den Kameras hinter der Rakete läge er sonst groß quer vor dem Bild
 			(trn as Node3D).visible = state == "kill" and kc.get("ir", false) and int(kc.get("pass", 0)) == 1 and st >= RK_DROP
-			(trn as Node3D).scale = Vector3(1.0, clampf((st - RK_DROP) / 0.4, 0.15, 1.0), 1.0)
+			(trn as Node3D).scale = Vector3(1.0, clampf((st - RK_DROP) / 0.3, 0.2, 1.0), 1.0)
 		ps[i].global_transform = Transform3D(rb.scaled(Vector3(rsc, rsc, rsc)), fr.c + fr.uu * hy + wo)
+	_rp_smoke(F, W)
 	var pm = _pool("mines", f0.m.size(), func():
 		return _glow_node(_lowsphere(0.12, 12, 6), Color(1, 0.15, 0.1), 6.0))
 	for i in range(f0.m.size()):
@@ -12808,7 +12861,7 @@ func _kc_clean() -> void:
 			_qf(e.l)
 	zaps = keep_z
 	for n in get_children():
-		if not kc.before.has(n) and not tun_l.has(n) and not n.has_meta("keep") and not rp.get("shots", []).has(n) and not rp.get("mines", []).has(n) and not rp.get("walls", []).has(n) and not rp.get("swalls", []).has(n) and (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D or n.has_meta("deb")):
+		if not kc.before.has(n) and not tun_l.has(n) and not n.has_meta("keep") and not rp.get("shots", []).has(n) and not rp.get("smoke", []).has(n) and not rp.get("mines", []).has(n) and not rp.get("walls", []).has(n) and not rp.get("swalls", []).has(n) and (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D or n.has_meta("deb")):
 			n.queue_free()
 	_flash_fade(0.0)
 
