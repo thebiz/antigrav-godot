@@ -12151,6 +12151,8 @@ func _replay(dt: float) -> void:
 			tm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			tm.cull_mode = BaseMaterial3D.CULL_DISABLED
 			tm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+			tm.no_depth_test = true   # durch Schiff und Tunnelwand hindurch: die Rakete kommt meist genau von hinten
+			tm.render_priority = 10
 			var qc: Color = q[2]
 			tm.albedo_color = Color(qc.r, qc.g, qc.b, float(q[4]))
 			tm.emission_enabled = true
@@ -12173,10 +12175,13 @@ func _replay(dt: float) -> void:
 		var hm = StandardMaterial3D.new()
 		hm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		hm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		hm.albedo_color = Color(1.0, 0.75, 0.4)
 		hm.emission_enabled = true
 		hm.emission = Color(1.0, 0.75, 0.4)
 		hm.emission_energy_multiplier = 6.0
+		hm.no_depth_test = true
+		hm.render_priority = 11
 		hd.material_override = hm
 		hd.position = Vector3(0, -0.4, 0)
 		tr.add_child(hd)
@@ -12927,11 +12932,11 @@ func _kc_cam_imp() -> bool:
 		1:
 			# Schräg von vorn: Kamera ein paar Schiffslängen vor dem Ziel, seitlich und erhöht, schaut zurück –
 			# vorn das Schiff, dahinter jagt die Rakete heran bis zum Einschlag (fährt mit dem Ziel mit)
-			var lc = vl + sd * (1.2 if inpipe else (1.1 if tight else 1.7))
+			var lc = vl + sd * (1.4 if inpipe else (1.3 if tight else 2.3))
 			if not pf:
 				lc = clampf(lc, -lim, lim)
 			var cs = T.sframe(vz + 6.0, lc)
-			ro = cs.c + cs.uu * (1.25 if inpipe else (1.0 if tight else 1.35))
+			ro = cs.c + cs.uu * (1.5 if inpipe else (1.3 if tight else 2.0))   # höher: der Blick über das Schiff hinweg auf die Strecke dahinter
 			var tb = T.sframe(vz - 5.0, vl)
 			ta = V.lerp(tb.c + tb.uu * 0.3, 0.35)
 			fov = 40.0   # leichtes Tele: Schiff groß, die anfliegende Rakete dahinter gut zu sehen
