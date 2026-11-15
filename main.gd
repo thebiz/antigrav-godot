@@ -7330,6 +7330,7 @@ void fragment(){
 	emb.draw.connect(func(): _emb_draw(emb))
 	cl.add_child(emb)
 	hud.emb = emb
+	bpn.visibility_changed.connect(func(): emb.visible = bpn.visible)   # Symbol immer nur zusammen mit der Tafel
 	var bt = mk.call(24, HORIZONTAL_ALIGNMENT_CENTER)
 	bt.reparent(bd)
 	bt.modulate = Color(1, 0.75, 0.4)
@@ -11735,6 +11736,8 @@ func _replay_start() -> void:
 	hud.rpphoto.text = "PHOTO"
 	hud.flwrow.visible = true
 	hud.board.visible = false
+	if hud.has("emb") and is_instance_valid(hud.emb):
+		hud.emb.visible = false
 	hud.rdim.visible = false
 	hud.vxb.visible = false   # Video-Export vorerst aus (zu langsam); Baustein bleibt für später im Code
 	hud.rpsave.text = "SAVE REPLAY"
@@ -12770,6 +12773,8 @@ func _board_update(dt: float) -> void:
 	hud.ring.visible = not show
 	if show:
 		hud.fire.visible = false
+	if hud.has("emb") and is_instance_valid(hud.emb):
+		(hud.emb as Control).visible = show and (hud.board as Control).visible   # Symbol nur mit der Tafel
 	if not show:
 		board_t = 0.0
 		board_man = -1
@@ -17816,6 +17821,8 @@ func _soft_reset() -> bool:
 	if hud.has("again") and is_instance_valid(hud.again):
 		hud.again.visible = false
 	hud.board.visible = false
+	if hud.has("emb") and is_instance_valid(hud.emb):
+		hud.emb.visible = false
 	hud.rdim.visible = false
 	hud.res.text = ""
 	hud.res.visible = true
