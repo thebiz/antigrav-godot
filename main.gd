@@ -17509,12 +17509,25 @@ func _fin_flow(place: int, out := false) -> void:
 					who = i
 		who = maxi(who, 1)
 	fin = {"t": 0.0, "win": win, "who": who, "fly": win and not ships[0].out, "phase": 0}
+	# SKIP links, sofort: die Kamerafahrt ums Schiff abbrechen (danach Feier/Comic, die haben ihren eigenen SKIP an derselben Stelle)
+	var fsl = CanvasLayer.new()
+	fsl.layer = 10
+	add_child(fsl)
+	var fsb = _skip_btn()
+	fsb.pressed.connect(_fin_skip)
+	fsl.add_child(fsb)
+	fin.sl = fsl
 	if OS.get_environment("FINFLASH") != "":
 		# nur zum Testen: Rennende direkt nach einer Explosion, mit dem längsten Ergebnistext
 		hud.res.text = "1st  ·  LAST ONE STANDING\n0:40.41"
 		_flash(Color(1.0, 0.9, 0.8), 1.0)
 		expo_v = 1.5
 	hud.layer.visible = false
+
+
+func _fin_skip() -> void:
+	if not fin.is_empty():
+		fin.fsk = true
 
 
 func _fin_update(dt: float) -> void:
@@ -17525,6 +17538,9 @@ func _fin_update(dt: float) -> void:
 		get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
 		get_tree().quit()
 	var fly_t = FLY_T
+	if OS.get_environment("FINSKIPT") != "" and fin.phase == 0 and fin.t >= float(OS.get_environment("FINSKIPT")) and not fin.get("fsk", false):
+		print("FINSKIP press t=", snappedf(fin.t, 0.01))
+		(fin.sl as CanvasLayer).get_child(0).emit_signal("pressed")
 	if fin.fly and fin.phase == 0 and fin.t >= 6.6 and not fin.has("lbl"):
 		# an den Düsen: Platz und Zeit einblenden
 		var cl = CanvasLayer.new()
@@ -17570,9 +17586,11 @@ func _fin_update(dt: float) -> void:
 		fin.lbl = cl
 	if fin.phase == 0:
 		var wait = fly_t if fin.fly else 1.2
-		if fin.t >= wait:
+		if fin.t >= wait or fin.get("fsk", false):
 			if fin.has("lbl") and is_instance_valid(fin.lbl):
 				_qf(fin.lbl)
+			if fin.has("sl") and is_instance_valid(fin.sl):
+				_qf(fin.sl)
 			if fin.win and not ships[0].out and not free_ride and not _jungle():
 				fin.phase = 5   # Siegerfeier am Ziel, danach die Comic-Seite
 				fin.pt = 0.0
