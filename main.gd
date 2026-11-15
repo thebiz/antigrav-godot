@@ -8971,13 +8971,248 @@ func _deb_ramp(gl: float, hu := 0.0) -> GradientTexture1D:
 func _fire_ball(pos: Vector3, k: float, am := 1.0, hu := 0.0) -> void:
 	if am < 0.01:
 		return
-	# Kill-Cam: Feuerball kleiner und nicht weißglühend – in der Zeitlupe überstrahlte er sonst das ganze Bild
+	_fb_boom(pos, k * 0.95 * clampf(am, 0.5, 1.4), hu)
+
+
+# ---------------------------------------------------------------- Explosionen aus echten Bildfolgen (Unity Labs, CC0)
+# Feuerball: 2–3 Bildfolgen (5×5) übereinander, zufällig gewählt, gedreht, gespiegelt, verschieden schnell –
+# zwischen den Einzelbildern weich überblendet (auch in der Zeitlupe flüssig). Weiche Kante zur Fahrbahn
+# (Tiefenvergleich), dadurch sitzt der Feuerball auf dem Boden statt davor. Danach Rauchschwaden (8×8),
+# die Schiffe beim Durchfahren zur Seite drücken und als Schleppe mitziehen, und ein Brandfleck.
+const FB_SH = """
+shader_type spatial;
+render_mode unshaded,blend_mix,depth_draw_never,cull_disabled,shadows_disabled;
+uniform sampler2D tex : source_color, filter_linear_mipmap, repeat_disable;
+uniform float grid=5.;
+uniform float soft=0.8;
+uniform vec3 smk=vec3(1.);
+instance uniform float fr=0.;
+instance uniform float al=1.;
+instance uniform float rot=0.;
+instance uniform float flip=1.;
+instance uniform float em=2.5;
+void vertex(){
+	mat4 mv=VIEW_MATRIX*mat4(INV_VIEW_MATRIX[0],INV_VIEW_MATRIX[1],INV_VIEW_MATRIX[2],MODEL_MATRIX[3]);
+	float sx=length(MODEL_MATRIX[0].xyz);
+	MODELVIEW_MATRIX=mv*mat4(vec4(sx,0.,0.,0.),vec4(0.,sx,0.,0.),vec4(0.,0.,sx,0.),vec4(0.,0.,0.,1.));
+}
+vec4 cel(float f,vec2 uv){
+	float n=grid*grid;
+	f=clamp(f,0.,n-1.);
+	vec2 c=vec2(mod(f,grid),floor(f/grid));
+	return texture(tex,(c+clamp(uv,vec2(.004),vec2(.996)))/grid);
+}
+void fragment(){
+	vec2 uv=UV-.5;
+	uv.x*=flip;
+	float cs=cos(rot),sn=sin(rot);
+	uv=vec2(cs*uv.x-sn*uv.y,sn*uv.x+cs*uv.y)+.5;
+	float m=step(0.,uv.x)*step(uv.x,1.)*step(0.,uv.y)*step(uv.y,1.);
+	float f0=floor(fr);
+	vec4 c=mix(cel(f0,uv),cel(f0+1.,uv),fr-f0);
+	float sf=1.;
+	float lum=max(c.r,max(c.g,c.b));
+	ALBEDO=c.rgb*smk*(1.+em*smoothstep(.55,1.,lum));
+	ALPHA=c.a*al*sf*m;
+}
+"""
+var fb_sh: Shader
+var fb_mats = {}
+var fbs = []      # Feuerball-Ebenen {n, t, dur, n0}
+var smk = []      # Rauchschwaden {n, p, v, t, life, sz, fr, fs}
+var scorchs = []  # Brandflecken {n, t}
+const SMOKE_MAX = 90
+
+
+func _fb_mat(key: String) -> ShaderMaterial:
+	if fb_mats.has(key):
+		return fb_mats[key]
+	if fb_sh == null:
+		fb_sh = Shader.new()
+		fb_sh.code = FB_SH
+	var m = ShaderMaterial.new()
+	m.shader = fb_sh
+	m.set_shader_parameter("tex", load("res://fx/%s.png" % key))
+	m.set_shader_parameter("grid", 8.0 if key == "wisp8" else 5.0)
+	m.set_shader_parameter("soft", 1.2 if key in ["wisp8", "smoke5"] else 0.7)
+	# Rauch leicht ins Blau der Nacht ziehen, damit er zur Stadt passt
+	m.set_shader_parameter("smk", Vector3(0.62, 0.64, 0.78) if key in ["wisp8", "smoke5"] else Vector3(1, 1, 1))
+	fb_mats[key] = m
+	return m
+
+
+func _fb_quad(key: String, pos: Vector3, size: float) -> MeshInstance3D:
+	var mi = MeshInstance3D.new()
+	var q = QuadMesh.new()
+	q.size = Vector2(1, 1)
+	mi.mesh = q
+	mi.material_override = _fb_mat(key)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+	mi.global_position = pos
+	mi.scale = Vector3.ONE * size
+	mi.set_instance_shader_parameter("rot", randf() * TAU)
+	mi.set_instance_shader_parameter("flip", -1.0 if randf() < 0.5 else 1.0)
+	mi.set_instance_shader_parameter("fr", 0.0)
+	return mi
+
+
+func _fb_boom(pos: Vector3, k: float, hu := 0.0) -> void:
 	var kl = state == "kill"
-	if kl:
-		k *= 0.75
-	_burst(pos, fxr.fire, int(16 * k * am), 1.0, 2.0 * k, 5.5 * k, 180.0, Vector3(0, 1.6, 0), 4.0, 1.1 * k, 1.9 * k,
-		_ramp(_rh([[0.0, Color(4.5, 2.8, 1.2, 1) if kl else Color(12, 10, 7, 1)], [0.1, Color(3.6, 1.6, 0.4, 1) if kl else Color(9, 4.5, 1.2, 1)], [0.35, Color(4, 1.1, 0.15, 0.85)], [0.7, Color(1.0, 0.2, 0.04, 0.45)], [1.0, Color(0.1, 0.02, 0.01, 0)]], hu)),
-		_curve([[0.0, 0.5], [0.2, 1.25], [1.0, 1.6]]), false, false, 0.5 * k)
+	var keys = ["boom0", "boom1", "boom2"]
+	keys.shuffle()
+	var nl = 2 if k < 1.4 else 3
+	for i in range(nl):
+		var off = Vector3(randf_range(-0.5, 0.5), randf_range(0.0, 0.5), randf_range(-0.5, 0.5)) * k * (0.0 if i == 0 else 1.0)
+		var sz = k * (3.0 if i == 0 else randf_range(1.8, 2.6))
+		var mi = _fb_quad(keys[i], pos + off + Vector3(0, sz * 0.18, 0), sz)
+		mi.set_instance_shader_parameter("em", 0.6 if kl else 1.3)
+		fbs.append({"n": mi, "t": -0.06 * i, "dur": randf_range(1.5, 2.1) * (1.0 + 0.15 * k), "n0": 25.0, "g": randf_range(0.25, 0.6) * k})
+	# Staub-/Rauchball aus der Bildfolge ohne Feuer, etwas später und breiter: macht die Explosion „voll“
+	var sm = _fb_quad("smoke5", pos + Vector3(0, k * 0.4, 0), k * 3.6)
+	sm.set_instance_shader_parameter("em", 0.0)
+	fbs.append({"n": sm, "t": -0.12, "dur": 3.2, "n0": 25.0, "g": 0.35 * k, "smk": true})
+
+
+func _smoke_cloud(sf: Dictionary, pos: Vector3, k: float, amt: float, life: float) -> void:
+	var n = clampi(int(round(9.0 * k * amt)), 4, 22)
+	while smk.size() + n > SMOKE_MAX and smk.size() > 0:
+		_qf(smk[0].n)
+		smk.remove_at(0)
+	for i in range(n):
+		var a = randf() * TAU
+		var r = randf_range(0.2, 1.4) * k
+		var p: Vector3 = pos + sf.rr * (cos(a) * r) + sf.fw * (sin(a) * r * 1.3) + sf.uu * randf_range(0.1, 0.9) * k
+		var sz = randf_range(1.6, 2.6) * k
+		var mi = _fb_quad("wisp8", p, sz)
+		mi.set_instance_shader_parameter("em", 0.0)
+		mi.set_instance_shader_parameter("al", 0.0)
+		var out: Vector3 = (p - pos)
+		out = out - sf.uu * out.dot(sf.uu)
+		smk.append({"n": mi, "p": p, "v": out.normalized() * randf_range(1.5, 4.0) * k + sf.uu * randf_range(0.3, 1.0), "t": -randf_range(0.15, 0.5),
+			"life": randf_range(5.0, 8.0) * life, "sz": sz, "fr": randf() * 63.0, "fs": randf_range(3.0, 6.0), "up": sf.uu, "spin": randf_range(-0.4, 0.4), "rot": randf() * TAU})
+
+
+func _scorch(sf: Dictionary, k: float) -> void:
+	if not sf.has("c"):
+		return
+	if scorchs.size() >= 8:
+		_qf(scorchs[0].n)
+		scorchs.remove_at(0)
+	var d = Decal.new()
+	d.texture_albedo = _scorch_tex()
+	d.size = Vector3(3.2 * k, 1.2, 3.2 * k)
+	d.modulate = Color(1, 1, 1, 0.85)
+	d.albedo_mix = 1.0
+	d.upper_fade = 0.3
+	d.lower_fade = 0.3
+	add_child(d)
+	var up: Vector3 = sf.uu
+	var rr: Vector3 = sf.rr.rotated(up, randf() * TAU)
+	d.global_transform = Transform3D(Basis(rr, up, rr.cross(up)), sf.c + up * 0.1)
+	scorchs.append({"n": d, "t": 0.0})
+
+
+var scorch_tex: ImageTexture
+func _scorch_tex() -> ImageTexture:
+	if scorch_tex != null:
+		return scorch_tex
+	var nz = FastNoiseLite.new()
+	nz.seed = 5
+	nz.frequency = 0.06
+	var N = 128
+	var img = Image.create(N, N, false, Image.FORMAT_RGBA8)
+	for y in range(N):
+		for x in range(N):
+			var dx = (x - N * 0.5) / (N * 0.5)
+			var dy = (y - N * 0.5) / (N * 0.5)
+			var r = sqrt(dx * dx + dy * dy) + nz.get_noise_2d(x, y) * 0.35
+			var a = clampf(1.0 - smoothstep(0.35, 0.95, r), 0.0, 1.0)
+			var glow = clampf(1.0 - smoothstep(0.0, 0.25, r), 0.0, 1.0)
+			img.set_pixel(x, y, Color(0.03 + 0.05 * glow, 0.025 + 0.02 * glow, 0.02, a * 0.9))
+	scorch_tex = ImageTexture.create_from_image(img)
+	return scorch_tex
+
+
+func _fb_update(dt: float) -> void:
+	for i in range(fbs.size() - 1, -1, -1):
+		var e: Dictionary = fbs[i]
+		if not is_instance_valid(e.n):
+			fbs.remove_at(i)
+			continue
+		e.t += dt
+		var u = e.t / float(e.dur)
+		if u >= 1.0:
+			_qf(e.n)
+			fbs.remove_at(i)
+			continue
+		var mi: MeshInstance3D = e.n
+		mi.visible = e.t >= 0.0
+		var uu = clampf(u, 0.0, 1.0)
+		mi.set_instance_shader_parameter("fr", uu * (float(e.n0) - 1.001))
+		mi.set_instance_shader_parameter("al", clampf((1.0 - uu) * 3.0, 0.0, 1.0))
+		mi.global_position += Vector3(0, float(e.g) * dt, 0)   # Hitze steigt
+	for i in range(scorchs.size() - 1, -1, -1):
+		var sc: Dictionary = scorchs[i]
+		if not is_instance_valid(sc.n):
+			scorchs.remove_at(i)
+			continue
+		sc.t += dt
+		(sc.n as Decal).modulate.a = 0.85 * clampf(1.0 - (sc.t - 8.0) / 4.0, 0.0, 1.0)
+		if sc.t > 12.0:
+			_qf(sc.n)
+			scorchs.remove_at(i)
+	if smk.is_empty():
+		return
+	# Schiffe in der Nähe: drücken den Rauch weg und ziehen ihn als Wirbel-Schleppe hinter sich her
+	var near = []
+	for o in ships:
+		if o.out or not is_instance_valid(o.node):
+			continue
+		var nd: Node3D = o.node
+		if absf(float(o.z) - cam.global_position.z) > 80.0:
+			continue
+		near.append([nd.global_position, T.frame(float(o.z)).fw, float(o.spd)])
+	for i in range(smk.size() - 1, -1, -1):
+		var e: Dictionary = smk[i]
+		if not is_instance_valid(e.n):
+			smk.remove_at(i)
+			continue
+		e.t += dt
+		if e.t > e.life:
+			_qf(e.n)
+			smk.remove_at(i)
+			continue
+		var p: Vector3 = e.p
+		var v: Vector3 = e.v
+		for sh in near:
+			var sp: Vector3 = sh[0]
+			var d: Vector3 = p - sp
+			var dl = d.length()
+			var R = 1.8 + e.sz * 0.25
+			if dl < R:
+				var fw: Vector3 = sh[1]
+				var side: Vector3 = d - fw * d.dot(fw)
+				var push = (1.0 - dl / R)
+				# zur Seite wegdrücken, ein Stück mitreißen und um die Flugachse drehen (Wirbel)
+				v += side.normalized() * push * 26.0 * dt + fw * push * float(sh[2]) * 1.6 * dt + fw.cross(side).normalized() * push * 14.0 * dt
+				e.spin = float(e.spin) + push * 3.0 * dt * signf(fw.cross(side).dot(e.up))
+		v *= exp(-dt * 0.9)
+		v += (e.up as Vector3) * 0.18 * dt
+		p += v * dt
+		e.p = p
+		e.v = v
+		var mi: MeshInstance3D = e.n
+		mi.visible = e.t >= 0.0
+		mi.global_position = p
+		var age = clampf(e.t / e.life, 0.0, 1.0)
+		mi.scale = Vector3.ONE * float(e.sz) * (1.0 + age * 0.9)
+		e.rot = float(e.rot) + float(e.spin) * dt
+		mi.set_instance_shader_parameter("rot", e.rot)
+		e.fr = fmod(float(e.fr) + dt * float(e.fs), 63.0)
+		mi.set_instance_shader_parameter("fr", e.fr)
+		var a = clampf(e.t / 0.6, 0.0, 1.0) * clampf((1.0 - age) * 2.0, 0.0, 1.0)
+		mi.set_instance_shader_parameter("al", a * 0.75)
 
 
 # Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
@@ -9311,6 +9546,11 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 				_ramp(_rh([[0.0, Color(5, 4, 9, 1)], [0.6, Color(1.6, 1.0, 4.0, 1)], [1.0, Color(0.4, 0.2, 1.0, 0)]], hu)), null, true, false, 0.3)
 			_burst(e.pos - f.uu * 0.4, fxr.debris, int(12 * sp), 1.8, 5.0, 12.0, 60.0, Vector3(0, -15, 0), 0.2, 0.8, 2.4, _deb_ramp(float(fx.boom.dglow), hu), null, false, true, 0.3)
 		fx_age = old_age
+		# echter Feuerball beim Zurückschnappen, Rauch bleibt hängen, Brandfleck auf der Fahrbahn
+		_fb_boom(e.pos, 1.15 * gz, hu)
+		var sfg = T.sframe(float(e.get("z", 0.0)), float(e.get("lat", 0.0))) if e.has("z") else {"c": e.pos - f.uu * 0.6, "uu": f.uu, "rr": f.rr, "fw": f.fw}
+		_smoke_cloud(sfg, e.pos, 1.3 * gz, 1.0, 1.0)
+		_scorch(sfg, 1.2 * gz)
 		var ring = MeshInstance3D.new()
 		ring.mesh = fxr.ring
 		var rm = _shader_mat(fxr.ring_code)
@@ -9410,11 +9650,9 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	var sm = float(X.smoke)
 	var sl = float(X.slife)
 	if sm > 0.01:
-		var smr = _ramp([[0.0, Color(0.16, 0.14, 0.13, 0)], [0.04, Color(0.14, 0.12, 0.11, 0.9)], [0.35, Color(0.1, 0.1, 0.11, 0.7)], [1.0, Color(0.08, 0.08, 0.09, 0)]], false)
-		var smc = _curve([[0.0, 0.35], [0.25, 1.0], [1.0, 1.7]])
-		_burst(pos + f.uu * 0.5, fxr.smoke, int(10 * k * sm), 8.0 * sl, 0.8, 2.6 * k, 80.0, Vector3(0, 0.35, 0), 1.6, 1.4 * k, 2.8 * k, smr, smc, false, false, 0.6 * k)
-		# zweite, dichtere Wolke dicht über der Fahrbahn, hängt noch länger
-		_later(0.25, func(): _burst(pos + f.uu * 0.2, fxr.smoke, int(6 * k * sm), 10.0 * sl, 0.3, 1.4 * k, 100.0, Vector3(0, 0.15, 0), 1.2, 1.8 * k, 3.2 * k, smr, smc, false, false, 0.9 * k))
+		# Rauchwolke aus einzelnen Schwaden: bleibt über der Strecke hängen, Schiffe verwirbeln sie beim Durchfahren
+		_smoke_cloud(sf0, pos, k, sm, sl)
+	_scorch(sf0, k)
 	# Funkenregen
 	if float(X.sparks) > 0.01:
 		_burst(pos, fxr.spark, int(45 * k * float(X.sparks)), 1.3, 7.0 * k, 18.0 * k, 180.0, Vector3(0, -10, 0), 0.6, 0.7, 1.4,
@@ -12088,6 +12326,7 @@ func _zap_update(dt: float) -> void:
 
 # Explosionen, schwarze Löcher, Blitze: laufen im Rennen und in der Wiederholung
 func _fx_update(dt: float) -> void:
+	_fb_update(dt)
 	for i in range(fxs.size() - 1, -1, -1):
 		var e = fxs[i]
 		if e.get("gb", false):
@@ -15473,6 +15712,17 @@ func _shot() -> void:
 						print("DEM n=", shot_n, " ", demons.map(func(d): return [snappedf(d.t, 0.01), snappedf(d.dz, 0.1), snappedf(d.h, 0.1), snappedf(d.a, 0.01)]), " en=", ships.map(func(x): return snappedf(float(x.en), 0.01)))
 					if shot_n % 10 == 0:
 						print("BLK n=", shot_n, " ", ships.map(func(x): return [snappedf(float(x.lat), 0.01), snappedf(float(x.get("blk", 0.0)), 0.1), snappedf(float(x.spd), 0.1)]))
+				if OS.get_environment("EXPT") != "":   # Test: Explosion vor dir, Bilder in Abständen (EXPS = alle n Bilder)
+					var e0 = int(OS.get_environment("EXPT"))
+					var ez = float(OS.get_environment("EXPZ")) if OS.get_environment("EXPZ") != "" else ships[0].z + float(OS.get_environment("EXPD"))
+					if shot_n == e0:
+						if OS.get_environment("EXPGB") != "":
+							_gbomb(ez, 0.0)
+						else:
+							_explode(ez, 0.0, OS.get_environment("EXPBIG") != "")
+					if shot_n > e0 and (shot_n - e0) % int(OS.get_environment("EXPS")) == 0 and shot_n - e0 <= 8 * int(OS.get_environment("EXPS")):
+						get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH").replace(".png", "_%d.png" % ((shot_n - e0) / int(OS.get_environment("EXPS")) - 1)))
+						print("EXP n=", shot_n, " fbs=", fbs.size(), " smk=", smk.size(), " sc=", scorchs.size())
 				if OS.get_environment("MAGT") != "" and shot_n % 5 == 0:
 					print("MAG z=", snappedf(float(ships[0].z), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " wpn=", ships[0].wpn)
 				if OS.get_environment("PLUMET") != "" and shot_n % 10 == 0:

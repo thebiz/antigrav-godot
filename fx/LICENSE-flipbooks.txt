@@ -1,0 +1,2 @@
+boom0/1/2.png, smoke5.png, wisp8.png: Unity Labs Paris VFX image sequences & flipbooks (Explosion00, Explosion01, Explosion02, Explosion01-nofire, WispySmoke01), released under CC0 1.0.
+https://unity.com/blog/engine-platform/free-vfx-image-sequences-flipbooks
