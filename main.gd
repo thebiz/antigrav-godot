@@ -9025,6 +9025,42 @@ func _rp_shots(F: Array, i: int, u: float) -> Array:
 	return out
 
 
+# Vorübergehende Diagnose-Zeile in der Kill-Cam: wurde deine Rakete aufgezeichnet, wo ist sie, wird sie gezeichnet?
+func _kc_diag() -> String:
+	if kc.is_empty():
+		return ""
+	var nown = 0
+	var best = 1e9
+	var bw = null
+	for w in rp.get("w", []):
+		if int(w[2]) == 0:
+			nown += 1
+			var d = float(w[0]) - float(ships[kc.victim].z)
+			if absf(d) < absf(best):
+				best = d
+				bw = w
+	# in wie vielen Aufnahmebildern der 3 s vor dem Treffer gab es eine eigene Rakete?
+	var fr_n = 0
+	var fr_rk = 0
+	for f in rec:
+		if float(f.t) > float(kc.t0) - 3.0 and float(f.t) <= float(kc.t0) + 0.1:
+			fr_n += 1
+			for w in f.w:
+				if int(w[2]) == 0:
+					fr_rk += 1
+					break
+	var vis = "-"
+	var ps: Array = rp.get("shots", [])
+	if bw != null:
+		var fw2 = T.sframe(float(bw[0]), float(bw[1]))
+		var wp: Vector3 = fw2.c + fw2.uu * 0.25
+		vis = "%s/%s" % ["im Bild" if cam.is_position_in_frustum(wp) else "außerhalb", "an" if ps.size() > 0 and (ps[0] as Node3D).visible else "aus"]
+	var kd = str(kc.get("kind", kc_pending.get("kind", "?")))
+	return "\n%s · %s · Rakete %d\n%d/%d Bilder · %s · %s" % [
+		"IMPACT" if kc.get("ir", false) else "KILL", kd, nown, fr_rk, fr_n,
+		("%.1f m" % best).replace(".", ",").replace("-", "−") if best < 1e8 else "–", vis]
+
+
 func _kc_cap(pos: Vector3, r: float, fr := 0.3) -> float:
 	if state != "kill" or not kc.get("ir", false) or r <= 0.001:
 		return 1.0
@@ -12733,7 +12769,7 @@ func _kc_step(dt: float) -> void:
 		var tt2 = Time.get_ticks_msec() / 1000.0
 		kco.dot.visible = fmod(tt2, 1.0) < 0.6
 		kco.rp.visible = fmod(tt2, 1.4) < 1.0
-		kco.ts.text = "%s   ×%.2f" % [_fmt(maxf(0.0, rp.t)), float(ps[2])]
+		kco.ts.text = "%s   ×%.2f" % [_fmt(maxf(0.0, rp.t)), float(ps[2])] + _kc_diag()
 		hud.top.text = kc.top
 		if rp.t - kc.t0 >= float(ps[1]):
 			if int(kc.pass) < KC_PASS.size() - 1:
@@ -12762,7 +12798,7 @@ func _kc_step(dt: float) -> void:
 	var tt = Time.get_ticks_msec() / 1000.0
 	kco.dot.visible = fmod(tt, 1.0) < 0.6
 	kco.rp.visible = fmod(tt, 1.4) < 1.0
-	kco.ts.text = "%s   ×%.2f" % [_fmt(maxf(0.0, rp.t)), rate]
+	kco.ts.text = "%s   ×%.2f" % [_fmt(maxf(0.0, rp.t)), rate] + _kc_diag()
 	hud.top.text = kc.top
 	if rp.t >= kc.end:
 		_kc_end()
