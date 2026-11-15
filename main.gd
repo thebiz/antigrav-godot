@@ -831,7 +831,7 @@ func _post_update(dt: float) -> void:
 		city_root.visible = blk_v < 0.7
 	if sky_m != null:
 		sky_m.set_shader_parameter("bk", blk_v)
-	_sp(post, "bo", blk_v)
+	_sp(post, "bo", blk_v if OS.get_environment("DEMNOBO") == "" else 0.0)
 	if ck.has("body") and is_instance_valid(ck.body):
 		var dm = 1.0 - 0.85 * blk_v   # Cockpit wird dunkel, nur seine Leuchten bleiben
 		(ck.body as CanvasItem).self_modulate = Color(dm, dm, dm)
@@ -9457,7 +9457,7 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 			# Licht aus, sobald jemand in der Nähe ist (vor oder hinter ihm)
 			for x in ships:
 				if x.idx != o.idx and not x.out and absf(x.z - o.z) < 35.0:
-					_blackout(o, 7.0 if sup else 5.0)
+					_blackout(o, 10.0 if sup else 5.5)
 					o.wpn = ""
 					break
 		_:
@@ -9663,26 +9663,203 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			g.sauto = sup
 			_snd("shield")
 		"blk":
-			_blackout(g, 7.0 if sup else 5.0)
+			_blackout(g, 10.0 if sup else 5.5)
 
 
-# Blackout: allen anderen geht das Licht aus – nur Neon bleibt. Gegner fahren unsicher, du (als Opfer) siehst fast nichts mehr.
-func _blackout(src: Dictionary, dur: float) -> void:
+# Blackout: überall geht das Licht aus – nur Neon bleibt. Die Gegner des Schützen fahren unsicher,
+# und leuchtende Dämonen jagen sie durch die Dunkelheit (beim MEGA-Blackout beißen sie auch zu).
+func _blackout(src: Dictionary, dur: float, mega := false) -> void:
 	_snd("blackout", 2.0)
+	var nv = 0
 	for x in ships:
 		if x.idx == src.idx or x.out:
 			continue
+		nv += 1
 		if x.idx == 0:
-			blk_t = maxf(blk_t, dur)
-			blk_d = maxf(blk_t, 0.1)
 			_msg("BLACKOUT", Color(0.72, 1.0, 0.12))
 			_vib(80, 0.7)
 			_after(0.35, func(): _snd("vo_blk", 3.0))   # geflüstert, während das Licht ausgeht
 		else:
 			x.blk = maxf(float(x.get("blk", 0.0)), dur)
+		# Dämonen: einer je Gegner, beim Super- und Mega-Blackout zwei
+		var nd = 2 if (mega or dur > 7.0) else 1
+		for k in range(nd):
+			_demon_spawn(src, x, dur, mega, k, nd)
+	# dunkel wird es für alle, auch für dich als Schützen (fahren kannst du aber normal)
+	blk_t = maxf(blk_t, dur)
+	blk_d = maxf(blk_t, 0.1)
 	if src.idx == 0:
-		_msg("LIGHTS OUT FOR THEM", Color(0.72, 1.0, 0.12))
+		_msg("LIGHTS OUT", Color(0.72, 1.0, 0.12))
 		_flash(Color(0.0, 0.0, 0.0), 0.25)
+
+
+# ---------------------------------------------------------------- Blackout-Dämonen
+# Leuchtende Lichtwesen (zwei Bilder: Flügel offen / zu), flattern als Billboard mit Leuchtschweif
+# um ihr Opfer herum. Position relativ zum Opfer (dz längs, dl quer, h Höhe über der Fläche) – so
+# halten sie mit jedem Tempo mit und bleiben auch in der Röhre an der richtigen Wand.
+var demons = []
+var demon_tex = {}
+const DEMON_TRAIL = 5
+
+
+func _demon_mat(tex: Texture2D) -> StandardMaterial3D:
+	var m = StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.no_depth_test = false
+	m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.albedo_texture = tex
+	m.vertex_color_use_as_albedo = true
+	return m
+
+
+func _demon_spawn(src: Dictionary, tg: Dictionary, dur: float, mega: bool, k: int, nk: int) -> void:
+	if demon_tex.is_empty():
+		for v in ["a", "b"]:
+			for f in ["o", "c"]:
+				demon_tex[v + f] = load("res://fx/demon_%s%s.png" % [v, f])
+	var var_ = "b" if (mega or randf() < 0.35) else "a"   # beim MEGA rot, sonst meist violett-cyan
+	var root = Node3D.new()
+	add_child(root)
+	var sz = (1.25 if mega else 1.0) * randf_range(0.9, 1.1)
+	var sp = []
+	# [0] Flügel offen, [1] Flügel zu, dahinter der Schweif (ältere Positionen, blasser)
+	for i in range(2 + DEMON_TRAIL):
+		var s3 = Sprite3D.new()
+		s3.texture = demon_tex[var_ + ("c" if i == 1 else "o")]
+		s3.pixel_size = 0.0032 * sz * (1.0 if i < 2 else 1.0 - 0.09 * (i - 1))
+		s3.material_override = _demon_mat(s3.texture)
+		s3.modulate = Color(1, 1, 1, 0)
+		s3.top_level = i >= 2
+		root.add_child(s3)
+		sp.append(s3)
+	var lt = OmniLight3D.new()
+	lt.light_color = Color(1.0, 0.35, 0.45) if var_ == "b" else Color(0.55, 0.45, 1.0)
+	lt.omni_range = 3.5
+	lt.light_energy = 0.0
+	lt.shadow_enabled = false
+	root.add_child(lt)
+	# Start: am Schützen, wenn er nah genug ist; sonst tauchen sie vor dem Opfer aus der Dunkelheit auf
+	var dz0 = float(src.z - tg.z)
+	var near = absf(dz0) < 60.0
+	var d = {"n": root, "sp": sp, "l": lt, "tg": int(tg.idx), "src": int(src.idx), "t": -0.12 * k, "dur": dur, "mega": mega,
+		"dz": dz0 if near else 28.0, "dl": (src.lat - tg.lat) if near else randf_range(-1.5, 1.5), "h": 1.6 if near else 4.5,
+		"ph": randf() * TAU, "w": randf_range(1.3, 1.9) * (1.0 if k % 2 == 0 else -1.0), "fl": randf() * TAU, "hist": [],
+		"bites": [], "bt": -1.0, "dz0": dz0 if near else 28.0, "dl0": (src.lat - tg.lat) if near else 0.0, "sw": randf_range(1.8, 3.2), "a": 0.0, "k": k, "nk": nk}
+	if mega:
+		# zwei Bisse je Dämon, versetzt: 4 × 6,25 % = 25 % je Gegner
+		for b in range(2):
+			d.bites.append(2.2 + (b * 2 + k) * (dur - 3.6) / 4.0)
+	demons.append(d)
+
+
+func _demon_free(d: Dictionary) -> void:
+	_qf(d.n)
+	for s3 in d.sp:
+		_qf(s3)
+
+
+func _demons_step(dt: float) -> void:
+	if demons.is_empty():
+		return
+	if state != "race":
+		for d in demons:
+			_demon_free(d)
+		demons.clear()
+		return
+	for i in range(demons.size() - 1, -1, -1):
+		var d: Dictionary = demons[i]
+		d.t += dt
+		var t: float = d.t
+		var tg: Dictionary = ships[d.tg]
+		var leave = t > d.dur - 0.9 or tg.out
+		if t > d.dur + 0.4 or (tg.out and d.a <= 0.01):
+			_demon_free(d)
+			demons.remove_at(i)
+			continue
+		# Ziel-Lage relativ zum Opfer
+		var ph = d.ph + t * d.w
+		var gz = (6.5 if tg.idx == 0 else 3.8) + 2.6 * sin(ph)
+		var gl = 1.7 * cos(ph * 1.3)
+		var gh = 1.25 + 0.55 * sin(ph * 2.1 + 1.0)
+		if tg.idx == 0:
+			# bei dir: immer wieder ein Sturzflug knapp an der Kamera vorbei
+			var sw = fposmod(t - d.sw, 3.4)
+			if t > 1.5 and sw < 0.9:
+				var u = sw / 0.9
+				gz = lerpf(6.0, -5.0, u)
+				gl = (1.9 if d.k % 2 == 0 else -1.9) * (1.0 - 0.25 * u)
+				gh = 2.2 + 0.5 * sin(u * PI)
+				if sw < dt * 1.5:
+					_snd("cm_whoosh", -4.0, randf_range(0.8, 1.1))
+		# erst über dem Schützen aufsteigen (dort sieht man sie kurz), dann ab zum Opfer
+		if t < 0.75:
+			gz = float(d.dz0) + 2.5
+			gl = float(d.dl0) + (1.3 if d.k % 2 == 0 else -1.3)
+			gh = 3.0
+		# MEGA: Biss – im Sturz aufs Schiff, beim Treffen Schaden
+		var bk = 0.0
+		for bti in d.bites:
+			var du = t - float(bti)
+			if du > -0.55 and du < 0.35:
+				bk = maxf(bk, 1.0 - absf(du) / (0.55 if du < 0.0 else 0.35))
+			if du >= 0.0 and float(d.bt) < float(bti):
+				d.bt = bti
+				_demon_bite(d, tg)
+		gz = lerpf(gz, 0.4, bk)
+		gl = lerpf(gl, 0.0, bk)
+		gh = lerpf(gh, 0.55, bk)
+		if leave:
+			gh += (t - (d.dur - 0.9)) * 6.0
+			gz += (t - (d.dur - 0.9)) * 10.0
+		# hinfliegen: anfangs schnell aufholen, dann weich folgen
+		var kf = 1.0 - exp(-dt * (3.0 if t < 0.75 else (2.2 if t < 1.6 else 5.0)))
+		d.dz = lerpf(d.dz, gz, kf)
+		d.dl = lerpf(d.dl, gl, kf)
+		d.h = lerpf(d.h, gh, kf)
+		var lat = clampf(tg.lat + d.dl, -T.lim(tg.z + d.dz), T.lim(tg.z + d.dz)) if not T.pipe_full(tg.z + d.dz) else tg.lat + d.dl
+		var f = T.sframe(tg.z + d.dz, lat)
+		var pos: Vector3 = f.c + f.uu * d.h + f.rr * (0.35 * sin(t * 3.1 + d.ph)) + f.uu * (0.18 * sin(t * 4.3 + d.fl))
+		(d.n as Node3D).global_position = pos
+		# einblenden / ausblenden
+		var a = clampf(t / 0.5, 0.0, 1.0) * clampf((d.dur + 0.4 - t) / 1.0, 0.0, 1.0)
+		if tg.out:
+			a = maxf(0.0, d.a - dt * 2.0)
+		d.a = a
+		# Flügelschlag: offen ↔ zu, beim Biss Flügel angelegt
+		var flap = 0.5 + 0.5 * sin(t * (9.0 + 4.0 * bk) + d.fl)
+		flap = lerpf(flap, 0.0, bk)
+		var gl2 = 0.8 * (1.0 + 0.25 * bk)   # nicht über 1: sonst frisst das Leuchten (Bloom) die Form weg
+		d.sp[0].modulate = Color(gl2, gl2, gl2, a * smoothstep(0.25, 0.75, flap))
+		d.sp[1].modulate = Color(gl2, gl2, gl2, a * (1.0 - smoothstep(0.25, 0.75, flap)))
+		# Schweif
+		var hist: Array = d.hist
+		hist.push_front(pos)
+		if hist.size() > DEMON_TRAIL * 2 + 1:
+			hist.pop_back()
+		for j in range(DEMON_TRAIL):
+			var s3: Sprite3D = d.sp[2 + j]
+			var hp: Vector3 = hist[mini((j + 1) * 2, hist.size() - 1)]
+			s3.global_position = hp
+			s3.texture = d.sp[1 if flap < 0.5 else 0].texture
+			var ta = a * 0.13 * (1.0 - float(j) / DEMON_TRAIL)
+			s3.modulate = Color(gl2, gl2 * 0.9, gl2, ta)
+		(d.l as OmniLight3D).light_energy = a * (0.8 + 2.0 * bk)
+
+
+func _demon_bite(d: Dictionary, tg: Dictionary) -> void:
+	_dmg(tg, 0.0625, int(d.src), "demon", true)
+	_explode(tg.z, tg.lat, false, 0.18 if tg.idx == 0 else 0.3)
+	if tg.idx == 0:
+		_flash(Color(0.9, 0.1, 0.25), 0.22)
+		_vib(120, 0.9)
+		shake = maxf(shake, 0.45)
+		_snd("cm_hit", 0.0, randf_range(0.8, 1.0))
+	elif absf(tg.z - ships[0].z) < 40.0:
+		_snd("cm_hit", -8.0, randf_range(0.8, 1.0))
 
 
 # MEGA: jede Waffe hat ihre eigene, große Wirkung – stark, aber kein Sofortsieg (höchstens ~40 % Schaden je Gegner)
@@ -9741,8 +9918,8 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 			g.mshield = 8.0
 			_snd("shield")
 		"blk":
-			# 9 s Blackout für alle anderen
-			_blackout(g, 9.0)
+			# 10 s Blackout, die Dämonen greifen an (je Gegner zusammen 25 % Schaden)
+			_blackout(g, 10.0, true)
 		"wand":
 			# zwei Barrieren hintereinander: bremsen deutlich, je 20 % Schaden (zusammen 40 %)
 			for dz in [20.0, 30.0]:
@@ -11399,6 +11576,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		quake2 = _quake_step(quake2, dt)
 	_bwaves_update(dt)
 	_fx_update(dt)
+	_demons_step(dt)
 	# Schild: blaue Hülle (für alle Schiffe)
 	for o in ships:
 		_shield_vis(o)
@@ -11964,6 +12142,7 @@ func _replay(dt: float) -> void:
 		_rp_next()
 	hud.top.text = "REPLAY · %s     %s" % [RP_CAMS[rp.ci][1], _fmt(minf(rp.t, F[F.size() - 1].t))]
 	_fx_update(dt)
+	_demons_step(dt)
 
 
 func _rp_photo() -> void:
@@ -14929,8 +15108,15 @@ func _shot() -> void:
 					if shot_n % 5 == 0 and shot_n <= 60:
 						print("APC n=", shot_n, " auto=", snappedf(float(ships[0].auto), 0.01), " hold=", ships[0].get("ahold", false))
 				if OS.get_environment("BLKFIRE") != "":   # Test: du feuerst Blackout
+					var bf = OS.get_environment("BLKFIRE")
+					if shot_n == 30 and OS.get_environment("BLKNEAR") != "":
+						for q in range(1, ships.size()):
+							ships[q].z = ships[0].z + float(OS.get_environment("BLKNEAR")) + q * 4.0
 					if shot_n == 40:
-						_blackout(ships[0], 5.0)
+						_blackout(ships[1] if bf.begins_with("ai") else ships[0], 10.0 if bf.ends_with("mega") or bf.ends_with("sup") else 5.5, bf.ends_with("mega"))
+					if OS.get_environment("BLKSHOT") != "" and shot_n > 40 and shot_n % int(OS.get_environment("BLKSHOT")) == 0:
+						get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH").replace(".png", "_%03d.png" % shot_n))
+						print("DEM n=", shot_n, " ", demons.map(func(d): return [snappedf(d.t, 0.01), snappedf(d.dz, 0.1), snappedf(d.h, 0.1), snappedf(d.a, 0.01)]), " en=", ships.map(func(x): return snappedf(float(x.en), 0.01)))
 					if shot_n % 10 == 0:
 						print("BLK n=", shot_n, " ", ships.map(func(x): return [snappedf(float(x.lat), 0.01), snappedf(float(x.get("blk", 0.0)), 0.1), snappedf(float(x.spd), 0.1)]))
 				if OS.get_environment("MAGT") != "" and shot_n % 5 == 0:
