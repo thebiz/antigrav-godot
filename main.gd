@@ -875,7 +875,11 @@ func _post_update(dt: float) -> void:
 	post.set_shader_parameter("grc", _v3(_hs(Color(0.75, 0.55, 1.0), best.get("rimh", 0.0))))
 	post.set_shader_parameter("gs", gs * bk)
 	post.set_shader_parameter("gr", (t - 0.55) * 1.1 if t >= 0.55 else -1.0)
-	post.set_shader_parameter("gk", bk * clampf(1.0 - (t - 0.55) / 0.8, 0.0, 1.0))
+	# Einschlag-Wiederholung: der Bildschirm-Ring der Rückstoßwelle lag in der Zeitlupe als dicker weißer Bogen über allem
+	var kimp = state == "kill" and kc.get("ir", false)
+	post.set_shader_parameter("gk", bk * clampf(1.0 - (t - 0.55) / 0.8, 0.0, 1.0) * (0.15 if kimp else 1.0))
+	if kimp:
+		post.set_shader_parameter("grb", best.get("rimb", 1.0) * 0.45)
 
 
 var post_spd = 0.0
@@ -1689,6 +1693,7 @@ render_mode unshaded,cull_disabled,blend_mix,depth_draw_always,shadows_disabled;
 uniform float pr=%f;
 uniform float z0=%f;
 uniform float z1=%f;
+uniform float nf=0.;   // Einschlag-Wiederholung: Ringe und Leuchtbahnen nahe der Kamera ausblenden
 // Bebenwelle (wie auf der Fahrbahn): läuft als glühender Ring durch die Röhre und hebt die Wand rundum an
 uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
 varying float qh;
@@ -1708,6 +1713,8 @@ void fragment(){
 	float pulse=smoothstep(.85,1.,fract(z/16.-TIME*1.4));
 	float qq=fract(z/5.-TIME*.7);
 	float chev=(1.-smoothstep(0.,.07,abs(qq-(.5-abs(ang)*.8))))*step(abs(ang),.5);
+	float nd=nf>0.?smoothstep(nf*.35,nf,length(VERTEX)):1.;
+	rib*=nd;ln*=nd;chev*=nd;
 	vec3 base=mix(vec3(.02,.03,.07),vec3(.04,.05,.09),bot);
 	vec3 c=base;
 	c+=lc*ln*(.6+1.3*pulse);
@@ -2068,6 +2075,12 @@ void fragment(){
 	mats["neonR"] = _neon(MG, 5.0)
 	mats["ringC"] = _neon(CY, 7.0 if not _jungle() else 1.2)
 	mats["ringM"] = _neon(MG, 7.0 if not _jungle() else 1.2)
+	for rk in ["ringC", "ringM"]:
+		# nahe an der Kamera ausblenden (nur in der Einschlag-Wiederholung aktiv, sonst 0): sonst liegt ein greller Bogen quer übers Bild
+		var rm: StandardMaterial3D = mats[rk]
+		rm.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_DITHER
+		rm.distance_fade_min_distance = 0.0
+		rm.distance_fade_max_distance = 0.001
 	mats["line"] = _neon(Color(0.8, 0.85, 1.0), 0.6)
 	mats["postL"] = _neon(CY, 2.2)
 	mats["postR"] = _neon(MG, 2.2)
@@ -6793,6 +6806,7 @@ func _kc_overlay() -> void:
 	sl.material = _shader_mat("""
 shader_type canvas_item;
 uniform sampler2D sc : hint_screen_texture, filter_linear_mipmap;
+uniform float kcol=0.;   // Einschlag-Wiederholung: Farben größtenteils behalten (in Schwarzweiß wurde jedes Neon zu einem weißen Fleck)
 void fragment(){
 	vec2 uv=SCREEN_UV;
 	// Aufnahme-Look: Farben fast raus, leicht kalt-blau, Bildzeilen, rollender Streifen, dunkle Ecken, roter Rahmen
@@ -6802,7 +6816,8 @@ void fragment(){
 	float mx=max(c.r,max(c.g,c.b));float mn=min(c.r,min(c.g,c.b));
 	float sat=(mx-mn)/(mx+.001);
 	float keep=smoothstep(.35,.75,mx)*smoothstep(.2,.55,sat)*smoothstep(.05,.3,c.r-c.b);
-	c=mix(vec3(l)*vec3(.92,.97,1.05),c*1.15,keep)*1.06;
+	keep=max(keep,kcol);
+	c=mix(vec3(l)*vec3(.92,.97,1.05)*(1.-.25*kcol),c*mix(1.15,.92,kcol),keep)*1.06;
 	float line=step(.5,fract(FRAGCOORD.y*.25))*.12;
 	float vig=smoothstep(.45,.95,length((uv-.5)*vec2(.8,1.)));
 	float roll=exp(-pow(abs((fract(uv.y-TIME*.12)-.5)*40.),2.))*.07;
@@ -6814,6 +6829,7 @@ void fragment(){
 	COLOR=vec4(c,1.);
 }""")
 	cl.add_child(sl)
+	kco.look = sl.material
 	var c = Color(1, 1, 1, 0.85)
 	for corner in range(4):
 		for k in range(2):
@@ -8873,8 +8889,8 @@ func _gbomb(z: float, lat: float, own := -1, hit := -1, sc := 1.0, sup := false)
 	_pev("hole")
 	_rev(["gb", z, lat, sc])
 	_fx_res()
-	var f = T.frame(z)
-	var pos: Vector3 = f.c + f.rr * lat + f.uu * 0.6
+	var f = T.sframe(z, lat)   # Fläche unter dem Loch (in der Röhre auch an der Wand)
+	var pos: Vector3 = f.c + f.uu * 0.6
 	var X: Dictionary = fx.gb
 	var hu = float(X.hue)
 	var gsc = float(X.scale) * sc   # Gesamtgröße: alles zusammen
@@ -8964,6 +8980,15 @@ func _glow_mat(c: Color, e: float) -> StandardMaterial3D:
 	return m
 
 
+# Einschlag-Wiederholung: Ringe und Druckwellen nicht bis an die Kamera wachsen lassen – sie lagen sonst als
+# grellweißer Bogen quer über dem Bild. Gibt den Faktor zurück, mit dem ein Radius r zu verkleinern ist.
+func _kc_cap(pos: Vector3, r: float, fr := 0.3) -> float:
+	if state != "kill" or not kc.get("ir", false) or r <= 0.001:
+		return 1.0
+	var lim = fr * pos.distance_to(cam.global_position)
+	return minf(1.0, lim / r)
+
+
 func _gb_update(e: Dictionary, dt: float) -> bool:
 	e.t += dt / e.get("ts", 1.0)
 	var gz: float = e.get("sz", 1.0)
@@ -8984,7 +9009,8 @@ func _gb_update(e: Dictionary, dt: float) -> bool:
 	if t < 0.55:
 		var u = t / 0.55
 		cr.scale = Vector3.ONE * (0.1 + 0.9 * pow(u, 1.5)) * e.get("cs", 1.0)
-		rg.scale = Vector3.ONE * (2.6 - 1.4 * u) * e.get("cs", 1.0)
+		var rgr = (2.6 - 1.4 * u) * e.get("cs", 1.0)
+		rg.scale = Vector3.ONE * rgr * _kc_cap(e.pos, rgr * 1.2, 0.1)
 		e.l.light_energy = 6.0 * u * e.get("lk", 1.0)
 	elif not e.snap:
 		e.snap = true
@@ -9037,7 +9063,7 @@ void fragment(){
 }""")
 		smt.set_shader_parameter("wc", _v3(_hs(Color(0.7, 0.5, 1.0), e.get("whu", hu))))
 		smt.set_shader_parameter("th", e.get("wt", 1.0))
-		smt.set_shader_parameter("br", e.get("wv", 1.0))
+		smt.set_shader_parameter("br", e.get("wv", 1.0) * (0.06 if state == "kill" and kc.get("ir", false) else 1.0))
 		sph.material_override = smt
 		sph.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		sph.extra_cull_margin = 20.0
@@ -9059,11 +9085,14 @@ void fragment(){
 		e.l.light_energy = 9.0 * pow(1.0 - u, 2.0) * e.get("lk", 1.0)
 		var f = e.f
 		var sc = (0.6 + 9.0 * pow(u, 0.5)) * gz
-		e.sw.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
+		sc *= _kc_cap(e.pos, sc)
+		e.sw.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.uu * 0.03)
 		e.swm.set_shader_parameter("u", u)
 		if e.has("sph"):
-			e.sph.scale = Vector3.ONE * (0.4 + 6.5 * pow(uw, 0.6)) * gz * e.get("wz", 1.0)
+			var spr = (0.4 + 6.5 * pow(uw, 0.6)) * gz * e.get("wz", 1.0)
+			e.sph.scale = Vector3.ONE * spr * _kc_cap(e.pos, spr)
 			e.sphm.set_shader_parameter("u", uw)
+			e.sphm.set_shader_parameter("br", e.get("wv", 1.0) * (0.06 if state == "kill" and kc.get("ir", false) else 1.0))
 		if u >= 1.0 and uw >= 1.0:
 			for k in ["core", "ring", "l", "sw", "sph"]:
 				if e.has(k):
@@ -9123,7 +9152,7 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 		rm.set_shader_parameter("rk", float(X.ring))
 		ring.material_override = rm
 		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		ring.global_transform = Transform3D(Basis(f.rr, f.uu, f.fw), f.c + f.rr * lat + f.uu * 0.03)
+		ring.global_transform = Transform3D(Basis(sf0.rr, sf0.uu, sf0.fw), sf0.c + sf0.uu * 0.03)
 		add_child(ring)
 	# Lichtblitz
 	var lt = OmniLight3D.new()
@@ -9134,7 +9163,7 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	lt.light_energy = 38.0 * float(X.light)
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
-	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light), "hu": hu})
+	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light), "hu": hu, "sf": sf0})
 	_snd("boom", 4.0 if big else 2.0, randf_range(0.85, 1.0), pos)
 	_snd("boom", 2.0, 0.55, pos)   # tiefer Wumms darunter
 	# Kamera rüttelt, je näher, desto stärker
@@ -11234,6 +11263,11 @@ func _weapons(dt: float, racing: bool) -> void:
 			else:
 				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
+			# Raketenkamera dabei: den Einschlag gleich noch einmal zeigen – Zeitlupe aus drei Blickwinkeln
+			if int(sh.own) == 0 and not mc.is_empty() and mc.sh == sh and kc.is_empty() and state == "race" and not free_ride:
+				if kc_pending.is_empty():
+					kc_pending = {"idx": hit.idx, "t0": rec_clk, "kind": "rocket"}
+				kc_pending.force = true
 			dead = true
 		elif hmk and sh.t > 5.0:
 			# Lenkrakete: nach 5 s ist der Sprit alle – sie verpufft ohne Schaden
@@ -11600,12 +11634,15 @@ func _fx_update(dt: float) -> void:
 		e.t += dt
 		var u = clampf(e.t / (0.7 if e.big else 0.5), 0.0, 1.0)
 		var sc = (0.6 + (8.0 if e.big else 5.5) * pow(u, 0.5)) * e.get("sz", 1.0)
-		var f = e.f
+		var f = e.get("sf", e.f)   # Fläche unter der Explosion (in der Röhre auch an der Wand)
 		if e.ring != null:
-			e.ring.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.rr * e.lat + f.uu * 0.03)
+			var imr = state == "kill" and kc.get("ir", false)
+			if imr:
+				sc = minf(sc, 2.2 * e.get("sz", 1.0))   # Einschlag-Wiederholung: Druckwelle klein halten, sie lief sonst quer durchs Bild
+			e.ring.global_transform = Transform3D(Basis(f.rr * sc, f.uu, f.fw * sc), f.c + f.uu * 0.03 + (Vector3.ZERO if e.has("sf") else f.rr * e.lat))
 			e.rm.set_shader_parameter("u", u)
 			# Druckwelle in der Kill-Cam schwächer – in Zeitlupe stand sie sonst als grellweißer Ring vor der Kamera
-			e.rm.set_shader_parameter("rk", float(fx.boom.ring) * (0.3 if state == "kill" else 1.0))
+			e.rm.set_shader_parameter("rk", float(fx.boom.ring) * (0.12 if imr else (0.3 if state == "kill" else 1.0)))
 			if u >= 1.0:
 				_qf(e.ring)
 				e.ring = null
@@ -11614,7 +11651,10 @@ func _fx_update(dt: float) -> void:
 		var tl = e.t
 		# in der Kill-Cam (Zeitlupe) gedämpft: der grelle Blitz dauert dort fünfmal so lang und brennt die Fahrbahn weiß aus
 		var kdim = 0.18 if state == "kill" else 1.0
-		lt2.light_energy = (38.0 * kdim * exp(-tl * 7.0) + 7.0 * (0.6 if state == "kill" else 1.0) * pow(clampf(1.0 - tl / 2.2, 0.0, 1.0), 1.6) * (1.0 + 0.15 * sin(tl * 37.0))) * e.get("lk", 1.0)
+		var kimp = state == "kill" and kc.get("ir", false)   # Einschlag-Wiederholung: Kamera ganz nah dran, Licht sonst grell weiß über allem
+		if kimp:
+			kdim = 0.06
+		lt2.light_energy = (38.0 * kdim * exp(-tl * 7.0) + 7.0 * (0.15 if kimp else (0.6 if state == "kill" else 1.0)) * pow(clampf(1.0 - tl / 2.2, 0.0, 1.0), 1.6) * (1.0 + 0.15 * sin(tl * 37.0))) * e.get("lk", 1.0)
 		lt2.light_color = _hs(Color(1.0, 0.92, 0.8).lerp(Color(1.0, 0.4, 0.08), clampf(tl * 2.2, 0.0, 1.0)), e.get("hu", 0.0))
 		lt2.omni_range = e.rg * (0.7 + 0.5 * exp(-tl * 3.0))
 		if tl >= 2.2:
@@ -11858,14 +11898,31 @@ func _replay(dt: float) -> void:
 	g.auto = 0.0
 	_orbs_update(dt, false)
 	var ps = _pool("shots", f0.w.size(), func():
-		var cap = CapsuleMesh.new()
-		cap.radius = 0.06
-		cap.height = 0.5
-		return _glow_node(cap, Color(1.0, 0.6, 0.2), 8.0))
+		var cap = CapsuleMesh.new()   # Plasma-Flamme
+		cap.radius = 0.028
+		cap.height = 0.2
+		var mi = _glow_node(cap, Color(1.0, 0.6, 0.2), 8.0)
+		mi.mesh = null
+		var fl = MeshInstance3D.new()
+		fl.mesh = cap
+		fl.material_override = mi.material_override
+		fl.position = Vector3(0, -0.36 - 0.07, 0)
+		mi.add_child(fl)
+		mi.add_child(_rocket_model(0.72))
+		return mi)
 	for i in range(f0.w.size()):
-		var fr = T.frame(f0.w[i][0])
-		var wo: Vector3 = _braid_off(fr, int(f0.w[i][4]), int(f0.w[i][5]), float(f0.w[i][6])) if (f0.w[i] as Array).size() >= 7 else Vector3.ZERO
-		ps[i].global_transform = Transform3D(Basis(fr.rr, fr.fw, -fr.uu), fr.c + fr.rr * f0.w[i][1] + fr.uu * 0.25 + wo)
+		var wv: Array = f0.w[i]
+		var fr = T.sframe(float(wv[0]), float(wv[1]))   # folgt auch der Röhrenwand
+		var wo: Vector3 = _braid_off(fr, int(wv[4]), int(wv[5]), float(wv[6])) if wv.size() >= 7 else Vector3.ZERO
+		var st: float = float(wv[6]) if wv.size() >= 7 else 9.0
+		var hy = 0.25
+		if st < RK_DROP:
+			hy = 0.34 - 0.24 * pow(st / RK_DROP, 2.0)
+		elif st < RK_DROP + 0.25:
+			hy = lerpf(0.10, 0.25, (st - RK_DROP) / 0.25)
+		var bkw = wv.size() >= 4 and float(wv[3]) < 0.0
+		var rb = Basis(-fr.rr, -fr.fw, -fr.uu) if bkw else Basis(fr.rr, fr.fw, -fr.uu)
+		ps[i].global_transform = Transform3D(rb, fr.c + fr.uu * hy + wo)
 	var pm = _pool("mines", f0.m.size(), func():
 		return _glow_node(_lowsphere(0.12, 12, 6), Color(1, 0.15, 0.1), 6.0))
 	for i in range(f0.m.size()):
@@ -12275,7 +12332,7 @@ func _kc_check() -> void:
 		kc_pending = {}
 		return
 	# Kill-Cam abgeschaltet (Standard): nur das K.o.-Comic, kein Replay
-	if int(cfg.get("kcam", 0)) != 1 and (not shot_s.contains("rkctest") or OS.get_environment("KCOFF") != ""):
+	if int(cfg.get("kcam", 0)) != 1 and not kc_pending.get("force", false) and (not shot_s.contains("rkctest") or OS.get_environment("KCOFF") != ""):
 		var vk: int = int(kc_pending.get("idx", -1))
 		kc_pending = {}
 		if int(cfg.get("comic", 1)) == 1 and vk >= 1 and vk <= 3:
@@ -12291,7 +12348,8 @@ func _kc_start() -> void:
 	_dg_flush()
 	var t0: float = kc_pending.t0
 	var F = rec
-	var ts = t0 - 5.0   # gut 5 s vorher einsteigen: man sieht, wie es dazu kam
+	var imp = str(kc_pending.get("kind", "")) == "rocket"   # Rakete: Einschlag-Wiederholung aus drei Blickwinkeln
+	var ts = t0 + float(KC_PASS[0][0]) if imp else t0 - 5.0   # sonst gut 5 s vorher einsteigen: man sieht, wie es dazu kam
 	var i = 0
 	while i < F.size() - 2 and F[i + 1].t <= ts:
 		i += 1
@@ -12327,7 +12385,7 @@ func _kc_start() -> void:
 						qdir = qk[1]
 	kc = {"qd": qdir, "t0": t0, "end": t0 + 2.4, "victim": kc_pending.idx, "imp": dzl, "kind": kc_pending.kind, "saved": saved, "hidden": hidden,
 		"before": get_children(), "fxs": fxs.duplicate(), "zaps": zaps.duplicate(), "top": hud.top.text, "side": 1.0 if randf() < 0.5 else -1.0,
-		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0}
+		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0, "ir": imp, "pass": 0, "kill": ships[kc_pending.idx].out}
 	if OS.get_environment("KCDBG") != "":
 		print("KCDBG imp=", dzl, " lz=", wrapf(dzl.x, T.ZST, T.ZST + T.LAP), " tun=", T.in_tun(wrapf(dzl.x, T.ZST, T.ZST + T.LAP), 8.0))
 	kc_pending = {}
@@ -12336,10 +12394,73 @@ func _kc_start() -> void:
 	hud.layer.visible = false
 	kco.layer.visible = true
 	kco.who.text = NAMES[kc.victim].to_upper()
+	kco.title.text = "REC   IMPACT  1/3" if imp else "REC   KILL CAM"
+	(kco.look as ShaderMaterial).set_shader_parameter("kcol", 0.7 if imp else 0.0)
 	AudioServer.playback_speed_scale = 0.75
 
 
+const KC_PASS = [[-1.7, -0.05, 0.8], [-0.5, 0.75, 0.28], [-0.35, 1.15, 0.5]]   # Einschlag-Wiederholung: von, bis (s zum Treffer), Tempo
+
+
+func _kc_rewind(t: float) -> void:
+	var F = rec
+	var i = 0
+	while i < F.size() - 2 and F[i + 1].t <= t:
+		i += 1
+	rp.t = t
+	rp.i = i
+	rp.ei = i
+
+
+# Effekte, die die Wiederholung erzeugt hat (Explosionen, Trümmer, Blitze), vor dem nächsten Durchgang wegräumen
+func _kc_clean() -> void:
+	var keep_fx = []
+	for e in fxs:
+		if kc.fxs.has(e):
+			keep_fx.append(e)
+	fxs = keep_fx
+	var keep_z = []
+	for e in zaps:
+		if kc.zaps.has(e):
+			keep_z.append(e)
+		else:
+			_qf(e.mi)
+			_qf(e.l)
+	zaps = keep_z
+	for n in get_children():
+		if not kc.before.has(n) and not tun_l.has(n) and not n.has_meta("keep") and not rp.get("shots", []).has(n) and not rp.get("mines", []).has(n) and not rp.get("walls", []).has(n) and not rp.get("swalls", []).has(n) and (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D or n.has_meta("deb")):
+			n.queue_free()
+	_flash_fade(0.0)
+
+
 func _kc_step(dt: float) -> void:
+	if kc.get("ir", false):
+		var ps: Array = KC_PASS[int(kc.pass)]
+		Engine.time_scale = float(ps[2])
+		AudioServer.playback_speed_scale = clampf(float(ps[2]) * 1.3, 0.45, 1.0)
+		_replay(dt)
+		if state != "kill":
+			return
+		var vv: Dictionary = ships[kc.victim]
+		if rp.t <= kc.t0 or not kc.get("kill", false):
+			kc.dz = vv.z
+			kc.dlat = vv.lat
+		var tt2 = Time.get_ticks_msec() / 1000.0
+		kco.dot.visible = fmod(tt2, 1.0) < 0.6
+		kco.rp.visible = fmod(tt2, 1.4) < 1.0
+		kco.ts.text = "%s   ×%.2f" % [_fmt(maxf(0.0, rp.t)), float(ps[2])]
+		hud.top.text = kc.top
+		if rp.t - kc.t0 >= float(ps[1]):
+			if int(kc.pass) < KC_PASS.size() - 1:
+				kc.pass = int(kc.pass) + 1
+				kco.title.text = "REC   IMPACT  %d/3" % (int(kc.pass) + 1)
+				_kc_clean()
+				_kc_rewind(kc.t0 + float(KC_PASS[int(kc.pass)][0]))
+				kc.side = -float(kc.side)
+				_flash(Color(1, 1, 1), 0.12)
+			else:
+				_kc_end()
+		return
 	var rel = rp.t - kc.t0
 	# Zeitlupe: anfangs etwas schneller, um den Treffer herum ganz langsam
 	# Vorlauf normal, Anflug etwas langsamer, Einschlag lange in starker Zeitlupe (Trümmer fliegen), dann Rundflug
@@ -12366,6 +12487,9 @@ func _kc_end() -> void:
 	if kc.is_empty():
 		return
 	_bc("killcam end")
+	_near_fade(0.0)
+	if kc.has("fill"):
+		_qf(kc.fill)
 	_dg_flush()
 	# alles zurück auf den Stand des laufenden Rennens
 	for k in range(ships.size()):
@@ -12405,9 +12529,10 @@ func _kc_end() -> void:
 		_rset("qs2", 0.0)
 	hud.top.text = kc.top
 	var vic: int = kc.victim
+	var was_kill = kc.get("kill", true) or (vic < ships.size() and ships[vic].out)
 	kc = {}
 	state = "race"
-	if int(cfg.get("comic", 1)) == 1 and vic >= 1 and vic <= 3:
+	if int(cfg.get("comic", 1)) == 1 and vic >= 1 and vic <= 3 and was_kill:
 		_comic_start("ko", vic)
 	hud.layer.visible = true
 	kco.layer.visible = false
@@ -12463,10 +12588,130 @@ func _kc_free_d(z: float, dir: float, base: float) -> float:
 	return base
 
 
+# Einschlag-Wiederholung: alle Positionen auf der Fahrbahnoberfläche gerechnet (stimmt auch in Röhre und Tunnel),
+# Kameras bleiben innerhalb der Fahrbahn und wenig über ihr – keine Wand, keine Decke im Bild
+# Einschlag-Wiederholung: nahe Leuchtringe und Röhrenrippen ausblenden (d = 0 schaltet es ab)
+func _near_fade(d: float) -> void:
+	for rk in ["ringC", "ringM"]:
+		if mats.has(rk):
+			(mats[rk] as StandardMaterial3D).distance_fade_max_distance = maxf(0.001, d)
+	if mats.has("pipe"):
+		(mats.pipe as ShaderMaterial).set_shader_parameter("nf", d)
+
+
+func _kc_cam_imp() -> bool:
+	_near_fade(4.5)
+	var v: Dictionary = ships[kc.victim]
+	var alive = rp.t <= kc.t0 or not kc.get("kill", false)   # nur ein Treffer: Kamera fährt mit dem Ziel weiter
+	var vz: float = v.z if alive else kc.dz
+	var vl: float = v.lat if alive else kc.dlat
+	var fv = T.sframe(vz, vl)
+	var V: Vector3 = fv.c + fv.uu * 0.32
+	var ip: Vector2 = kc.imp
+	var fi = T.sframe(ip.x, ip.y)
+	var I: Vector3 = fi.c + fi.uu * 0.32
+	var rel = rp.t - kc.t0
+	var sd: float = kc.side
+	var pf = T.pipe_full(ip.x)
+	var inpipe = T.pipe_k(ip.x) > 0.05
+	var tight = T.in_tun(T.lz(ip.x), 5.0) or inpipe
+	var lim = T.lim(ip.x) - 0.45
+	var up: Vector3 = fi.uu
+	var ro: Vector3
+	var ta: Vector3
+	var fov = 56.0
+	match int(kc.pass):
+		0:
+			# Anflug: hinter der Rakete her, Blick aufs Ziel
+			var fr: Dictionary = rec[mini(rp.i, rec.size() - 1)]
+			var rk = null
+			var best = 1e9
+			for w in fr.get("w", []):
+				if (w as Array).size() >= 4 and (int(w[2]) != 0 or float(w[3]) < 0.0):
+					continue
+				var dz = vz - float(w[0])
+				if dz > -0.5 and dz < 80.0 and dz < best:
+					best = dz
+					rk = w
+			if rk != null:
+				var fs = T.sframe(float(rk[0]), float(rk[1]))
+				var S: Vector3 = fs.c + fs.uu * 0.3
+				ro = S - fs.fw * 2.4 + fs.uu * 0.55 + fs.rr * (0.35 * sd)
+				ta = S.lerp(V, 0.75)
+				up = fs.uu
+				fov = lerpf(58.0, 38.0, clampf((best - 4.0) / 25.0, 0.0, 1.0))
+			else:
+				ro = V - fv.fw * 6.0 + fv.uu * 1.3
+				ta = V
+				up = fv.uu
+		1:
+			# Einschlag von der Seite, starke Zeitlupe: Kamera auf der Fahrbahn neben dem Treffpunkt, leicht davor
+			# fährt mit dem Ziel mit (bei einem Abschuss bleibt sie an der Absturzstelle stehen)
+			var lc = vl + sd * (1.5 if inpipe else (2.1 if tight else 3.2))
+			if not pf:
+				if absf(clampf(lc, -lim, lim) - vl) < 1.2:
+					lc = vl - sd * (2.0 if tight else 2.8)   # auf dieser Seite kein Platz: andere Seite
+				lc = clampf(lc, -lim, lim)
+			var cs = T.sframe(vz + 3.2, lc)
+			ro = cs.c + cs.uu * (1.75 if inpipe else (0.95 if tight else 1.35))   # Röhre: Richtung Mitte, weg von den Leuchtrippen
+			ta = V - fv.fw * 0.3
+			fov = 60.0
+		_:
+			# noch einmal von schräg hinten oben: Rakete fliegt ins Heck, Explosion vor der Kamera
+			var lc2 = vl - sd * 0.7
+			if not pf:
+				lc2 = clampf(lc2, -lim, lim)
+			var cb = T.sframe(vz - 6.0 + clampf(rel + 0.35, 0.0, 2.0) * 1.0, lc2)
+			ro = cb.c + cb.uu * (1.8 if inpipe else (1.25 if tight else 2.2))
+			ta = V + fv.fw * 0.8
+			fov = 54.0
+	if not pf and not tight:
+		up = Vector3.UP
+	# Schiffe, die direkt vor der Kamera stehen würden (meist du selbst), ausblenden – das Ziel bleibt sichtbar
+	for o in ships:
+		if o.idx != kc.victim and (o.node as Node3D).visible:
+			var op: Vector3 = (o.node as Node3D).global_position
+			var seg: Vector3 = ta - ro
+			var tq = clampf((op - ro).dot(seg) / maxf(0.001, seg.length_squared()), 0.0, 1.0)
+			if op.distance_to(ro) < 7.0 or op.distance_to(ro + seg * tq) < 1.1:
+				(o.node as Node3D).visible = false
+	cam.global_position = ro
+	if (ta - ro).length() > 0.01:
+		cam.look_at(ta, up)
+	cam.fov = fov
+	# Aufhelllicht an der Kamera: das Ziel ist in der Röhre und im Tunnel sonst nur ein schwarzer Umriss
+	if not is_instance_valid(kc.get("fill")):   # wird zwischen den Durchgängen mit aufgeräumt
+		var fl = OmniLight3D.new()
+		fl.light_color = Color(0.85, 0.9, 1.0)
+		fl.omni_range = 5.0
+		fl.light_energy = 0.45
+		fl.shadow_enabled = false
+		fl.light_specular = 0.0   # keine grellen Glanzflecken auf der nassen Fahrbahn
+		add_child(fl)
+		kc.fill = fl
+	kc.fill.global_position = ro.lerp(ta, 0.25) + up * 0.6
+	_flash_fade(0.05)
+	# Test: Bilder bei Durchgang:Zeit (IMPSHOT="0:-0.8,1:0.0,2:0.2")
+	if OS.get_environment("IMPSHOT") != "":
+		var lst = OS.get_environment("IMPSHOT").split(",")
+		var kk = int(kc.get("isk", 0))
+		if kk < lst.size():
+			var pr = lst[kk].split(":")
+			if int(pr[0]) == int(kc.pass) and rel >= float(pr[1]):
+				kc.isk = kk + 1
+				var kpath = OS.get_environment("SHOTPATH").replace(".png", "_i%d.png" % kk)
+				get_tree().process_frame.connect(func(): get_viewport().get_texture().get_image().save_png(kpath), CONNECT_ONE_SHOT)
+	if OS.get_environment("KCDBG") != "":
+		print("KCIMP pass=", kc.pass, " rel=", snappedf(rel, 0.01), " camfw·toImpact=", snappedf((-cam.global_transform.basis.z).dot((I - ro).normalized()), 0.02), " dist=", snappedf(ro.distance_to(I), 0.1), " tight=", tight, " pipe=", pf)
+	return true
+
+
 func _kc_cam() -> bool:
 	# Blitz und Überbelichtung in der Kill-Cam schnell abklingen lassen (vorher blieb das Bild beim Einschlag weiß stehen)
 	_flash_fade(0.06)
 	expo_v = minf(expo_v, 0.3)
+	if kc.get("ir", false):
+		return _kc_cam_imp()
 	# Kill-Cam je nach Waffe: Rakete = Kamera fliegt auf der Rakete mit; Schockwelle = reitet auf der Welle;
 	# Mine = flach auf der Fahrbahn neben der Mine; Kraftfeld & Rest = von hinten. Nach dem Knall: kurzer Rundflug über den Trümmern.
 	var v: Dictionary = ships[kc.victim]
@@ -14583,6 +14828,8 @@ func _shot() -> void:
 					Input.parse_input_event(me)
 		if fr_n % 10 == 0 and cm.has("t"):
 			print("CMT f=", fr_n, " t=", snappedf(cm.t, 0.01), " skip=", snappedf(cm.skip, 0.01), " fade=", snappedf(float(cm.get("fade", 1.0)), 0.01), " fingers=", fingers.size())
+		if OS.get_environment("CMSHOT") != "" and fr_n == int(OS.get_environment("CMSHOT")):
+			get_viewport().get_texture().get_image().save_png(OS.get_environment("CMSHOTP"))
 		if OS.get_environment("CMSKIP") != "" and fr_n == int(OS.get_environment("CMSKIP")) and cm.has("sb"):
 			(cm.sb as Button).pressed.emit()
 	for a in [shot_s]:
@@ -15259,7 +15506,7 @@ func _mc_cam(dt: float) -> bool:
 	if mc.hold < 0.0 and shots.has(sh) and tg0 != null and not tg0.out:
 		var dzi = fposmod(float(tg0.z) - float(sh.z), T.LAP)
 		var clo = maxf(1.5, float(sh.get("vs", 20.0)) - float(tg0.spd))   # Annäherungstempo
-		near = dzi < 7.0 and dzi / clo < 0.32   # gut ein Drittel Sekunde vor dem Einschlag
+		near = false and dzi < 7.0 and dzi / clo < 0.32   # ersetzt durch die Einschlag-Wiederholung (_kc_cam_imp)
 	if near and not mc.has("ci"):
 		mc.ci = 0.0
 		mc.side = 1.0 if randf() < 0.5 else -1.0
@@ -16433,7 +16680,7 @@ func _comic_build(kind: String) -> void:
 	c.gui_input.connect(func(ev):
 		if (ev is InputEventScreenTouch or ev is InputEventMouseButton) and ev.pressed and cm.has("c") and cm.t > 0.6 and cm.skip < 0.0:
 			cm.skip = cm.t)
-	if kind == "start":
+	if kind != "ko":   # SKIP links bei jedem Comic (außer beim kurzen K.o.-Bild mitten im Rennen – da lenkt der linke Daumen)
 		var sb = _skip_btn()
 		sb.pressed.connect(func():
 			if cm.has("c") and cm.get("skip", 0.0) < 0.0:
