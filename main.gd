@@ -12135,6 +12135,52 @@ func _replay(dt: float) -> void:
 		fl.position = Vector3(0, -0.36 - 0.07, 0)
 		mi.add_child(fl)
 		mi.add_child(_rocket_model(0.72))
+		# Plasmaschweif (nur in der Einschlag-Wiederholung): langer, heller Streifen hinter der Rakete,
+		# damit man sie auch von Weitem anfliegen sieht
+		var tr = Node3D.new()
+		tr.name = "trail"
+		for q in [[0.035, 3.2, Color(1.0, 0.9, 0.6), 9.0, 1.0], [0.11, 3.6, Color(1.0, 0.45, 0.15), 4.0, 0.45], [0.26, 4.2, Color(1.0, 0.3, 0.1), 2.0, 0.16]]:
+			var cm = CapsuleMesh.new()
+			cm.radius = q[0]
+			cm.height = q[1]
+			cm.radial_segments = 8
+			cm.rings = 2
+			var tm = StandardMaterial3D.new()
+			tm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			tm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+			tm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			tm.cull_mode = BaseMaterial3D.CULL_DISABLED
+			tm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+			var qc: Color = q[2]
+			tm.albedo_color = Color(qc.r, qc.g, qc.b, float(q[4]))
+			tm.emission_enabled = true
+			tm.emission = qc
+			tm.emission_energy_multiplier = float(q[3]) * float(q[4])
+			var tmi = MeshInstance3D.new()
+			tmi.mesh = cm
+			tmi.material_override = tm
+			tmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			tmi.position = Vector3(0, -0.45 - float(q[1]) * 0.5, 0)
+			tr.add_child(tmi)
+		# heller Kopf-Glanz, sieht man auch als winzigen Punkt
+		var hd = MeshInstance3D.new()
+		var hs = SphereMesh.new()
+		hs.radius = 0.16
+		hs.height = 0.32
+		hs.radial_segments = 10
+		hs.rings = 5
+		hd.mesh = hs
+		var hm = StandardMaterial3D.new()
+		hm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		hm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		hm.albedo_color = Color(1.0, 0.75, 0.4)
+		hm.emission_enabled = true
+		hm.emission = Color(1.0, 0.75, 0.4)
+		hm.emission_energy_multiplier = 6.0
+		hd.material_override = hm
+		hd.position = Vector3(0, -0.4, 0)
+		tr.add_child(hd)
+		mi.add_child(tr)
 		return mi)
 	for i in range(W.size()):
 		var wv: Array = W[i]
@@ -12149,6 +12195,12 @@ func _replay(dt: float) -> void:
 		var bkw = wv.size() >= 4 and float(wv[3]) < 0.0
 		var rb = Basis(-fr.rr, -fr.fw, -fr.uu) if bkw else Basis(fr.rr, fr.fw, -fr.uu)
 		var rsc = 1.6 if state == "kill" else 1.0   # in der Wiederholung etwas größer, damit man sie anfliegen sieht
+		var trn = ps[i].get_node_or_null("trail")
+		if trn != null:
+			# Schweif erst nach dem Zünden, kurz nach dem Start noch kurz
+			# nur im Blick von vorn – bei den Kameras hinter der Rakete läge er sonst groß quer vor dem Bild
+			(trn as Node3D).visible = state == "kill" and kc.get("ir", false) and int(kc.get("pass", 0)) == 1 and st >= RK_DROP
+			(trn as Node3D).scale = Vector3(1.0, clampf((st - RK_DROP) / 0.4, 0.15, 1.0), 1.0)
 		ps[i].global_transform = Transform3D(rb.scaled(Vector3(rsc, rsc, rsc)), fr.c + fr.uu * hy + wo)
 	var pm = _pool("mines", f0.m.size(), func():
 		return _glow_node(_lowsphere(0.12, 12, 6), Color(1, 0.15, 0.1), 6.0))
@@ -12627,7 +12679,7 @@ func _kc_start() -> void:
 	AudioServer.playback_speed_scale = 0.75
 
 
-const KC_PASS = [[-1.7, -0.05, 0.8], [-0.85, 0.6, 0.38], [-0.35, 1.15, 0.5]]   # Einschlag-Wiederholung: von, bis (s zum Treffer), Tempo
+const KC_PASS = [[-1.7, -0.05, 0.8], [-2.0, 0.5, 0.5], [-0.35, 1.15, 0.5]]   # Einschlag-Wiederholung: von, bis (s zum Treffer), Tempo
 
 
 func _kc_rewind(t: float) -> void:
