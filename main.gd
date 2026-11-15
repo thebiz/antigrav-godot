@@ -83,6 +83,7 @@ const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIEL
 var shots = []
 var mines = []
 var fxs = []
+var shot_seq = 0   # laufende Nummer je Schuss: so findet die Wiederholung dieselbe Rakete im nächsten Bild wieder
 var walls = []
 var quake = null
 var quake2 = null   # Super-Quake: zweite Welle rollt nach hinten
@@ -8982,6 +8983,48 @@ func _glow_mat(c: Color, e: float) -> StandardMaterial3D:
 
 # Einschlag-Wiederholung: Ringe und Druckwellen nicht bis an die Kamera wachsen lassen – sie lagen sonst als
 # grellweißer Bogen quer über dem Bild. Gibt den Faktor zurück, mit dem ein Radius r zu verkleinern ist.
+# Schüsse der Wiederholung zum Zeitpunkt zwischen Bild i und i+1 (u = 0 … 1): gleiche Rakete (Nummer + Zopf-Strang)
+# im nächsten Bild suchen und dazwischen weich verschieben; fehlt sie dort (Einschlag dazwischen), mit ihrem
+# Tempo aus dem Bild davor weiterfliegen lassen, bis zum Einschlag
+func _rp_shots(F: Array, i: int, u: float) -> Array:
+	var f0: Dictionary = F[i]
+	var f1: Dictionary = F[mini(F.size() - 1, i + 1)]
+	var fp: Dictionary = F[maxi(0, i - 1)]
+	var dt1 = maxf(0.001, float(f1.t) - float(f0.t))
+	var dtp = maxf(0.001, float(f0.t) - float(fp.t))
+	var nx = {}
+	for w in f1.w:
+		if (w as Array).size() >= 8 and int(w[7]) > 0:
+			nx[int(w[7]) * 16 + int(w[5])] = w
+	var pv = {}
+	for w in fp.w:
+		if (w as Array).size() >= 8 and int(w[7]) > 0:
+			pv[int(w[7]) * 16 + int(w[5])] = w
+	var out = []
+	for w in f0.w:
+		var a: Array = w
+		if a.size() < 8 or int(a[7]) <= 0 or u <= 0.0:
+			out.append(a)
+			continue
+		var key = int(a[7]) * 16 + int(a[5])
+		var r = a.duplicate()
+		if nx.has(key):
+			var b: Array = nx[key]
+			r[0] = lerpf(float(a[0]), float(b[0]), u)
+			if absf(float(b[1]) - float(a[1])) < 2.0:   # in der Röhre springt die Querlage beim Umlauf – dann nicht mischen
+				r[1] = lerpf(float(a[1]), float(b[1]), u)
+			r[6] = lerpf(float(a[6]), float(b[6]), u)
+		elif pv.has(key) and i > 0:
+			var c: Array = pv[key]
+			var k = u * dt1 / dtp
+			r[0] = float(a[0]) + (float(a[0]) - float(c[0])) * k
+			if absf(float(a[1]) - float(c[1])) < 2.0:
+				r[1] = float(a[1]) + (float(a[1]) - float(c[1])) * k
+			r[6] = float(a[6]) + u * dt1
+		out.append(r)
+	return out
+
+
 func _kc_cap(pos: Vector3, r: float, fr := 0.3) -> float:
 	if state != "kill" or not kc.get("ir", false) or r <= 0.001:
 		return 1.0
@@ -9318,7 +9361,8 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 				tg = o
 	if tg != null and tg.idx == 0 and from.idx != 0 and state == "race":
 		_snd("incoming", -1.0)   # Warnung: Lenkrakete kommt auf dich zu
-	shots.append({"z": from.z + 1.0 * dir, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) * dir if not at_player else 0.0, "n": mi, "own": from.idx, "dir": dir, "cl": cl, "sup": sp or cl,
+	shot_seq += 1
+	shots.append({"id": shot_seq, "z": from.z + 1.0 * dir, "lat": from.lat, "t": 0.0, "pl": at_player, "hm": homing, "tg": tg, "dl": tan(from.psi) * dir if not at_player else 0.0, "n": mi, "own": from.idx, "dir": dir, "cl": cl, "sup": sp or cl,
 		"ov": float(from.spd), "z0": from.z + 1.0 * dir, "lap1": not homing and not at_player and not cl and dir > 0.0})   # normale Rakete: eine ganze Runde auf ihrer Spur
 	if cl or sp:
 		# Superwaffe: gold, größer, heller
@@ -11880,7 +11924,7 @@ func _record(dt: float) -> void:
 	var w = []
 	for x in shots:
 		for k in range(int(x.get("br", 1))):
-			w.append([x.z, x.lat, int(x.own), float(x.dir), int(x.get("br", 1)), k, float(x.t)])
+			w.append([x.z, x.lat, int(x.own), float(x.dir), int(x.get("br", 1)), k, float(x.t), int(x.get("id", 0))])
 	var m = []
 	for x in mines:
 		m.append([x.z, x.lat])
@@ -12075,7 +12119,11 @@ func _replay(dt: float) -> void:
 	g.sorb = f0.get("so", false)
 	g.auto = 0.0
 	_orbs_update(dt, false)
-	var ps = _pool("shots", f0.w.size(), func():
+	# Raketen zwischen den Aufnahmebildern (30 je Sekunde) weiterfliegen lassen – in der Zeitlupe sprang
+	# sie sonst von Bild zu Bild, und vor dem Einschlag war sie oft gar nicht zu sehen
+	var W: Array = _rp_shots(F, rp.i, u)
+	rp.w = W
+	var ps = _pool("shots", W.size(), func():
 		var cap = CapsuleMesh.new()   # Plasma-Flamme
 		cap.radius = 0.028
 		cap.height = 0.2
@@ -12088,8 +12136,8 @@ func _replay(dt: float) -> void:
 		mi.add_child(fl)
 		mi.add_child(_rocket_model(0.72))
 		return mi)
-	for i in range(f0.w.size()):
-		var wv: Array = f0.w[i]
+	for i in range(W.size()):
+		var wv: Array = W[i]
 		var fr = T.sframe(float(wv[0]), float(wv[1]))   # folgt auch der Röhrenwand
 		var wo: Vector3 = _braid_off(fr, int(wv[4]), int(wv[5]), float(wv[6])) if wv.size() >= 7 else Vector3.ZERO
 		var st: float = float(wv[6]) if wv.size() >= 7 else 9.0
@@ -12805,7 +12853,7 @@ func _kc_cam_imp() -> bool:
 			var fr: Dictionary = rec[mini(rp.i, rec.size() - 1)]
 			var rk = null
 			var best = 1e9
-			for w in fr.get("w", []):
+			for w in rp.get("w", fr.get("w", [])):
 				if (w as Array).size() >= 4 and (int(w[2]) != 0 or float(w[3]) < 0.0):
 					continue
 				var dz = vz - float(w[0])
@@ -12948,7 +12996,7 @@ func _kc_cam() -> bool:
 	var rk = null
 	if alive and kc.kind == "rocket":
 		var best = 1e9
-		for w in fr.get("w", []):
+		for w in rp.get("w", fr.get("w", [])):
 			if (w as Array).size() >= 4 and (int(w[2]) != 0 or float(w[3]) < 0.0):
 				continue
 			var dz = z - float(w[0])
