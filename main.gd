@@ -13429,17 +13429,24 @@ func _name_entry(hits: Array) -> void:
 	cl.layer = 14
 	add_child(cl)
 	var bg = ColorRect.new()
-	bg.color = Color(0, 0, 0, 0.78)
+	bg.color = Color(0, 0, 0, 0.92)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_STOP   # Knöpfe darunter sind gesperrt
 	cl.add_child(bg)
+	# alles in einem Halter, der bei offener Tastatur nach oben rutscht
+	var root = Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cl.add_child(root)
 	var vb = VBoxContainer.new()
 	vb.anchor_left = 0.08
 	vb.anchor_right = 0.92
-	vb.anchor_top = 0.08
-	vb.anchor_bottom = 0.6
+	vb.anchor_top = 0.2
+	vb.anchor_bottom = 0.62
+	vb.offset_bottom = -22
+	vb.alignment = BoxContainer.ALIGNMENT_END   # Text und Feld direkt über dem Knopf
 	vb.add_theme_constant_override("separation", 16)
-	cl.add_child(vb)
+	root.add_child(vb)
 	var t = _lbl("NEW RECORD", 52)
 	t.add_theme_color_override("font_color", Color(1.0, 0.85, 0.4))
 	vb.add_child(t)
@@ -13457,8 +13464,32 @@ func _name_entry(hits: Array) -> void:
 	le.custom_minimum_size = Vector2(0, 100)
 	le.select_all_on_focus = true
 	vb.add_child(le)
+	# SAVE genau da, wo sonst REPLAY sitzt – Knöpfe bleiben immer an derselben Stelle
 	var ok = _btn("SAVE", true)
-	vb.add_child(ok)
+	ok.anchor_left = 0.5
+	ok.anchor_right = 0.5
+	ok.anchor_top = 0.62
+	ok.anchor_bottom = 0.62
+	ok.offset_left = -150
+	ok.offset_right = 150
+	ok.offset_top = 0
+	ok.offset_bottom = 112
+	root.add_child(ok)
+	# Tastatur offen: so weit hochschieben, dass SAVE über der Tastatur liegt
+	var kt = Timer.new()
+	kt.wait_time = 0.05
+	kt.autostart = true
+	cl.add_child(kt)
+	kt.timeout.connect(func():
+		if not is_instance_valid(root):
+			return
+		var vs = get_viewport().get_visible_rect().size
+		var ss = Vector2(DisplayServer.screen_get_size())
+		var kh = float(DisplayServer.virtual_keyboard_get_height()) * (vs.y / maxf(1.0, ss.y))
+		var need = 0.0
+		if kh > 1.0:
+			need = maxf(0.0, vs.y * 0.62 + 112.0 + 24.0 - (vs.y - kh))
+		root.position.y = lerpf(root.position.y, -need, 0.5))
 	var done = func():
 		var nm2 = le.text.strip_edges()
 		if nm2 == "":
@@ -14666,6 +14697,8 @@ func _shot() -> void:
 				state = "done"
 				t_state = 0.0
 				_show_resb()
+				if OS.get_environment("NAMET") != "":   # Test: Namenseingabe zeigen
+					_name_entry([["total", 64.64, 4], ["dmg", 2.35, 0]])
 				if OS.get_environment("SKIPVIEW") != "":   # Test: SKIP-Knopf dazu, um beide Randknöpfe zu sehen
 					hud.layer.add_child(_skip_btn())
 			if OS.get_environment("SWT") != "" and shot_s.contains("resbtest") and shot_n >= 60 and shot_n <= 89 and shot_n % 5 < 2:
