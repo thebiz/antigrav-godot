@@ -575,6 +575,21 @@ void fragment(){
 const BOARD_VO = ["vo_rak", "vo_lenk", "vo_mine", "vo_orbs", "vo_wand", "vo_beben", "vo_schild", "vo_auto", "vo_turbo", "vo_blk", "vo_super", "vo_mega", "vo_enlow", "incoming"]
 
 
+# Stimmprobe beim Voice-Regler: höchstens alle 0,8 s eine kurze Ansage, abwechselnd
+var vo_probe_t = 0.0
+var vo_probe_i = 0
+
+
+func _voice_probe() -> void:
+	var now = Time.get_ticks_msec() / 1000.0
+	if now - vo_probe_t < 0.8:
+		return
+	vo_probe_t = now
+	var l = ["vo_turbo", "vo_super", "vo_mega", "vo_go", "vo_rak"]
+	vo_probe_i = (vo_probe_i + 1) % l.size()
+	_snd(l[vo_probe_i])
+
+
 func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 	if warm or not snd.has(k):
 		return
@@ -909,7 +924,7 @@ const FXS = {
 		["sparks", "Sparks", 0.0, 8.0, 1.0], ["light", "Light", 0.0, 8.0, 1.0], ["lens", "Space warp", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0],
 		["hue", "Color (all)", -0.5, 0.5, 0.0]],
 	"rak": [["size", "Size", 0.2, 8.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["light", "Light", 0.0, 10.0, 1.0],
-		["hue", "Color", -0.5, 0.5, 0.0]],
+		["hue", "Color", -0.5, 0.5, 0.0], ["smoke", "Smoke trail", 0.0, 3.0, 1.2], ["flame", "Flame", 0.0, 3.0, 1.0]],
 	"jungle": [["trees", "Trees", 0.0, 1.0, 1.0], ["under", "Undergrowth", 0.0, 1.0, 1.0], ["flies", "Fireflies", 0.0, 1.0, 1.0], ["fsize", "Firefly size", 0.3, 3.0, 1.0],
 		["mush", "Mushroom glow", 0.0, 4.0, 1.0], ["wall", "Wall height (restart)", 0.3, 2.0, 1.0], ["meteor", "Shooting stars", 0.0, 4.0, 1.0], ["far", "Far mountains", 0.0, 2.0, 1.0]],
 	"lock": [["shape", "Shape", 0.0, 4.0, 0.0], ["size", "Size", 0.3, 4.0, 1.0], ["thick", "Line thickness", 0.2, 5.0, 1.0], ["glow", "Glow", 0.0, 10.0, 1.0],
@@ -939,7 +954,7 @@ const FXS = {
 		["wob", "Lean wobble (look)", 0.0, 2.0, 0.0], ["nosev", "Nose turn (look)", 0.0, 1.5, 1.0]],
 	"env": [["city", "Buildings", 0.0, 1.0, 1.0], ["dens", "Building count", 0.0, 5.0, 1.0], ["bh", "Height", 0.3, 6.0, 1.0], ["bw", "Width", 0.2, 6.0, 1.0],
 		["bd", "Distance", 0.2, 6.0, 1.0], ["win", "Lit windows", 0.0, 2.5, 1.0], ["hue_w", "Window color", -0.5, 0.5, 0.0], ["edge", "Neon edges", 0.0, 10.0, 1.0],
-		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["haze", "Skyline haze", 0.0, 3.0, 1.1], ["skyl", "Skyline", 0.0, 5.0, 1.0],
+		["hue_s", "Sky color", -0.5, 0.5, 0.0], ["skyb", "Sky brightness", 0.0, 6.0, 1.0], ["stars", "Stars", 0.0, 10.0, 1.0], ["haze", "Skyline haze", 0.0, 3.0, 1.1], ["skyl", "Skyline", 0.0, 5.0, 1.0], ["skhz", "Skyline in haze", 0.0, 1.0, 0.65],
 		["fog", "Fog density", 0.0, 12.0, 1.0], ["hue_f", "Fog color", -0.5, 0.5, 0.0], ["moon", "Moon", 0.0, 6.0, 1.0], ["beams", "Light pillars", 0.0, 10.0, 1.0],
 		["lamps", "Track lights", 0.0, 10.0, 1.0], ["nlight", "Neon reflections", 0.0, 6.0, 1.0],
 		["gloss", "Road gloss", 0.0, 4.0, 2.0], ["wet", "Wet road", 0.0, 4.0, 1.0]],
@@ -1005,6 +1020,67 @@ func _rh(cols: Array, h: float) -> Array:
 
 func _v3(c: Color) -> Vector3:
 	return Vector3(c.r, c.g, c.b)
+
+
+# ---------------------------------------------------------------- Update: neueste Version auf GitHub prüfen
+const UPD_API = "https://api.github.com/repos/thebiz/antigrav-godot/releases/latest"
+static var upd_url = ""     # APK der neueren Version (bleibt über Neustarts der Szene erhalten)
+static var upd_build = 0
+static var upd_done = false
+
+
+func _my_build() -> int:
+	if OS.get_environment("MYBUILD") != "":
+		return int(OS.get_environment("MYBUILD"))
+	var v = str(ProjectSettings.get_setting("application/config/version", "1.0"))
+	return int(v.get_slice(".", 1)) if v.contains(".") else 0
+
+
+func _upd_check() -> void:
+	if upd_done:
+		_upd_show()
+		return
+	upd_done = true
+	var h = HTTPRequest.new()
+	h.timeout = 12.0
+	add_child(h)
+	if OS.get_environment("UPDPROXY") != "":
+		var pp = OS.get_environment("UPDPROXY").split(":")
+		h.set_https_proxy(pp[0], int(pp[1]))
+	h.request_completed.connect(func(res, code, _hd, body):
+		h.queue_free()
+		if OS.get_environment("MYBUILD") != "":
+			print("UPD res=", res, " code=", code, " len=", body.size())
+		if res != HTTPRequest.RESULT_SUCCESS or code != 200:
+			return
+		var d = JSON.parse_string(body.get_string_from_utf8())
+		if not (d is Dictionary):
+			return
+		var n = int(str(d.get("tag_name", "")).trim_prefix("build-"))
+		for a in d.get("assets", []):
+			var u = str(a.get("browser_download_url", ""))
+			if u.ends_with("-godot47.apk") or (u.ends_with(".apk") and upd_url == ""):
+				upd_url = u
+		upd_build = n
+		_upd_show())
+	if h.request(UPD_API, ["User-Agent: AntiGrav3D", "Accept: application/vnd.github+json"]) != OK:
+		h.queue_free()
+
+
+func _upd_open() -> void:
+	if upd_url != "":
+		OS.shell_open(upd_url)
+
+
+func _upd_show() -> void:
+	if not ui.has("upd") or not is_instance_valid(ui.upd):
+		return
+	var mine = _my_build()
+	var b: Button = ui.upd
+	b.visible = upd_url != "" and mine > 0 and upd_build > mine
+	b.text = "UPDATE  ·  Build %d  (you have %d)" % [upd_build, mine]
+	if OS.get_environment("MYBUILD") != "":
+		print("UPD show mine=", mine, " latest=", upd_build, " vis=", b.visible, " url=", upd_url)
 
 
 # ---------------------------------------------------------------- Einstellungen (im Handy gespeichert)
@@ -1188,6 +1264,10 @@ func _env_apply() -> void:
 		sky_m.set_shader_parameter("st", float(E.stars))
 		sky_m.set_shader_parameter("hz", float(E.get("haze", 0.6)))
 		sky_m.set_shader_parameter("sl", float(E.skyl))
+		sky_m.set_shader_parameter("sk", float(E.get("skhz", 0.65)))
+		if true:
+			var fcc = _hs(fog_c, float(E.hue_f))
+			sky_m.set_shader_parameter("fgc", Vector3(fcc.r, fcc.g, fcc.b) * 0.8)
 		sky_m.set_shader_parameter("mn", float(E.moon))
 		sky_m.set_shader_parameter("hu", float(E.hue_s))
 	if wenv != null:
@@ -1212,7 +1292,7 @@ func _env() -> void:
 	sky_mat.shader = Shader.new()
 	sky_mat.shader.code = _nz("""
 shader_type sky;
-uniform float sb=1.;uniform float st=1.;uniform float sl=1.;uniform float mn=1.;uniform float hu=0.;uniform float hz=1.;
+uniform float sb=1.;uniform float st=1.;uniform float sl=1.;uniform float mn=1.;uniform float hu=0.;uniform float hz=1.;uniform float sk=0.;uniform vec3 fgc=vec3(.06,.058,.14);
 uniform float bk=0.;   // Blackout: Himmel und Skyline aus
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 vec3 hr(vec3 c,float a){vec3 k=vec3(.57735);float ca=cos(a);return c*ca+cross(k,c)*sin(a)+k*dot(k,c)*(1.-ca);}
@@ -1237,7 +1317,10 @@ void sky(){
 			float lit=step(.68,h21(wi+bx*1.3+fk*7.))*step(.25,fract(w.x))*step(.3,fract(w.y));
 			vec3 wc=h21(wi+3.1)>.8?vec3(.3,.8,1.):vec3(1.,.7,.45);
 			c=vec3(.004,.005,.01)*(1.+fk)+wc*lit*(.6-fk*.2);
-			if(h>bh-.0025)c+=(h21(vec2(bx,9.))>.5?vec3(0.,.78,1.):vec3(1.,.06,.42))*1.5;}}
+			if(h>bh-.0025)c+=(h21(vec2(bx,9.))>.5?vec3(0.,.78,1.):vec3(1.,.06,.42))*1.5;
+			// im Dunst versinken: unten fast nur Nebelfarbe, nach oben etwas mehr Stadt; hintere Reihe stärker
+			float fz=clamp(sk*(1.15-.55*smoothstep(-.02,bh,h)+fk*.25),0.,1.);
+			c=mix(c,fgc*sb,fz);}}
 	c+=hr(vec3(.5,.12,.45)*exp(-abs(h)*22.)*.22,hu*6.2832)*sb*hz;   // Dunst über der Skyline (Regler)
 	if(h<-.04)c=mix(c,vec3(.006,.005,.012),smoothstep(-.04,-.15,h));
 	COLOR=c*(1.-bk);
@@ -5163,7 +5246,10 @@ func _tribunes() -> void:
 		if _noir() or _jungle():
 			_neon_sign(f.c + f.rr * (sd2 * (T.TW + 7.5)) + f.uu * 7.0, bsg, sp[2], c2, 2.4 if sp[2] == "ANTIGRAV" else 1.8)
 		else:
-			_light_panel(f.c + f.rr * (sd2 * (T.TW + 8.5)) + f.uu * 8.0, bsg, sp[2], c2, 2.6 if sp[2] == "ANTIGRAV" else 2.0)
+			# senkrechte Neonröhren-Buchstaben übereinander (wie in Tokio), Blick entgegen der Fahrtrichtung
+			var lh = 1.25 if sp[2].length() <= 8 else 0.95
+			var zt: Vector3 = -f.fw
+			_tube_sign(f.c + f.rr * (sd2 * (T.TW + 6.5)) + f.uu * (3.2 + sp[2].length() * lh * 1.38), Basis(f.uu.cross(zt).normalized(), f.uu, zt), sp[2], c2, lh)
 	# Jubel als Schleife an der Ziellinie, Sprecher-Lautsprecher daneben (beide mit Dopplereffekt)
 	var f0 = T.frame(20.0)
 	crowd_p = AudioStreamPlayer3D.new()
@@ -5386,6 +5472,224 @@ func _light_panel(pos: Vector3, b: Basis, txt: String, col: Color, hgt: float) -
 	root.add_child(l)
 
 
+# ---------------------------------------------------------------- Neonröhren-Buchstaben
+# Jeder Buchstabe ist eine gebogene Glasröhre (Strichschrift auf einem 4×6-Raster), heller Kern, farbiger
+# Schein; die Buchstaben hängen senkrecht übereinander an einer dunklen Schiene mit Haltern. Einer pro
+# Schild ist kaputt: flackert, setzt aus und brummt dabei.
+const TUBE_GLYPHS = {
+	"A": [[[0, 0], [0, 4], [2, 6], [4, 4], [4, 0]], [[0, 3], [4, 3]]],
+	"B": [[[0, 0], [0, 6], [3, 6], [4, 5], [4, 4], [3, 3], [0, 3]], [[3, 3], [4, 2], [4, 1], [3, 0], [0, 0]]],
+	"C": [[[4, 5], [3, 6], [1, 6], [0, 5], [0, 1], [1, 0], [3, 0], [4, 1]]],
+	"D": [[[0, 0], [0, 6], [3, 6], [4, 5], [4, 1], [3, 0], [0, 0]]],
+	"E": [[[4, 6], [0, 6], [0, 0], [4, 0]], [[0, 3], [3, 3]]],
+	"F": [[[4, 6], [0, 6], [0, 0]], [[0, 3], [3, 3]]],
+	"G": [[[4, 5], [3, 6], [1, 6], [0, 5], [0, 1], [1, 0], [3, 0], [4, 1], [4, 3], [2, 3]]],
+	"H": [[[0, 0], [0, 6]], [[4, 0], [4, 6]], [[0, 3], [4, 3]]],
+	"I": [[[1, 6], [3, 6]], [[2, 6], [2, 0]], [[1, 0], [3, 0]]],
+	"K": [[[0, 0], [0, 6]], [[4, 6], [0, 2]], [[1, 3], [4, 0]]],
+	"L": [[[0, 6], [0, 0], [4, 0]]],
+	"M": [[[0, 0], [0, 6], [2, 3], [4, 6], [4, 0]]],
+	"N": [[[0, 0], [0, 6], [4, 0], [4, 6]]],
+	"O": [[[1, 0], [0, 1], [0, 5], [1, 6], [3, 6], [4, 5], [4, 1], [3, 0], [1, 0]]],
+	"P": [[[0, 0], [0, 6], [3, 6], [4, 5], [4, 4], [3, 3], [0, 3]]],
+	"R": [[[0, 0], [0, 6], [3, 6], [4, 5], [4, 4], [3, 3], [0, 3]], [[2, 3], [4, 0]]],
+	"S": [[[4, 5], [3, 6], [1, 6], [0, 5], [0, 4], [1, 3], [3, 3], [4, 2], [4, 1], [3, 0], [1, 0], [0, 1]]],
+	"T": [[[0, 6], [4, 6]], [[2, 6], [2, 0]]],
+	"U": [[[0, 6], [0, 1], [1, 0], [3, 0], [4, 1], [4, 6]]],
+	"V": [[[0, 6], [2, 0], [4, 6]]],
+	"W": [[[0, 6], [1, 0], [2, 3], [3, 0], [4, 6]]],
+	"X": [[[0, 0], [4, 6]], [[0, 6], [4, 0]]],
+	"Y": [[[0, 6], [2, 3], [4, 6]], [[2, 3], [2, 0]]],
+	"Z": [[[0, 6], [4, 6], [0, 0], [4, 0]]],
+	"-": [[[1, 3], [3, 3]]],
+}
+var tube_signs = []
+
+
+func _tube_seg(st: SurfaceTool, a: Vector3, b: Vector3, r: float, n: int) -> void:
+	var ax = (b - a)
+	var L = ax.length()
+	if L < 0.0001:
+		return
+	ax /= L
+	var u = ax.cross(Vector3(0, 0, 1))
+	if u.length() < 0.01:
+		u = ax.cross(Vector3(1, 0, 0))
+	u = u.normalized()
+	var v = ax.cross(u).normalized()
+	for i in range(n):
+		var a0 = TAU * i / n
+		var a1 = TAU * (i + 1) / n
+		var d0 = u * cos(a0) + v * sin(a0)
+		var d1 = u * cos(a1) + v * sin(a1)
+		st.set_normal(d0)
+		st.add_vertex(a + d0 * r)
+		st.set_normal(d1)
+		st.add_vertex(b + d1 * r)
+		st.set_normal(d0)
+		st.add_vertex(b + d0 * r)
+		st.set_normal(d0)
+		st.add_vertex(a + d0 * r)
+		st.set_normal(d1)
+		st.add_vertex(a + d1 * r)
+		st.set_normal(d1)
+		st.add_vertex(b + d1 * r)
+
+
+func _tube_ball(st: SurfaceTool, c: Vector3, r: float) -> void:
+	# runde Knicke: kleines Achteck-Kugelstück an jeder Ecke
+	var pts = []
+	for j in range(4):
+		var ph = PI * (j / 3.0) - PI * 0.5
+		var row = []
+		for i in range(8):
+			var th = TAU * i / 8.0
+			row.append(Vector3(cos(ph) * cos(th), sin(ph), cos(ph) * sin(th)))
+		pts.append(row)
+	for j in range(3):
+		for i in range(8):
+			var p00: Vector3 = pts[j][i]
+			var p01: Vector3 = pts[j][(i + 1) % 8]
+			var p10: Vector3 = pts[j + 1][i]
+			var p11: Vector3 = pts[j + 1][(i + 1) % 8]
+			for q in [p00, p10, p11, p00, p11, p01]:
+				st.set_normal(q)
+				st.add_vertex(c + q * r)
+
+
+func _tube_letter(ch: String, sz: float, r: float) -> ArrayMesh:
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var g = TUBE_GLYPHS.get(ch, [[[0, 0], [4, 0], [4, 6], [0, 6], [0, 0]]])
+	var k = sz / 6.0
+	for pl in g:
+		for i in range(pl.size()):
+			var p = Vector3((pl[i][0] - 2.0) * k, (pl[i][1] - 3.0) * k, 0.0)
+			_tube_ball(st, p, r)
+			if i > 0:
+				var q = Vector3((pl[i - 1][0] - 2.0) * k, (pl[i - 1][1] - 3.0) * k, 0.0)
+				_tube_seg(st, q, p, r, 8)
+	return st.commit()
+
+
+func _tube_mat(col: Color, core: bool) -> StandardMaterial3D:
+	var m = StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	if core:
+		var c = col.lerp(Color(1, 1, 1), 0.45)
+		m.albedo_color = Color(c.r * 1.7, c.g * 1.7, c.b * 1.7)
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	else:
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+		m.cull_mode = BaseMaterial3D.CULL_FRONT
+		m.albedo_color = Color(col.r, col.g, col.b, 0.12)
+	return m
+
+
+func _tube_sign(top: Vector3, b: Basis, txt: String, col: Color, lh: float) -> void:
+	var root = Node3D.new()
+	deco.add_child(root)
+	root.transform = Transform3D(b, top)
+	var r = lh * 0.042
+	var step = lh * 1.38
+	var n = txt.length()
+	# dunkle Schiene hinter den Buchstaben, oben und unten ein Ausleger zur Hauswand
+	var rail = BoxMesh.new()
+	rail.size = Vector3(lh * 1.05, step * n + lh * 0.4, 0.14)
+	var dm = StandardMaterial3D.new()
+	dm.albedo_color = Color(0.05, 0.05, 0.07)
+	dm.metallic = 0.6
+	dm.roughness = 0.45
+	var rm = MeshInstance3D.new()
+	rm.mesh = rail
+	rm.material_override = dm
+	rm.position = Vector3(0, -step * (n - 1) * 0.5, -0.32)
+	root.add_child(rm)
+	var bad = randi() % maxi(1, n)
+	while n > 1 and txt[bad] == "-":
+		bad = (bad + 1) % n
+	var core_m = _tube_mat(col, true)
+	var halo_m = _tube_mat(col, false)
+	var sg = {"root": root, "bad": null, "badh": null, "col": col, "on": true, "nx": randf_range(1.0, 3.0)}
+	for i in range(n):
+		var ch = txt[i]
+		var y = -step * i
+		var lm = _tube_letter(ch, lh, r)
+		var hm = _tube_letter(ch, lh, r * 2.3)
+		var mi = MeshInstance3D.new()
+		mi.mesh = lm
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = Vector3(0, y, 0)
+		var hi = MeshInstance3D.new()
+		hi.mesh = hm
+		hi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		hi.position = Vector3(0, y, 0)
+		if i == bad:
+			mi.material_override = _tube_mat(col, true)
+			hi.material_override = _tube_mat(col, false)
+			sg.bad = mi.material_override
+			sg.badh = hi.material_override
+		else:
+			mi.material_override = core_m
+			hi.material_override = halo_m
+		root.add_child(mi)
+		root.add_child(hi)
+		# zwei Halter je Buchstabe: hier geht die Röhre kurz „hinter die Halterung“
+		for hx in [-0.32, 0.32]:
+			var hb = BoxMesh.new()
+			hb.size = Vector3(0.05, 0.05, 0.3)
+			var hbi = MeshInstance3D.new()
+			hbi.mesh = hb
+			hbi.material_override = dm
+			hbi.position = Vector3(hx * lh, y + lh * 0.18, -0.16)
+			root.add_child(hbi)
+	# Brummen beim kaputten Buchstaben
+	var hum = AudioStreamPlayer3D.new()
+	hum.bus = "Game"
+	hum.unit_size = 3.0
+	hum.max_distance = 45.0
+	hum.volume_db = -6.0
+	root.add_child(hum)
+	hum.position = Vector3(0, -step * bad, 0)
+	sg.hum = hum
+	tube_signs.append(sg)
+
+
+func _tube_live(dt: float) -> void:
+	if tube_signs.is_empty():
+		return
+	var live = state in ["race", "count", "intro", "done", "menu", "replay"]
+	for sg in tube_signs:
+		if not is_instance_valid(sg.root):
+			continue
+		var hum: AudioStreamPlayer3D = sg.hum
+		if hum.stream == null and snd.has("neon_buzz"):
+			hum.stream = _looped(snd["neon_buzz"])
+		if hum.stream != null:
+			if live and not hum.playing:
+				hum.play()
+			elif not live and hum.playing:
+				hum.stop()
+		sg.nx -= dt
+		if sg.nx <= 0.0:
+			sg.on = not sg.on
+			if sg.on:
+				sg.nx = randf_range(0.3, 3.5) if randf() < 0.7 else randf_range(0.03, 0.12)
+			else:
+				sg.nx = randf_range(0.03, 0.1) if randf() < 0.8 else randf_range(0.3, 1.2)
+		if sg.bad == null:
+			continue
+		var col: Color = sg.col
+		var k = 1.0 if sg.on else 0.08
+		var c = col.lerp(Color(1, 1, 1), 0.45)
+		(sg.bad as StandardMaterial3D).albedo_color = Color(c.r * 1.7 * k + 0.02, c.g * 1.7 * k + 0.02, c.b * 1.7 * k + 0.02)
+		(sg.badh as StandardMaterial3D).albedo_color = Color(col.r, col.g, col.b, 0.12 * k)
+		if hum.playing:
+			hum.volume_db = -6.0 if sg.on else -22.0
+
+
 # Neon-Schriftzug aus einzelnen Buchstaben (Röhren-Look: dünne Schrift, heller Kern, farbiger Schein);
 # ein Buchstabe ist „kaputt“: flackert, setzt aus, brummt
 func _neon_sign(pos: Vector3, b: Basis, txt: String, col: Color, hgt: float) -> void:
@@ -5431,6 +5735,7 @@ func _neon_sign(pos: Vector3, b: Basis, txt: String, col: Color, hgt: float) -> 
 
 
 func _neon_live(dt: float) -> void:
+	_tube_live(dt)
 	if neon_signs.is_empty() or not snd.has("neon_buzz"):
 		return
 	var live = state in ["race", "count", "intro", "done", "menu", "replay"]
@@ -7844,6 +8149,15 @@ func _menu() -> void:
 	blab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	blab.pressed.connect(_lab_open)
 	srow.add_child(blab)
+	# Update: neuere Version auf GitHub? Dann erscheint hier ein Knopf, der die APK im Browser lädt
+	var bup = _btn("UPDATE", true)
+	bup.visible = false
+	bup.add_theme_font_size_override("font_size", 30)
+	bup.custom_minimum_size = Vector2(0, 88)
+	bup.pressed.connect(_upd_open)
+	box.add_child(bup)
+	ui.upd = bup
+	_upd_check()
 	var bq = _btn("Quit")
 	bq.modulate = Color(1, 1, 1, 0.75)
 	bq.pressed.connect(func(): get_tree().quit())
@@ -7929,7 +8243,13 @@ func _menu() -> void:
 		track_sb.content_margin_bottom = 6
 		track_sb.set_corner_radius_all(6)
 		hs.add_theme_stylebox_override("slider", track_sb)
-		hs.value_changed.connect(func(v): cfg[k] = v; _refresh_ui(); _apply_cfg(); _save_cfg())
+		hs.value_changed.connect(func(v):
+			cfg[k] = v
+			_refresh_ui()
+			_apply_cfg()
+			_save_cfg()
+			if k == "voice":
+				_voice_probe())
 		sp.add_child(hs)
 		ui.sl[k] = lb
 	sp.add_child(_lbl("Graphics", 32))
@@ -9027,7 +9347,7 @@ var fb_mats = {}
 var fbs = []      # Feuerball-Ebenen {n, t, dur, n0}
 var smk = []      # Rauchschwaden {n, p, v, t, life, sz, fr, fs}
 var scorchs = []  # Brandflecken {n, t}
-const SMOKE_MAX = 90
+const SMOKE_MAX = 150
 
 
 func _fb_mat(key: String) -> ShaderMaterial:
@@ -9212,13 +9532,13 @@ func _fb_update(dt: float) -> void:
 		mi.visible = e.t >= 0.0
 		mi.global_position = p
 		var age = clampf(e.t / e.life, 0.0, 1.0)
-		mi.scale = Vector3.ONE * float(e.sz) * (1.0 + age * 0.9)
+		mi.scale = Vector3.ONE * float(e.sz) * (1.0 + age * (2.6 if e.get("rk", false) else 0.9))
 		e.rot = float(e.rot) + float(e.spin) * dt
 		mi.set_instance_shader_parameter("rot", e.rot)
 		e.fr = fmod(float(e.fr) + dt * float(e.fs), 63.0)
 		mi.set_instance_shader_parameter("fr", e.fr)
-		var a = clampf(e.t / 0.6, 0.0, 1.0) * clampf((1.0 - age) * 2.0, 0.0, 1.0)
-		mi.set_instance_shader_parameter("al", a * 0.75)
+		var a = clampf(e.t / (0.06 if e.get("rk", false) else 0.6), 0.0, 1.0) * clampf((1.0 - age) * 2.0, 0.0, 1.0)
+		mi.set_instance_shader_parameter("al", a * (float(e.get("ak", 1.0)) if e.get("rk", false) else 0.75))
 
 
 # Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
@@ -9793,6 +10113,37 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 
 
 var rocket_ps: PackedScene
+
+
+# Rauchfahne der Rakete: Rauch-Wölkchen (wie bei den Explosionen) bleiben in der Luft stehen,
+# wachsen und verblassen; vorbeifliegende Schiffe wirbeln sie auf
+func _rk_trail(sh: Dictionary, f: Dictionary, dt: float) -> void:
+	var sk = float(fx.rak.get("smoke", 1.2))
+	if sk < 0.02 or (state == "lab" and absf(float(sh.z) - LZ) > 16.0):
+		return
+	if absf(float(sh.z) - cam.global_position.z) > 120.0 and fposmod(float(sh.z) - cam.global_position.z, T.LAP) > 120.0:
+		return
+	sh.st = float(sh.get("st", 0.0)) + dt
+	var ev = 1.0 / 20.0
+	if float(sh.st) < ev:
+		return
+	var nz: Vector3 = (sh.n as Node3D).global_position - f.fw * (float(sh.dir) * 0.45 * float(fx.rak.size))
+	var lp: Vector3 = sh.get("sp", nz)
+	var k = 0
+	while float(sh.st) >= ev and k < 4:
+		sh.st = float(sh.st) - ev
+		k += 1
+		if smk.size() >= SMOKE_MAX:
+			_qf(smk[0].n)
+			smk.remove_at(0)
+		var p: Vector3 = lp.lerp(nz, float(k) / 4.0 if k < 4 else 1.0) + Vector3(randf_range(-0.05, 0.05), randf_range(-0.05, 0.05), randf_range(-0.05, 0.05))
+		var sz = randf_range(0.6, 0.9) * float(fx.rak.size) * sqrt(sk)
+		var mi = _fb_quad("wisp8", p, sz)
+		mi.set_instance_shader_parameter("em", 0.8)
+		mi.set_instance_shader_parameter("al", 0.0)
+		smk.append({"n": mi, "p": p, "v": f.uu * randf_range(0.1, 0.4) + f.rr * randf_range(-0.3, 0.3), "t": 0.0,
+			"life": randf_range(1.3, 2.0) * clampf(sk, 0.6, 1.6), "sz": sz, "ak": minf(1.0, sk), "fr": randf() * 63.0, "fs": randf_range(4.0, 7.0), "up": f.uu, "spin": randf_range(-0.8, 0.8), "rot": randf() * TAU, "rk": true})
+	sh.sp = nz
 const RK_DROP = 0.48   # Rakete klinkt aus, sackt ab und zündet nach dieser Zeit (passend zum Startsound)
 
 
@@ -9812,8 +10163,8 @@ func _rocket_model(sc: float) -> Node3D:
 func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0, cl := false, sp := false) -> void:
 	var X: Dictionary = fx.rak
 	var cap = CapsuleMesh.new()   # Plasma-Flamme am Heck (glüht, flackert)
-	cap.radius = 0.028 * float(X.size)
-	cap.height = 0.2 * float(X.size)
+	cap.radius = 0.045 * float(X.size)
+	cap.height = 0.42 * float(X.size)
 	var mi = _glow_node(cap, _hs(Color(1.0, 0.6, 0.2), float(X.hue)), 8.0)
 	var rl = 0.72 * float(X.size) * (1.35 if (cl or sp) else 1.0)   # Länge des Modells
 	mi.mesh = null
@@ -9825,6 +10176,41 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	fl.set_meta("y0", fl.position.y)
 	mi.add_child(fl)
 	mi.set_meta("fl", fl)
+	# äußerer Flammenschein: breiter, länger, orange, additiv – macht den Antrieb auch von hinten sichtbar
+	var cap2 = CapsuleMesh.new()
+	cap2.radius = cap.radius * 2.2
+	cap2.height = cap.height * 1.9
+	var om = StandardMaterial3D.new()
+	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	om.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	om.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	var oc = _hs(Color(1.0, 0.42, 0.1), float(X.hue))
+	om.albedo_color = Color(oc.r * 1.6, oc.g * 1.6, oc.b * 1.6, 0.3)
+	var fo = MeshInstance3D.new()
+	fo.mesh = cap2
+	fo.material_override = om
+	fo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	fo.position = Vector3(0, -cap.height * 0.45, 0)
+	fl.add_child(fo)
+	# Glutball als Billboard: von hinten (Raketenkamera) sieht man die Kapseln nur von vorne – der Ball leuchtet aus jeder Richtung
+	var gq = QuadMesh.new()
+	gq.size = Vector2(0.55, 0.55) * float(X.size)
+	var gm = StandardMaterial3D.new()
+	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	gm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	gm.albedo_texture = _puff_tex()
+	var gc = _hs(Color(1.0, 0.55, 0.18), float(X.hue))
+	gm.albedo_color = Color(gc.r * 2.4, gc.g * 2.4, gc.b * 2.4, 0.9)
+	var gb = MeshInstance3D.new()
+	gb.mesh = gq
+	gb.material_override = gm
+	gb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	gb.position = Vector3(0, cap.height * 0.25, 0)
+	fl.add_child(gb)
 	mi.add_child(_rocket_model(rl))
 	var lt = OmniLight3D.new()
 	lt.light_color = _hs(Color(1.0, 0.55, 0.2), float(X.hue))
@@ -10940,6 +11326,8 @@ const FX_INFO = {
 	"rak.speed": "Wie schnell die Raketen fliegen.",
 	"rak.light": "Wie hell der Antrieb der Rakete leuchtet.",
 	"rak.hue": "Dreht die Farbe der Raketen.",
+	"rak.smoke": "Rauchfahne hinter der Rakete (0 = aus).",
+	"rak.flame": "Größe der Antriebsflamme.",
 	"jungle.trees": "Wie viele Bäume am Rand stehen. Weniger = schneller auf dem Handy.",
 	"jungle.under": "Menge an Büschen und Farnen. Weniger = schneller.",
 	"jungle.flies": "Anzahl der Glühwürmchen.",
@@ -11041,6 +11429,7 @@ const FX_INFO = {
 	"env.stars": "Wie viele Sterne zu sehen sind.",
 	"env.skyline": "Ferne Skyline am Horizont.",
 	"env.skyl": "Ferne Skyline am Horizont.",
+	"env.skhz": "Wie stark die ferne Skyline im Dunst versinkt (0 = klar, 1 = fast nur Nebel).",
 	"env.fog": "Wie dicht der Nebel in der Ferne ist.",
 	"env.hue_f": "Dreht die Farbe des Nebels.",
 	"env.moon": "Größe bzw. Helligkeit des Mondes. 0 = kein Mond.",
@@ -11281,6 +11670,8 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 					_save_cfg()
 					if ui.has("sl"):
 						_refresh_ui()
+					if k == "voice":
+						_voice_probe()
 			fx_fresh = false
 			fx_ver += 1
 		elif FXS.has(g) and fx[g].has(k):
@@ -12063,9 +12454,16 @@ func _weapons(dt: float, racing: bool) -> void:
 				hit.slow = minf(hit.slow, 0.35)
 				hit.vpsi += randf_range(-0.25, 0.25)
 			if sh.get("mega", false):
-				# Mega-Salve: fester Schaden (40 %), Explosion ohne schwarzes Loch – sonst summiert es sich im Pulk
+				# Mega-Salve: fester Schaden (40 %); jede der drei Raketen reißt ein kleineres schwarzes Loch,
+				# leicht versetzt – zusammen größer als bei der normalen Rakete (Schaden kommt nur einmal oben)
 				_dmg(hit, 0.4, sh.own, "rocket", true)
-				_explode(hit.z, hit.lat, false, 1.2)
+				var hz = float(hit.z)
+				var hl = float(hit.lat)
+				var hi = int(hit.idx)
+				for j in range(3):
+					var oz = hz + [0.0, 1.3, 2.4][j]
+					var ol = clampf(hl + [0.0, -0.8, 0.8][j], -T.TW + 0.4, T.TW - 0.4)
+					_after(0.07 * j + 0.001, func(): _gbomb(oz, ol, -2, hi, 0.68))
 			else:
 				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
@@ -12125,7 +12523,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			sh.n.global_transform = Transform3D(bb, bp + _braid_off(f, bn, 0, sh.t))
 			var fln = sh.n.get_meta("fl", null)
 			if fln != null and is_instance_valid(fln):
-				var fk = 0.75 + 0.5 * randf()   # Antrieb flackert
+				var fk = (0.75 + 0.5 * randf()) * maxf(0.01, float(fx.rak.get("flame", 1.0)))   # Antrieb flackert
 				var olt = sh.n.get_meta("lt", null)
 				if olt != null and is_instance_valid(olt):
 					if not (olt as OmniLight3D).has_meta("e0"):
@@ -12141,6 +12539,8 @@ func _weapons(dt: float, racing: bool) -> void:
 				else:
 					(fln as Node3D).scale = Vector3(fk * 0.9, fk, fk * 0.9)
 					(fln as Node3D).position.y = float((fln as Node3D).get_meta("y0", (fln as Node3D).position.y))
+				if ig >= 0.0:
+					_rk_trail(sh, f, dt)
 			for k in range(1, bn):
 				(sh.ex[k - 1] as Node3D).global_transform = Transform3D(bb, bp + _braid_off(f, bn, k, sh.t))
 	# Minen
@@ -15565,6 +15965,8 @@ func _lab_input(ev: InputEvent) -> void:
 	if _lab_list(ev):
 		return
 	var top = get_viewport().get_visible_rect().size.y * 0.5
+	if lab.has("cl") and is_instance_valid(lab.cl) and not (lab.cl as CanvasLayer).visible:
+		top = 99999.0   # Regler ausgeblendet (PC verbunden): ganzer Bildschirm dreht die Ansicht
 	if ev is InputEventScreenTouch:
 		if ev.pressed and ev.position.y < top:
 			lab.tch[ev.index] = ev.position
@@ -16448,7 +16850,7 @@ func _mc_cam(dt: float) -> bool:
 			# Blick stur in Flugrichtung (Rakete wie mit Kamera auf dem Rücken), nur leicht mit der Seitenlage der Rakete
 			var f2 = T.sframe(float(sh.z) + 10.0 * float(sh.dir), float(sh.lat))
 			var look: Vector3 = f2.c + f2.uu * 0.3
-			var want = P - fw * 1.5 + f.uu * 0.42
+			var want = P - fw * 1.9 + f.uu * 0.55   # etwas weiter hinten: Flamme und Rauch am Heck bleiben im Bild
 			if float(sh.t) < RK_DROP + 0.15:
 				# Ausklinken: schräg hinten seitlich, etwas tiefer – man sieht sie absacken und zünden
 				want = P - fw * 2.0 + f.rr * 1.35 + f.uu * 0.6
