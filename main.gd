@@ -946,6 +946,8 @@ const FXS = {
 	"city": [["holo", "Holograms", 0.0, 4.0, 1.0], ["hsize", "Hologram size", 0.3, 3.0, 1.0], ["hflick", "Hologram glitch", 0.0, 12.0, 1.0], ["hhue", "Hologram color", -0.5, 0.5, 0.0],
 		["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
 		["mega", "Mega towers", 0.0, 3.0, 1.0]],
+	"view": [["dist", "Camera distance", 0.5, 3.5, 1.0], ["height", "Camera height", 0.3, 3.0, 1.0],
+		["tun", "Tunnels while live tuning (0 = hidden)", 0.0, 1.0, 0.0]],
 	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
 		["grit", "Grit", 0.0, 2.0, 0.0], ["echo", "Echo", 0.0, 2.0, 0.0], ["etime", "Echo time", 0.2, 3.0, 1.0], ["reverb", "Reverb", 0.0, 2.0, 0.0], ["room", "Room size", 0.0, 1.0, 0.6],
 		["rumble", "Engine rumble", 0.0, 3.0, 1.0], ["beeps", "Countdown beeps", 0.0, 3.0, 1.0]],
@@ -954,13 +956,17 @@ const FXT = [["boom", "Boom"], ["mine", "Mine"], ["quake", "Quake"], ["gb", "Hol
 var fx = {}
 
 
+var fx_fresh = false   # keine gespeicherten Regler gefunden (frisch installiert): die PC-Seite bietet dann die Sicherung an
+
+
 func _fx_load() -> void:
 	fx = {}
 	for gk in FXS:
 		fx[gk] = {}
 		for it in FXS[gk]:
 			fx[gk][it[0]] = it[4]
-	if not FileAccess.file_exists(FX_PATH):
+	fx_fresh = not FileAccess.file_exists(FX_PATH)
+	if fx_fresh:
 		return
 	var d = JSON.parse_string(FileAccess.get_file_as_string(FX_PATH))
 	if not (d is Dictionary):
@@ -11224,12 +11230,22 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 	if path.begins_with("/fx"):
 		# alle Reiter mit Reglern und aktuellen Werten
 		var tabs = []
-		for t in FXT:
+		# vorne: Spiel-Einstellungen, Ansicht, Lenkung – danach alle Reiter des FX Labs
+		var gits = []
+		for it in LIVE_CFG:
+			gits.append({"k": it[0], "n": it[1], "lo": it[2], "hi": it[3], "d": it[4], "v": float(cfg[it[0]]), "i": "", "m": []})
+		tabs.append({"g": "cfg", "n": "Game", "it": gits})
+		for t in [["view", "View"], ["steer", "Steering"]] + FXT:
 			var its = []
 			for it in FXS[t[0]]:
 				its.append({"k": it[0], "n": it[1], "lo": it[2], "hi": it[3], "d": it[4], "v": float(fx[t[0]][it[0]]), "i": FX_INFO.get(t[0] + "." + it[0], ""), "m": []})
 			tabs.append({"g": t[0], "n": t[1], "it": its})
-		_live_send(c, "application/json", JSON.stringify({"ver": fx_ver, "tabs": tabs, "ctrl": 0, "cn": [], "cc": []}))
+		_live_send(c, "application/json", JSON.stringify({"ver": fx_ver, "tabs": tabs, "ctrl": 0, "cn": [], "cc": [], "fresh": fx_fresh}))
+	elif path.begins_with("/backup"):
+		_live_send(c, "application/json", JSON.stringify(_backup_data()))
+	elif path.begins_with("/restore?"):
+		var ok = _backup_restore(path.substr(path.find("d=") + 2).uri_decode())
+		_live_send(c, "text/plain", "ok" if ok else "bad")
 	elif path.begins_with("/tab?") or path.begins_with("/fire?") or path.begins_with("/drive"):
 		var q2 = {}
 		var qi = path.find("?")
@@ -11257,7 +11273,18 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 			q[kv.get_slice("=", 0)] = kv.get_slice("=", 1).uri_decode()
 		var g = str(q.get("g", ""))
 		var k = str(q.get("k", ""))
-		if FXS.has(g) and fx[g].has(k):
+		if g == "cfg":
+			for it in LIVE_CFG:
+				if it[0] == k:
+					cfg[k] = clampf(float(q.get("v", "0")), it[2], it[3])
+					_apply_cfg()
+					_save_cfg()
+					if ui.has("sl"):
+						_refresh_ui()
+			fx_fresh = false
+			fx_ver += 1
+		elif FXS.has(g) and fx[g].has(k):
+			fx_fresh = false
 			for it in FXS[g]:
 				if it[0] == k:
 					fx[g][k] = clampf(float(q.get("v", "0")), it[2], it[3])
@@ -11269,9 +11296,56 @@ func _live_answer(c: StreamPeerTCP, path: String) -> void:
 		_live_send(c, "text/html", LIVE_HTML)
 
 
+# Spiel-Einstellungen, die auch die PC-Seite zeigt (Schlüssel, Name, von, bis, Standard)
+const LIVE_CFG = [["speed", "Speed", 0.5, 4.0, 1.0], ["ai", "Opponents", 0.7, 1.4, 1.05], ["res", "Resolution", 0.5, 1.0, 0.85],
+	["glow", "Glow", 0.0, 1.5, 0.5], ["neon", "Neon", 0.2, 1.5, 0.8], ["vol", "Volume", 0.0, 1.0, 0.9], ["music", "Music", 0.0, 1.0, 0.6], ["voice", "Voice", 0.0, 2.0, 1.0]]
+
+
+# Sicherung: alle Regler, Einstellungen und Bestzeiten als ein JSON – die PC-Seite hebt es im Browser auf
+# und kann es nach einer Neuinstallation zurückspielen
+func _backup_data() -> Dictionary:
+	var rec = ""
+	if FileAccess.file_exists(REC_PATH):
+		rec = FileAccess.get_file_as_string(REC_PATH)
+	var cf = {}
+	for k in cfg.keys():
+		cf[k] = cfg[k]
+	return {"app": "antigrav", "v": 1, "fx": fx, "cfg": cf, "rec": rec, "fresh": fx_fresh,
+		"time": Time.get_datetime_string_from_system(false, true)}
+
+
+func _backup_restore(txt: String) -> bool:
+	var d = JSON.parse_string(txt)
+	if not (d is Dictionary) or str(d.get("app", "")) != "antigrav":
+		return false
+	if d.get("fx") is Dictionary:
+		for gk in FXS:
+			if d.fx.get(gk) is Dictionary:
+				for it in FXS[gk]:
+					var v = d.fx[gk].get(it[0])
+					if v != null:
+						fx[gk][it[0]] = clampf(float(v), it[2], it[3])
+		_fx_save()
+	if d.get("cfg") is Dictionary:
+		for k in cfg.keys():
+			if d.cfg.has(k):
+				var v = d.cfg[k]
+				cfg[k] = (int(v) if typeof(cfg[k]) == TYPE_INT else (float(v) if typeof(cfg[k]) == TYPE_FLOAT else str(v)))
+		_save_cfg()
+	if str(d.get("rec", "")) != "":
+		var f = FileAccess.open(REC_PATH, FileAccess.WRITE)
+		if f != null:
+			f.store_string(str(d.rec))
+			f.close()
+	fx_fresh = false
+	fx_ver += 1
+	_reload.call_deferred()   # alles neu aufbauen, damit Stadt, Lenkung und Einstellungen sofort greifen
+	return true
+
+
 # Vorschau am Handy: passende FX-Lab-Ansicht zum Reiter öffnen
 func _live_view(t: String) -> void:
-	if not FXS.has(t) or state == "kill" or state == "replay":
+	if not FXS.has(t) or t in ["view", "steer"] or state == "kill" or state == "replay":
 		return
 	if state != "lab":
 		_settings_close_all()
@@ -11368,6 +11442,7 @@ main{padding:12px 16px;max-width:900px}
 </style></head><body><header><h1>ANTIGRAV · LIVE TUNING</h1><div id="tabs"></div>
 <div id="bar"><label><input type="checkbox" id="pv"> Vorschau am Handy</label>
 <button id="fire">Auslösen</button><button id="bs">Super</button><button id="bm">Mega</button><button id="drive">Weiterfahren (Free ride)</button></div>
+<div id="bar"><button id="bkdl">Sicherung herunterladen</button><button id="bkul">Sicherung laden …</button><button id="bkrs">Browser-Sicherung zurückspielen</button><span id="bkst" style="font-size:12px;color:#6c7a96"></span><input type="file" id="bkf" accept=".json,application/json" style="display:none"></div>
 <div id="st">verbinde …</div></header><main id="m"></main>
 <script>
 let D=[],cur=0,tm={};
@@ -11386,7 +11461,7 @@ document.getElementById('drive').onclick=()=>fetch('/drive').then(()=>st.textCon
 let ssT=null,SS=null,EDS=[];
 function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D[i].g);document.querySelectorAll('#tabs button').forEach((b,j)=>b.className=j==i?'on':'');
  const m=document.getElementById('m');m.innerHTML='';const T=D[i];
- if(T.g=='steer'){const pr=document.createElement('div');pr.id='pre';const lb=document.createElement('span');lb.textContent='Voreinstellung zum Vergleichen:';lb.style.color='#9fb0cc';pr.append(lb);
+ if(T.g=='steer_old'){const pr=document.createElement('div');pr.id='pre';const lb=document.createElement('span');lb.textContent='Voreinstellung zum Vergleichen:';lb.style.color='#9fb0cc';pr.append(lb);
   ['Ruhig','Mittel','Scharf'].forEach((n,k)=>{const b=document.createElement('button');b.textContent=n;b.onclick=()=>fetch('/preset?n='+k).then(()=>reloadAll(n));pr.append(b);});
   const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t='Setzt Lenkkurve, Anlaufzeit, Ausklingzeit und im Reiter Ship auch Steering lag, Steering strength und Grip auf einen festen Satz. Fahr mit jeder Voreinstellung eine Runde und sag, welche am nächsten dran ist.';pr.append(ii);m.append(pr);
   ssT=setInterval(()=>{if(SS&&SS.t&&Date.now()-lastWs<1000)return;fetch('/sst').then(r=>r.json()).then(d=>{SS=d;dirty=true;}).catch(()=>{});},150);}
@@ -11399,7 +11474,7 @@ function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D
   s.oninput=()=>{it.v=+s.value;v.textContent=fmt(it,it.v);send(T.g,it.k,s.value);};
   z.onclick=()=>{s.value=it.d;s.oninput();};
   r.append(l,s,v,z);m.append(r);});
- if(T.g=='steer')curveUI(m);}
+}
 let CV=null,CD=null;
 function reloadAll(n){fetch('/fx').then(r=>r.json()).then(dd=>{D=dd.tabs;VER=dd.ver;CTRL=dd.ctrl;CN=dd.cn;CC=dd.cc;modeBar();fetch('/curve').then(r=>r.json()).then(c=>{CV=c.cur;CD=c.def;show(cur);st.textContent='Voreinstellung: '+n;});});}
 function sendCurve(){lastSend=Date.now();clearTimeout(tm.cv);tm.cv=setTimeout(()=>fetch('/curve?d='+encodeURIComponent(JSON.stringify(CV))).then(()=>st.textContent='Lenkkurve gesendet').catch(()=>st.textContent='keine Verbindung'),60);}
@@ -11467,7 +11542,7 @@ document.addEventListener('pointerdown',()=>mdown=true,true);document.addEventLi
 function syncFrom(ver){if(ver==VER||mdown||Date.now()-lastSend<800)return;VER=ver;
  fetch('/fx').then(r=>r.json()).then(d=>{if(d.ctrl!=CTRL){D=d.tabs;CTRL=d.ctrl;modeBar();show(cur);return;}const T=d.tabs;T.forEach((t,i)=>{if(D[i])D[i].it=t.it;});
   document.querySelectorAll('#m .r').forEach(r=>{const it=D[cur].it.find(x=>x.k==r.dataset.k);if(!it)return;const s=r.querySelector('input');if(s&&document.activeElement!==s){s.value=it.v;r.querySelector('.v').textContent=fmt(it,it.v);}});
-  if(D[cur].g=='steer')fetch('/curve').then(r=>r.json()).then(c=>{if(!EDS.dragging){CV=c.cur;EDS.forEach(f=>f());}});});}
+  if(D[cur].g=='steer_old')fetch('/curve').then(r=>r.json()).then(c=>{if(!EDS.dragging){CV=c.cur;EDS.forEach(f=>f());}});});}
 function wsConnect(){try{const ws=new WebSocket('ws://'+location.hostname+':8081');
  ws.onmessage=e=>{lastWs=Date.now();const d=JSON.parse(e.data);
   const ch=!SS||SS.px!=d.px||SS.rx!=d.rx||SS.sx!=d.sx||SS.vx!=d.vx;SS=d;if(ch)dirty=true;syncFrom(d.ver);};
@@ -11476,7 +11551,21 @@ wsConnect();
 let CTRL=1,CN=[],CC=[];
 function modeBar(){let mb=document.getElementById('mb');if(!CN.length){if(mb)mb.remove();return;}if(!mb){mb=document.createElement('div');mb.id='mb';mb.style.cssText='display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0';document.querySelector('header').insertBefore(mb,document.getElementById('st'));}
  mb.innerHTML='<span style="color:#9fb0cc">Lenkmodus:</span>';CN.forEach((n,i)=>{const b=document.createElement('button');b.textContent=n;b.style.cssText='background:'+(i==CTRL?'#ef6a2e':'#151a2a')+';color:#fff;border:1px solid #2a3350;border-radius:8px;padding:5px 10px;cursor:pointer';b.onclick=()=>fetch('/mode?n='+i).then(()=>reloadAll(n));mb.append(b);});}
-fetch('/fx').then(r=>r.json()).then(dd=>{const d=dd.tabs;VER=dd.ver;D=d;CTRL=dd.ctrl;CN=dd.cn;CC=dd.cc;modeBar();const t=document.getElementById('tabs');
+// Sicherung: der Browser hebt Regler, Einstellungen und Bestzeiten auf (übersteht Neuinstallation am Handy)
+const bkst=document.getElementById('bkst');
+function bkShow(){const b=localStorage.getItem('ag_backup');if(!b){bkst.textContent='noch keine Sicherung im Browser';return;}try{bkst.textContent='Browser-Sicherung vom '+JSON.parse(b).time.replace('T',' ');}catch(e){}}
+function bkSave(){fetch('/backup').then(r=>r.json()).then(d=>{if(d.fresh)return;const o=localStorage.getItem('ag_backup');if(o)localStorage.setItem('ag_backup_prev',o);localStorage.setItem('ag_backup',JSON.stringify(d));bkShow();}).catch(()=>{});}
+function bkRestore(txt,src){fetch('/restore?d='+encodeURIComponent(txt)).then(r=>r.text()).then(t=>{st.textContent=t=='ok'?'Sicherung eingespielt ('+src+') – Spiel lädt neu':'Sicherung ungültig';if(t=='ok')setTimeout(()=>location.reload(),2500);});}
+document.getElementById('bkdl').onclick=()=>fetch('/backup').then(r=>r.text()).then(t=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'application/json'}));a.download='antigrav-sicherung-'+new Date().toISOString().slice(0,16).replace(':','-')+'.json';a.click();});
+document.getElementById('bkul').onclick=()=>document.getElementById('bkf').click();
+document.getElementById('bkf').onchange=e=>{const f=e.target.files[0];if(!f)return;f.text().then(t=>bkRestore(t,f.name));};
+document.getElementById('bkrs').onclick=()=>{const b=localStorage.getItem('ag_backup');if(b&&confirm('Browser-Sicherung aufs Handy zurückspielen? Die aktuellen Werte am Handy werden ersetzt.'))bkRestore(b,'Browser');};
+bkShow();setInterval(()=>{if(Date.now()-lastSend<5000)bkSave();},4000);
+fetch('/fx').then(r=>r.json()).then(dd=>{const d=dd.tabs;VER=dd.ver;D=d;CTRL=dd.ctrl;CN=dd.cn;CC=dd.cc;modeBar();
+ const ob=localStorage.getItem('ag_backup');
+ if(dd.fresh&&ob){let tt='';try{tt=JSON.parse(ob).time.replace('T',' ');}catch(e){}if(confirm('Das Spiel am Handy hat frische Standardwerte (neu installiert?).\\nDeine Sicherung vom '+tt+' jetzt zurückspielen?'))bkRestore(ob,'Browser');}
+ else if(!dd.fresh)bkSave();
+ const t=document.getElementById('tabs');
  d.forEach((T,i)=>{const b=document.createElement('button');b.textContent=T.n;b.onclick=()=>show(i);t.append(b);});
  const ship=d.findIndex(T=>T.g=='ship');show(ship>=0?ship:0);st.textContent='verbunden – Änderungen wirken sofort';})
  .catch(()=>st.textContent='keine Verbindung zum Spiel');
@@ -16092,6 +16181,17 @@ func _tunnel(dt: float) -> void:
 	var k = 0.0
 	for tu in T.tuns():
 		k = maxf(k, clampf(minf(zl - tu[0] + 2.0, tu[1] - zl + 2.0) / 7.0, 0.0, 1.0))
+	# Live-Tuning am PC: Tunnelröhre ausblenden, damit man das Schiff frei sieht (Reiter „View“)
+	var nohide = not (_live_pc() and float(fx.view.tun) < 0.5)
+	if mats.has("tube") and mats.tube is BaseMaterial3D:
+		var tm: BaseMaterial3D = mats.tube
+		if (tm.albedo_color.a < 0.5) == nohide:
+			tm.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED if nohide else BaseMaterial3D.TRANSPARENCY_ALPHA
+			var ac: Color = tm.albedo_color
+			ac.a = 1.0 if nohide else 0.0
+			tm.albedo_color = ac
+	if not nohide:
+		k = 0.0
 	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
 	wenv.ambient_light_energy = lerpf(0.35 * _newr("amb", 1.0), 0.02, tun_k)
 	wenv.fog_density = lerpf((0.03 if _jungle() else (0.012 if _noir() else 0.016)) * float(fx.env.fog), 0.0, tun_k)
@@ -16465,7 +16565,7 @@ func _camera(dt: float) -> void:
 	# in der Röhre rollt die Kamera ganz mit: wo du fährst, ist unten – die Welt dreht sich um dich
 	var twk = clampf(T.pipe_k(g.z) * 2.5, 0.0, 1.0)
 	var uc: Vector3 = (Vector3.UP * 0.25 * (1.0 - twk) + f.uu * (0.75 + 0.25 * twk)).normalized()
-	var ro: Vector3 = S0 - fc * (2.6 + cam_d) + uc * (0.95 - 0.15 * cam_d) - f.uu * g.h * 0.5
+	var ro: Vector3 = S0 - fc * (2.6 * float(fx.view.dist) + cam_d) + uc * (0.95 * float(fx.view.height) - 0.15 * cam_d) - f.uu * g.h * 0.5
 	var ta: Vector3 = S0 + fc * 7.0 + uc * 0.35
 	# Countdown: Blick leicht nach oben, damit das riesige Start-Mädel ganz ins Bild passt
 	var lift = 0.0
