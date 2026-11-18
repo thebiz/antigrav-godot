@@ -11080,7 +11080,7 @@ var live_ws = []   # Sekunden seit der letzten Anfrage vom PC (die Seite meldet 
 
 # PC hat die Regler-Seite offen: am Handy alles ausblenden, nur die Szene im Vollbild
 func _live_pc() -> bool:
-	return live_srv != null and live_seen < 5.0
+	return (live_srv != null and live_seen < 5.0) or OS.get_environment("LIVEPC") != ""
 
 
 func _live_addr() -> String:
@@ -11096,7 +11096,7 @@ func _live_addr() -> String:
 
 
 func _live_poll(dt: float) -> void:
-	var on = int(cfg.get("live", 0)) == 1
+	var on = int(cfg.get("live", 0)) == 1 or OS.get_environment("LIVEPC") != ""
 	if not on:
 		if live_srv != null:
 			live_srv.stop()
@@ -11128,9 +11128,29 @@ func _live_poll(dt: float) -> void:
 		live_lbl.visible = not pc
 		live_lbl.text = "LIVE  " + _live_addr()
 	if state == "lab" and lab.has("cl") and is_instance_valid(lab.cl):
+		# PC-Seite (Live-Tuning) offen: Regler am Handy ausblenden, damit man das Schiff frei sieht –
+		# aber mit Hinweis und Knopf, sonst wirkte das FX Lab einfach leer
 		var cl: CanvasLayer = lab.cl
-		if cl.visible == pc:
-			cl.visible = not pc
+		var hide = pc and not lab.get("show", false)
+		if cl.visible == hide:
+			cl.visible = not hide
+		if hide and not (lab.has("pcn") and is_instance_valid(lab.pcn)):
+			var nl = CanvasLayer.new()
+			nl.layer = 7
+			add_child(nl)
+			var nb = _btn("Live tuning on PC is connected – sliders are there.\nTap to show them here too")
+			nb.add_theme_font_size_override("font_size", 22)
+			nb.anchor_left = 0.06
+			nb.anchor_right = 0.94
+			nb.anchor_top = 1.0
+			nb.anchor_bottom = 1.0
+			nb.offset_top = -190
+			nb.offset_bottom = -60
+			nb.pressed.connect(func(): lab.show = true)
+			nl.add_child(nb)
+			lab.pcn = nl
+		if lab.has("pcn") and is_instance_valid(lab.pcn):
+			(lab.pcn as CanvasLayer).visible = hide
 	while live_srv.is_connection_available():
 		var c = live_srv.take_connection()
 		if c != null:
