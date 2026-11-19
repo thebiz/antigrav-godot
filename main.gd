@@ -10142,13 +10142,15 @@ func _impact(o: Dictionary, lx: float, lz: float, ly: float, fl: float, ff: floa
 		kp *= 0.3   # Schild fängt das meiste ab, keine Wunde
 		wound = false
 	# Seitenstoß (m/s): versetzt das Schiff, klingt in einer halben Sekunde ab
-	o.kl = float(o.get("kl", 0.0)) + fn.x * 3.4 * kp
+	o.kl = clampf(float(o.get("kl", 0.0)) + (fn.x * 6.5 + signf(-lx + 0.001) * 2.0) * kp, -12.0, 12.0)
+	# kurz kaum steuerbar: das Schiff wird wirklich aus der Bahn geworfen
+	o.stun = maxf(float(o.get("stun", 0.0)), 0.55 * minf(kp, 2.0))
 	# Drehstoß: Kraft neben dem Schwerpunkt dreht das Schiff (Hebel × Kraft) – hinten links getroffen → Heck nach rechts, Nase nach links
-	o.kyw = clampf(float(o.get("kyw", 0.0)) + (lz * fn.x - lx * fn.y) * 6.0 * kp, -3.5, 3.5)
+	o.kyw = clampf(float(o.get("kyw", 0.0)) + ((lz * fn.x - lx * fn.y) * 12.0 + signf(-lx + 0.001) * 1.2) * kp, -6.0, 6.0)
 	# Rollen, Nicken und Hochspringen (die Federn der Lage schwingen danach von selbst aus)
-	o.rv = float(o.get("rv", 0.0)) + (fn.x * 14.0 + signf(lx) * absf(fn.y) * 7.0 + randf_range(-2.0, 2.0)) * kp
+	o.rv = float(o.get("rv", 0.0)) + (fn.x * 22.0 + signf(lx) * absf(fn.y) * 14.0 + randf_range(-3.0, 3.0)) * kp
 	o.pv = float(o.get("pv", 0.0)) + (-fn.y * 6.0 * signf(-lz + 0.001) + randf_range(-2.0, 2.0)) * kp
-	o.jv = float(o.get("jv", 0.0)) + (2.4 if ly < 0.15 else 1.4) * kp
+	o.jv = float(o.get("jv", 0.0)) + (4.0 if ly < 0.15 else 2.6) * kp
 	if wound and float(fx.rak.get("wound", 1.0)) > 0.01:
 		_wound(o, lx, lz, ly, k)
 		_hit_shards(o, lx, lz, ly, k)
@@ -10405,10 +10407,24 @@ const RK_DROP = 0.48   # Rakete klinkt aus, sackt ab und zündet nach dieser Zei
 
 
 # Raketenmodell (Tripo) als Kind des Schusses: Spitze zeigt in Flugrichtung (lokal +Y), Oberseite zur Fahrbahn-Normale (lokal −Z)
+var rocket_mat: StandardMaterial3D
+
+
 func _rocket_model(sc: float) -> Node3D:
 	if rocket_ps == null:
 		rocket_ps = load("res://ships/rocket.glb")
 	var m: Node3D = rocket_ps.instantiate()
+	# eigene Textur ohne die türkisen Düsenringe (sahen von hinten aus wie ein blauer Kringel)
+	if rocket_mat == null and ResourceLoader.exists("res://ships/rocket_alb.jpg"):
+		for c in m.find_children("*", "MeshInstance3D", true, false):
+			var sm = (c as MeshInstance3D).mesh.surface_get_material(0) if (c as MeshInstance3D).mesh != null else null
+			if sm is StandardMaterial3D:
+				rocket_mat = (sm as StandardMaterial3D).duplicate()
+				rocket_mat.albedo_texture = load("res://ships/rocket_alb.jpg")
+				break
+	if rocket_mat != null:
+		for c in m.find_children("*", "MeshInstance3D", true, false):
+			(c as MeshInstance3D).material_override = rocket_mat
 	var bs = Basis(Vector3(0, -1, 0), Vector3(0, 0, -1), Vector3(1, 0, 0)).scaled(Vector3.ONE * sc)
 	m.transform = Transform3D(bs, -(bs * Vector3(0, 0.21, 0)))
 	m.set_meta("rkm", true)
@@ -10420,9 +10436,10 @@ func _rocket_model(sc: float) -> Node3D:
 func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0, cl := false, sp := false) -> void:
 	var X: Dictionary = fx.rak
 	var cap = CapsuleMesh.new()   # Plasma-Flamme am Heck (glüht, flackert)
-	cap.radius = 0.045 * float(X.size)
-	cap.height = 0.42 * float(X.size)
-	var mi = _glow_node(cap, _hs(Color(1.0, 0.6, 0.2), float(X.hue)), 8.0)
+	cap.radius = 0.06 * float(X.size)
+	cap.height = 0.75 * float(X.size)
+	# Flamme immer in Feuerfarben (unabhängig vom Farbregler der Rakete – sonst wird sie blau und unsichtbar)
+	var mi = _glow_node(cap, Color(1.0, 0.72, 0.3), 9.0)
 	var rl = 0.72 * float(X.size) * (1.35 if (cl or sp) else 1.0)   # Länge des Modells
 	mi.mesh = null
 	var fl = MeshInstance3D.new()
@@ -10435,15 +10452,14 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	mi.set_meta("fl", fl)
 	# äußerer Flammenschein: breiter, länger, orange, additiv – macht den Antrieb auch von hinten sichtbar
 	var cap2 = CapsuleMesh.new()
-	cap2.radius = cap.radius * 2.2
-	cap2.height = cap.height * 1.9
+	cap2.radius = cap.radius * 2.4
+	cap2.height = cap.height * 2.2
 	var om = StandardMaterial3D.new()
 	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	om.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	om.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	var oc = _hs(Color(1.0, 0.42, 0.1), float(X.hue))
-	om.albedo_color = Color(oc.r * 1.6, oc.g * 1.6, oc.b * 1.6, 0.3)
+	om.albedo_color = Color(1.9, 0.62, 0.12, 0.42)
 	var fo = MeshInstance3D.new()
 	fo.mesh = cap2
 	fo.material_override = om
@@ -10452,7 +10468,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	fl.add_child(fo)
 	# Glutball als Billboard: von hinten (Raketenkamera) sieht man die Kapseln nur von vorne – der Ball leuchtet aus jeder Richtung
 	var gq = QuadMesh.new()
-	gq.size = Vector2(0.55, 0.55) * float(X.size)
+	gq.size = Vector2(0.95, 0.95) * float(X.size)
 	var gm = StandardMaterial3D.new()
 	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	gm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -10460,8 +10476,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	gm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	gm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	gm.albedo_texture = _puff_tex()
-	var gc = _hs(Color(1.0, 0.55, 0.18), float(X.hue))
-	gm.albedo_color = Color(gc.r * 2.4, gc.g * 2.4, gc.b * 2.4, 0.9)
+	gm.albedo_color = Color(2.6, 1.3, 0.4, 0.95)
 	var gb = MeshInstance3D.new()
 	gb.mesh = gq
 	gb.material_override = gm
@@ -10470,7 +10485,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	fl.add_child(gb)
 	mi.add_child(_rocket_model(rl))
 	var lt = OmniLight3D.new()
-	lt.light_color = _hs(Color(1.0, 0.55, 0.2), float(X.hue))
+	lt.light_color = Color(1.0, 0.55, 0.2)
 	lt.omni_range = 4.0 * sqrt(float(X.size))
 	lt.light_energy = 3.0 * float(X.light)
 	mi.add_child(lt)
@@ -12797,7 +12812,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			sh.n.global_transform = Transform3D(bb, bp + _braid_off(f, bn, 0, sh.t))
 			var fln = sh.n.get_meta("fl", null)
 			if fln != null and is_instance_valid(fln):
-				var fk = (0.75 + 0.5 * randf()) * maxf(0.01, float(fx.rak.get("flame", 1.0)))   # Antrieb flackert
+				var fk = (0.75 + 0.5 * randf()) * maxf(0.01, float(fx.rak.get("flame", 1.0))) * (0.4 if (not mc.is_empty() and is_same(mc.get("sh"), sh)) else 1.0)   # Antrieb flackert; in der Raketenkamera kürzer (zeigt auf die Kamera)
 				var olt = sh.n.get_meta("lt", null)
 				if olt != null and is_instance_valid(olt):
 					if not (olt as OmniLight3D).has_meta("e0"):
@@ -14781,6 +14796,10 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 		return
 	var z: float = s.z
 	# Fahrphysik wie im HTML-Spiel: die Nase lenkt, die Flugrichtung folgt mit begrenzter Haftung
+	var stn = float(s.get("stun", 0.0))
+	if stn > 0.0:
+		s.stun = stn - dt
+		inp *= 0.15   # nach einem Treffer: Lenkung greift kaum
 	s.u += (inp - s.u) * (1.0 - exp(-dt / (0.03 if is_p else 0.08)))
 	var turn: float = T.kap(z) * s.spd
 	var yk = YAW_P * float(fx.steer.power) if is_p else YAW_AI
@@ -16961,7 +16980,7 @@ func _pose_all(dt: float) -> void:
 		var jv = float(s.get("jv", 0.0))
 		var jy = float(s.get("jy", 0.0))
 		if absf(jv) > 0.0005 or absf(jy) > 0.0005:
-			jv += (-70.0 * jy - 9.0 * jv) * dt
+			jv += (-40.0 * jy - 6.0 * jv) * dt
 			jy += jv * dt
 			s.jv = jv
 			s.jy = jy
