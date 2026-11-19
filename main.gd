@@ -963,7 +963,7 @@ const FXS = {
 		["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
 		["mega", "Mega towers", 0.0, 3.0, 1.0]],
 	"view": [["dist", "Camera distance", 0.5, 3.5, 1.0], ["height", "Camera height", 0.3, 3.0, 1.0], ["rumble", "Speed shake (0 = calm)", 0.0, 2.0, 1.0],
-		["nose", "Nose lift when accelerating (0 = off)", 0.0, 3.0, 1.0],
+		["nose", "Nose lift when accelerating (0 = off)", 0.0, 3.0, 1.0], ["dropcam", "Rocket launch close-up (0 = never, more = more often)", 0.0, 3.0, 1.0],
 		["tun", "Tunnels while live tuning (0 = hidden)", 0.0, 1.0, 0.0]],
 	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
 		["grit", "Grit", 0.0, 2.0, 0.0], ["echo", "Echo", 0.0, 2.0, 0.0], ["etime", "Echo time", 0.2, 3.0, 1.0], ["reverb", "Reverb", 0.0, 2.0, 0.0], ["room", "Room size", 0.0, 1.0, 0.6],
@@ -10800,11 +10800,15 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			_add_shot(g, false, false, 1.0, sup)
 			if sup:
 				_braid(shots[shots.size() - 1], 2)   # Super: zwei Raketen im Zopf
+			if g.idx == 0 and mc.is_empty() and _drop_roll():
+				_drop_cine(shots[shots.size() - 1])
 		"lenk":
 			_add_shot(g, false, true, 1.0, false, sup)
 			if sup:
 				_braid(shots[shots.size() - 1], 2)
 			if g.idx == 0:
+				if int(cfg.get("mcam", 1)) == 1 and _drop_roll():
+					_drop_mark(shots[shots.size() - 1])   # Raketenkamera zeigt das Ausklinken von der Seite
 				_mc_start(shots[shots.size() - 1])
 		"mine":
 			_drop_mines(g, sup)
@@ -12636,7 +12640,8 @@ func _weapons(dt: float, racing: bool) -> void:
 			vs = base_spd * (1.82 if sh.get("sup", false) else 1.68) * float(fx.rak.speed)
 		elif sh.get("mega", false):
 			vs = base_spd * 3.75 * float(fx.rak.speed)   # Mega: ein Blitz – selbst eine ganze Runde dauert nur Sekunden
-		var dropping = sh.t < RK_DROP
+		var drp = float(sh.get("drp", 0.0))   # normal 0: zündet sofort; nur beim Close-up klinkt sie sichtbar aus
+		var dropping = sh.t < drp
 		if dropping:
 			vs = float(sh.get("ov", spd)) * 0.9   # ausgeklinkt: fällt mit dem Schiff, bleibt etwas zurück
 		sh.z += vs * dt * sdir
@@ -12769,7 +12774,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			# Lenkrakete: nach 5 s ist der Sprit alle – sie verpufft ohne Schaden
 			_explode(sh.z, sh.lat, false, 0.45)
 			dead = true
-		elif (sh.t > 6.0 and not sh.get("mega", false) and not sh.get("lap1", false)) or (sh.get("mega", false) and sh.t > 40.0) or (sh.get("lap1", false) and absf(float(sh.z) - float(sh.z0)) > T.LAP) or (sh.cl and sh.t > 0.42 + RK_DROP) or (state == "lab" and absf(sh.z - LZ) > 18.0):
+		elif (sh.t > 6.0 and not sh.get("mega", false) and not sh.get("lap1", false)) or (sh.get("mega", false) and sh.t > 40.0) or (sh.get("lap1", false) and absf(float(sh.z) - float(sh.z0)) > T.LAP) or (sh.cl and sh.t > 0.42 + float(sh.get("drp", 0.0))) or (state == "lab" and absf(sh.z - LZ) > 18.0):
 			if sh.get("mega", false):
 				_explode(sh.z, sh.lat, false, 0.8)   # Mega-Salve: daneben = nur ein Knall, kein Loch
 			else:
@@ -12796,16 +12801,17 @@ func _weapons(dt: float, racing: bool) -> void:
 			var bn: int = sh.get("br", 1)
 			# Höhe: unter dem Schiff ausgeklinkt, sackt ab, nach der Zündung zurück auf Flughöhe
 			var hy = 0.25
-			var ig = sh.t - RK_DROP
+			var drp2 = float(sh.get("drp", 0.0))
+			var ig = sh.t - drp2
 			if ig < 0.0:
 				var u = sh.t / RK_DROP
 				hy = 0.34 - 0.24 * u * u
 			elif ig < 0.25:
-				hy = lerpf(0.10, 0.25, ig / 0.25)
+				hy = lerpf(0.10 if drp2 > 0.0 else 0.22, 0.25, ig / 0.25)
 			var bp: Vector3 = f.c + f.uu * hy
 			# klinkt seitlich unter dem Rumpf aus (sichtbar), nach der Zündung zurück auf die Spur
-			var sx = clampf(sh.t / 0.2, 0.0, 1.0) * clampf(1.0 - ig / 0.3, 0.0, 1.0) if ig < 0.3 else 0.0
-			bp += f.rr * 0.5 * sx
+			var sx = clampf(sh.t / 0.2, 0.0, 1.0) * clampf(1.0 - ig / 0.3, 0.0, 1.0) if (ig < 0.3 and drp2 > 0.0) else 0.0
+			bp += f.rr * 0.5 * sx * float(sh.get("ds", 1.0))
 			var bb = Basis(f.rr, f.fw, -f.uu)
 			if ig < 0.0:
 				bb = bb * Basis(Vector3.RIGHT, -0.18 * sh.t / RK_DROP)   # Nase kippt beim Fallen leicht nach unten
@@ -13202,7 +13208,7 @@ func _record(dt: float) -> void:
 	var w = []
 	for x in shots:
 		for k in range(int(x.get("br", 1))):
-			w.append([x.z, x.lat, int(x.own), float(x.dir), int(x.get("br", 1)), k, float(x.t), int(x.get("id", 0))])
+			w.append([x.z, x.lat, int(x.own), float(x.dir), int(x.get("br", 1)), k, float(x.t) + RK_DROP - float(x.get("drp", 0.0)), int(x.get("id", 0))])
 	var m = []
 	for x in mines:
 		m.append([x.z, x.lat])
@@ -17094,6 +17100,49 @@ func _pose_all(dt: float) -> void:
 var mc = {}
 
 
+# ---------------------------------------------------------------- Ausklink-Close-up
+# Normal zündet die Rakete sofort. Ab und zu (erste Rakete im Rennen, danach selten) klinkt sie sichtbar aus:
+# Kamera nah seitlich am Schiff, leichte Zeitlupe, Rakete sackt ab, zündet, schießt los – dann weich zurück.
+var dcam = {}
+var dc_last = -999.0
+
+
+func _drop_roll() -> bool:
+	if state != "race" or free_ride or not kc.is_empty():
+		return false
+	var k = float(fx.view.get("dropcam", 1.0))
+	if k <= 0.01:
+		return false
+	if race_t < dc_last:
+		dc_last = -999.0   # neues Rennen
+	var ok = dc_last < -900.0 or (race_t - dc_last > 30.0 / k and randf() < 0.18 * k)
+	if ok:
+		dc_last = race_t
+	return ok
+
+
+func _drop_mark(sh: Dictionary) -> void:
+	sh.drp = RK_DROP
+	sh.ov = float(ships[0].spd)
+	sh.ds = -1.0 if float(ships[0].lat) > 0.3 else 1.0   # klinkt zur Streckenmitte hin aus
+
+
+func _drop_cine(sh: Dictionary) -> void:
+	_drop_mark(sh)
+	dcam = {"sh": sh, "w": 0.0}
+	Engine.time_scale = 0.55
+	AudioServer.playback_speed_scale = 0.8
+
+
+func _drop_end() -> void:
+	if dcam.is_empty():
+		return
+	dcam = {}
+	if mc.is_empty() and kc.is_empty():
+		Engine.time_scale = 1.0
+		AudioServer.playback_speed_scale = 1.0
+
+
 func _mc_start(sh: Dictionary) -> void:
 	if int(cfg.get("mcam", 1)) != 1 or state != "race":   # immer mitfliegen – auch ohne Ziel, bis sie verpufft
 		return
@@ -17182,7 +17231,7 @@ func _mc_cam(dt: float) -> bool:
 			var f2 = T.sframe(float(sh.z) + 10.0 * float(sh.dir), float(sh.lat))
 			var look: Vector3 = f2.c + f2.uu * 0.3
 			var want = P - fw * 1.9 + f.uu * 0.55   # etwas weiter hinten: Flamme und Rauch am Heck bleiben im Bild
-			if float(sh.t) < RK_DROP + 0.15:
+			if float(sh.t) < float(sh.get("drp", 0.0)) + 0.15 and float(sh.get("drp", 0.0)) > 0.0:
 				# Ausklinken: schräg hinten seitlich, etwas tiefer – man sieht sie absacken und zünden
 				want = P - fw * 2.0 + f.rr * 1.35 + f.uu * 0.6
 				look = P + fw * 0.9
@@ -17340,6 +17389,27 @@ func _camera(dt: float) -> void:
 		# Fliehkraft: beim Boost in den Sitz gedrückt (Blick weicht zurück), beim Aufsetzen ein Ruck nach unten
 		ro += -SF * 0.16 * float(ckh.push) - SU * 0.06 * float(ckh.lj)
 		ta += -SU * 0.6 * float(ckh.lj)
+	if OS.get_environment("DCDBG") != "":
+		print("DC f=", Engine.get_process_frames(), " on=", not dcam.is_empty(), " ts=", Engine.time_scale, " shots=", shots.size(), " t=", (shots[0].t if shots.size() > 0 else -1), " drp=", (shots[0].get("drp", -1) if shots.size() > 0 else -1), " ckm=", ckm, " state=", state)
+	if not dcam.is_empty():
+		var dsh: Dictionary = dcam.sh
+		var dt0 = float(dsh.t)
+		var dT = float(dsh.get("drp", RK_DROP)) + 0.42
+		if not is_instance_valid(dsh.n) or dt0 > dT or state != "race" or not mc.is_empty() or not kc.is_empty():
+			_drop_end()
+		else:
+			var dsd = float(dsh.get("ds", 1.0))
+			var rp: Vector3 = (dsh.n as Node3D).global_position
+			var cro: Vector3 = S0 + f.rr * (2.1 * dsd) + f.uu * 0.75 - f.fw * 2.1
+			var cta: Vector3 = rp.lerp(S0, 0.7) + f.fw * 0.6 - f.uu * 0.05
+			var wv = smoothstep(0.0, 0.12, dt0) * (1.0 - smoothstep(dT - 0.3, dT, dt0))
+			ro = ro.lerp(cro, wv)
+			ta = ta.lerp(cta, wv)
+			if OS.get_environment("DCSHOT") != "" and dt0 >= float(OS.get_environment("DCSHOT")):
+				cam.global_position = ro
+				cam.look_at(ta, uc)
+				get_viewport().get_texture().get_image().save_png(OS.get_environment("DCSHOT_P"))
+				get_tree().quit()
 	shake = maxf(0.0, shake - dt * 1.8)
 	_flash_fade(dt * 2.2)
 	if shake > 0.0:
