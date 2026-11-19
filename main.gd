@@ -961,7 +961,8 @@ const FXS = {
 	"city": [["holo", "Holograms", 0.0, 4.0, 1.0], ["hsize", "Hologram size", 0.3, 3.0, 1.0], ["hflick", "Hologram glitch", 0.0, 12.0, 1.0], ["hhue", "Hologram color", -0.5, 0.5, 0.0],
 		["signs", "Neon signs", 0.0, 4.0, 1.0], ["search", "Searchlights", 0.0, 4.0, 1.0], ["cars", "Flying cars", 0.0, 4.0, 1.0],
 		["mega", "Mega towers", 0.0, 3.0, 1.0]],
-	"view": [["dist", "Camera distance", 0.5, 3.5, 1.0], ["height", "Camera height", 0.3, 3.0, 1.0],
+	"view": [["dist", "Camera distance", 0.5, 3.5, 1.0], ["height", "Camera height", 0.3, 3.0, 1.0], ["rumble", "Speed shake (0 = calm)", 0.0, 2.0, 1.0],
+		["nose", "Nose lift when accelerating (0 = off)", 0.0, 3.0, 1.0],
 		["tun", "Tunnels while live tuning (0 = hidden)", 0.0, 1.0, 0.0]],
 	"sound": [["vol", "Volume", 0.0, 3.0, 1.0], ["pitch", "Pitch", 0.5, 2.0, 1.0], ["bass", "Bass", 0.0, 2.0, 1.0], ["treble", "Treble", 0.0, 2.0, 1.0],
 		["grit", "Grit", 0.0, 2.0, 0.0], ["echo", "Echo", 0.0, 2.0, 0.0], ["etime", "Echo time", 0.2, 3.0, 1.0], ["reverb", "Reverb", 0.0, 2.0, 0.0], ["room", "Room size", 0.0, 1.0, 0.6],
@@ -11864,6 +11865,8 @@ function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D
   const z=document.createElement('button');z.textContent='↺';z.title='Standard';
   s.oninput=()=>{it.v=+s.value;v.textContent=fmt(it,it.v);send(T.g,it.k,s.value);};
   z.onclick=()=>{s.value=it.d;s.oninput();};
+  s.addEventListener('wheel',e=>{e.preventDefault();const ig=s.step=='1';let st=ig?1:(it.hi-it.lo)/(e.shiftKey?2000:400);
+   s.value=Math.min(it.hi,Math.max(it.lo,+s.value+(e.deltaY<0?st:-st)));s.oninput();},{passive:false});
   r.append(l,s,v,z);m.append(r);});
 }
 let CV=null,CD=null;
@@ -16667,7 +16670,7 @@ func _pose_all(dt: float) -> void:
 			var vl = s.spd * sin(s.vpsi)
 			# bei 100 %: voll eingelenkt rund 45°, wie ein Motorrad in der Kurve (Regler bis 300 % → bis ~70°)
 			var tr = clampf(0.8 * float(fx.steer.bank) * clampf(0.6 * s.u + 0.6 * clampf(absf(s.u) * 2.0, 0.2, 1.0) * clampf(vl / 4.0, -1.0, 1.0), -1.0, 1.0), -1.2, 1.2)
-			var tp = clampf((s.pacc * 0.006 + s.boost * 0.035) * float(SX.pitch), -0.35, 0.35)
+			var tp = clampf((s.pacc * 0.006 + s.boost * 0.035) * float(SX.pitch) * (float(fx.view.get("nose", 1.0)) if is_same(s, ships[0]) else 1.0), -0.35, 0.35)
 			var nsub = maxi(1, int(ceil(dt * om * maxf(1.0, float(fx.steer.recover)) / 0.25)))
 			var sdt = dt / nsub
 			for _i in range(nsub):
@@ -17016,7 +17019,7 @@ func _camera(dt: float) -> void:
 		ro += Vector3(sin(tt2 * 61.0), sin(tt2 * 53.0 + 1.0) * 0.7, sin(tt2 * 47.0 + 2.0) * 0.5) * shake * (0.04 if ckm else 0.09)
 	# Tempo-Zittern: bei normaler Fahrt kaum spürbar, bei Boost deutlich (die Kamera vibriert, das Bild wackelt leicht mit)
 	if (state == "race" or state == "replay") and post_spd > 0.01:
-		var rum = (0.003 + 0.02 * maxf(0.0, post_spd - 0.32) / 0.68) * clampf(post_spd / 0.32, 0.0, 1.0)
+		var rum = (0.003 + 0.02 * maxf(0.0, post_spd - 0.32) / 0.68) * clampf(post_spd / 0.32, 0.0, 1.0) * float(fx.view.get("rumble", 1.0))
 		var t3 = Time.get_ticks_msec() / 1000.0
 		var jr = (sin(t3 * 71.0) + sin(t3 * 113.0 + 1.3)) * 0.5
 		var ju = (sin(t3 * 83.0 + 0.7) + sin(t3 * 131.0 + 2.1)) * 0.5
