@@ -924,7 +924,8 @@ const FXS = {
 		["sparks", "Sparks", 0.0, 8.0, 1.0], ["light", "Light", 0.0, 8.0, 1.0], ["lens", "Space warp", 0.0, 8.0, 1.0], ["shake", "Camera shake", 0.0, 8.0, 1.0],
 		["hue", "Color (all)", -0.5, 0.5, 0.0]],
 	"rak": [["size", "Size", 0.2, 8.0, 1.0], ["speed", "Speed", 0.2, 6.0, 1.0], ["light", "Light", 0.0, 10.0, 1.0],
-		["hue", "Color", -0.5, 0.5, 0.0], ["smoke", "Smoke trail", 0.0, 3.0, 1.2], ["flame", "Flame", 0.0, 3.0, 1.0]],
+		["hue", "Color", -0.5, 0.5, 0.0], ["smoke", "Smoke trail", 0.0, 3.0, 1.2], ["flame", "Flame", 0.0, 3.0, 1.0],
+		["push", "Hit push (ship thrown around)", 0.0, 3.0, 1.0], ["wound", "Hit damage (scorch, sparks, fire)", 0.0, 3.0, 1.0]],
 	"jungle": [["trees", "Trees", 0.0, 1.0, 1.0], ["under", "Undergrowth", 0.0, 1.0, 1.0], ["flies", "Fireflies", 0.0, 1.0, 1.0], ["fsize", "Firefly size", 0.3, 3.0, 1.0],
 		["mush", "Mushroom glow", 0.0, 4.0, 1.0], ["wall", "Wall height (restart)", 0.3, 2.0, 1.0], ["meteor", "Shooting stars", 0.0, 4.0, 1.0], ["far", "Far mountains", 0.0, 2.0, 1.0]],
 	"lock": [["shape", "Shape", 0.0, 4.0, 0.0], ["size", "Size", 0.3, 4.0, 1.0], ["thick", "Line thickness", 0.2, 5.0, 1.0], ["glow", "Glow", 0.0, 10.0, 1.0],
@@ -4028,10 +4029,12 @@ func _dmg_fx_build(root: Node3D) -> void:
 
 # je Bild: Stufen nach Energie – unter 55 % Funken, unter 35 % Qualm, unter 18 % kleine Flammen
 func _dmg_fx_step(o: Dictionary, nd: Node3D) -> void:
+	var live = (state == "race" or state == "done" or state == "lab") and not o.out and not free_ride and nd.visible
+	if nd.has_meta("wnd"):
+		_wound_step(o, nd, live)
 	if not nd.has_meta("dmgfx"):
 		return
 	var ef: Array = nd.get_meta("dmgfx")
-	var live = (state == "race" or state == "done") and not o.out and not free_ride and nd.visible
 	var en = clampf(o.en, 0.0, 1.0)
 	var lv = [0.55, 0.35, 0.18]
 	for k in range(3):
@@ -4215,7 +4218,7 @@ var crash_m = {}
 var scorch = []   # Brandflecken: kühlen langsam ab (glühen danach noch schwach)
 
 
-func _crash_site(o: Dictionary, bp: Vector3, f: Dictionary, rn: RandomNumberGenerator) -> void:
+func _crash_init() -> void:
 	if crash_m.is_empty():
 		crash_m.char = StandardMaterial3D.new()
 		(crash_m.char as StandardMaterial3D).albedo_color = Color(0.07, 0.065, 0.06)
@@ -4229,6 +4232,10 @@ func _crash_site(o: Dictionary, bp: Vector3, f: Dictionary, rn: RandomNumberGene
 		var b3 = BoxMesh.new()
 		b3.size = Vector3(0.07, 0.05, 0.22)
 		crash_m.shapes = [b1, b2, b3]
+
+
+func _crash_site(o: Dictionary, bp: Vector3, f: Dictionary, rn: RandomNumberGenerator) -> void:
+	_crash_init()
 	var lat0: float = clampf(o.lat, -T.TW + 0.3, T.TW - 0.3)
 	if OS.get_environment("CSDBG") != "":
 		print("CRASHSITE z=", o.z, " lz=", T.lz(o.z), " lat=", o.lat)
@@ -10116,6 +10123,255 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 var rocket_ps: PackedScene
 
 
+# ---------------------------------------------------------------- Treffer: Stoß, Wunden, Splitter
+# Keine feste Animation: alles richtet sich danach, WO die Rakete einschlägt.
+# lx/lz/ly = Einschlagpunkt relativ zur Schiffsmitte (rechts, vorn, oben, in Metern),
+# fl/ff = Richtung des Stoßes (rechts, vorn), k = Wucht (1 = normale Rakete)
+var hshards = []
+
+
+func _impact(o: Dictionary, lx: float, lz: float, ly: float, fl: float, ff: float, k: float, wound: bool) -> void:
+	if o.out or o.orbs > 0.0 or (o.idx == 0 and (o.auto > 0.0 or not mc.is_empty())):
+		return
+	var fn = Vector2(fl, ff)
+	if fn.length() < 0.001:
+		fn = Vector2(0.0, 1.0)
+	fn = fn.normalized()
+	var kp = k * float(fx.rak.get("push", 1.0))
+	if o.shield > 0.0:
+		kp *= 0.3   # Schild fängt das meiste ab, keine Wunde
+		wound = false
+	# Seitenstoß (m/s): versetzt das Schiff, klingt in einer halben Sekunde ab
+	o.kl = float(o.get("kl", 0.0)) + fn.x * 3.4 * kp
+	# Drehstoß: Kraft neben dem Schwerpunkt dreht das Schiff (Hebel × Kraft) – hinten links getroffen → Heck nach rechts, Nase nach links
+	o.kyw = clampf(float(o.get("kyw", 0.0)) + (lz * fn.x - lx * fn.y) * 6.0 * kp, -3.5, 3.5)
+	# Rollen, Nicken und Hochspringen (die Federn der Lage schwingen danach von selbst aus)
+	o.rv = float(o.get("rv", 0.0)) + (fn.x * 14.0 + signf(lx) * absf(fn.y) * 7.0 + randf_range(-2.0, 2.0)) * kp
+	o.pv = float(o.get("pv", 0.0)) + (-fn.y * 6.0 * signf(-lz + 0.001) + randf_range(-2.0, 2.0)) * kp
+	o.jv = float(o.get("jv", 0.0)) + (2.4 if ly < 0.15 else 1.4) * kp
+	if wound and float(fx.rak.get("wound", 1.0)) > 0.01:
+		_wound(o, lx, lz, ly, k)
+		_hit_shards(o, lx, lz, ly, k)
+
+
+# Brandflecken direkt auf der Hülle: ein Überzug-Shader (material_overlay) färbt die Hülle um jede Wunde
+# schwarz verkohlt, mit ausgefranstem Rand und frischer Glut – folgt jeder Rundung des Modells, auf jedem Renderer
+const HULLBURN_CODE = """
+shader_type spatial;
+render_mode blend_mix, depth_draw_never, cull_back, specular_disabled;
+instance uniform vec4 w0 = vec4(0.0);
+instance uniform vec4 w1 = vec4(0.0);
+instance uniform vec4 w2 = vec4(0.0);
+instance uniform vec4 w3 = vec4(0.0);
+instance uniform vec4 w4 = vec4(0.0);
+instance uniform vec4 w5 = vec4(0.0);
+instance uniform float hot = 0.0;
+varying vec3 lv;
+float h3(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float vn(vec3 p){ vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
+		mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z); }
+void vertex(){ lv = VERTEX; }
+float spot(vec4 w, float n){ if (w.w <= 0.0) return 0.0; float d = length(lv - w.xyz) / w.w + (n - 0.5) * 0.55; return 1.0 - smoothstep(0.45, 1.0, d); }
+float core(vec4 w, float n){ if (w.w <= 0.0) return 0.0; float d = length(lv - w.xyz) / w.w + (n - 0.5) * 0.4; return 1.0 - smoothstep(0.0, 0.35, d); }
+void fragment(){
+	float sc = max(max(max(abs(w0.w), abs(w1.w)), max(abs(w2.w), abs(w3.w))), max(abs(w4.w), abs(w5.w)));
+	float n = vn(lv * 9.0 / max(sc, 0.001)) * 0.65 + vn(lv * 23.0 / max(sc, 0.001)) * 0.35;
+	float a = max(max(max(spot(w0, n), spot(w1, n)), max(spot(w2, n), spot(w3, n))), max(spot(w4, n), spot(w5, n)));
+	float c = max(max(max(core(w0, n), core(w1, n)), max(core(w2, n), core(w3, n))), max(core(w4, n), core(w5, n)));
+	ALBEDO = mix(vec3(0.035, 0.03, 0.028), vec3(0.012, 0.01, 0.01), c);
+	ROUGHNESS = 0.95;
+	EMISSION = vec3(3.0, 0.9, 0.15) * c * hot * (0.6 + 0.4 * n);
+	ALPHA = a * 0.96;
+}
+"""
+var scorch_ov: ShaderMaterial
+
+
+func _ship_layers(nd: Node3D) -> void:
+	if nd.has_meta("lay"):
+		return
+	nd.set_meta("lay", true)
+	if scorch_ov == null:
+		scorch_ov = _shader_mat(HULLBURN_CODE)
+	var hl = []
+	for mi in nd.find_children("*", "MeshInstance3D", true, false):
+		var m3 := mi as MeshInstance3D
+		if m3.material_override != null:
+			continue   # Düsenstrahl, Flimmern usw. – keine Hülle
+		m3.material_overlay = scorch_ov
+		hl.append(m3)
+	nd.set_meta("hull", hl)
+
+
+# Wunden in den Überzug schreiben: Lage je Teilmodell umrechnen (Teile können skaliert/verschoben sein)
+func _wound_apply(nd: Node3D) -> void:
+	var wl: Array = nd.get_meta("wnd", [])
+	var wk = sqrt(maxf(0.05, float(fx.rak.get("wound", 1.0))))
+	for mi in nd.get_meta("hull", []):
+		if not is_instance_valid(mi):
+			continue
+		var m3 := mi as MeshInstance3D
+		var inv: Transform3D = m3.global_transform.affine_inverse() * nd.global_transform
+		var sc = inv.basis.get_scale().x
+		for j in range(6):
+			var v = Vector4(0, 0, 0, 0)
+			if j < wl.size():
+				var lp: Vector3 = inv * (wl[j].p as Vector3)
+				v = Vector4(lp.x, lp.y, lp.z, (0.13 + 0.07 * float(wl[j].sev)) * wk * sc)
+			m3.set_instance_shader_parameter("w%d" % j, v)
+		m3.set_instance_shader_parameter("hot", 1.0)
+	nd.set_meta("hot", 1.0)
+
+
+# Wunde an der getroffenen Stelle: schwarzer Brandfleck auf der Hülle, Funken, ab mehr Schaden Qualm und Feuer
+func _wound(o: Dictionary, lx: float, lz: float, ly: float, k: float) -> void:
+	var nd: Node3D = o.node
+	if not is_instance_valid(nd) or not nd.has_meta("bb"):
+		return
+	_ship_layers(nd)
+	_fx_res()
+	var f = T.sframe(o.z, o.lat)
+	var wp: Vector3 = nd.global_position + f.rr * lx + f.fw * lz + f.uu * ly
+	var lp: Vector3 = nd.global_transform.affine_inverse() * wp
+	var bb: AABB = nd.get_meta("bb")
+	var c: Vector3 = bb.get_center()
+	var hs: Vector3 = bb.size * 0.5
+	var q = Vector3((lp.x - c.x) / maxf(hs.x, 0.01), (lp.y - c.y) / maxf(hs.y, 0.01), (lp.z - c.z) / maxf(hs.z, 0.01))
+	var m = maxf(absf(q.x), maxf(absf(q.y), absf(q.z)))
+	if m < 0.01:
+		q = Vector3(0, 1, 0)
+		m = 1.0
+	q /= m
+	var sp: Vector3 = c + Vector3(q.x * hs.x, q.y * hs.y, q.z * hs.z) * 0.8   # Punkt auf der Hülle
+	var nrm: Vector3 = Vector3(q.x / maxf(hs.x, 0.01), q.y / maxf(hs.y, 0.01), q.z / maxf(hs.z, 0.01)).normalized()
+	var wl: Array = nd.get_meta("wnd", [])
+	# schon eine Wunde in der Nähe: die wird größer
+	for w in wl:
+		if (w.p as Vector3).distance_to(sp) < 0.32:
+			w.sev = minf(4.0, float(w.sev) + k)
+			_wound_apply(nd)
+			(w.sp as GPUParticles3D).restart()
+			return
+	if wl.size() >= 6:
+		var wb = wl[0]
+		for w in wl:
+			if (w.p as Vector3).distance_to(sp) < (wb.p as Vector3).distance_to(sp):
+				wb = w
+		wb.sev = minf(4.0, float(wb.sev) + k)
+		_wound_apply(nd)
+		return
+	var a = Vector3.UP if absf(nrm.y) < 0.9 else Vector3.RIGHT
+	var bx = a.cross(nrm).normalized()
+	var bz = bx.cross(nrm).normalized()
+	var B = Basis(bx, nrm, bz).rotated(nrm, randf() * TAU)
+	var wr = _ramp([[0.0, Color(9, 6, 2.5, 1)], [0.5, Color(4, 1.3, 0.25, 1)], [1.0, Color(1, 0.2, 0.05, 0)]])
+	var spk = _dmg_emitter(fxr.spark, 16, 0.4, 1.2, 4.5, 55.0, Vector3(0, -9, 0), 0.1, 0.28, wr, null, true, Vector3(0.03, 0.03, 0.03), 0.95)
+	spk.one_shot = true
+	var smo = _dmg_emitter(fxr.smoke, 18, 1.4, 0.2, 0.8, 25.0, Vector3(0, 0.7, 0), 0.25, 0.6,
+		_ramp([[0.0, Color(0.16, 0.15, 0.15, 0)], [0.1, Color(0.12, 0.11, 0.11, 0.7)], [1.0, Color(0.06, 0.06, 0.07, 0)]], false),
+		_curve([[0.0, 0.4], [1.0, 1.8]]), false, Vector3(0.04, 0.02, 0.04), 0.0)
+	var fir = _dmg_emitter(fxr.fire, 14, 0.35, 0.3, 1.0, 25.0, Vector3(0, 1.5, 0), 0.07, 0.16,
+		_ramp([[0.0, Color(1.8, 1.2, 0.5, 1)], [0.3, Color(1.4, 0.5, 0.1, 0.8)], [1.0, Color(0.3, 0.06, 0.02, 0)]]),
+		_curve([[0.0, 0.6], [0.3, 1.0], [1.0, 0.3]]), false, Vector3(0.03, 0.02, 0.03), 0.0)
+	for e in [spk, smo, fir]:
+		nd.add_child(e)
+		e.transform = Transform3D(B, sp + nrm * 0.03)
+	spk.emitting = true
+	var w = {"sp": spk, "sm": smo, "fi": fir, "sev": k, "p": sp}
+	wl.append(w)
+	nd.set_meta("wnd", wl)
+	_wound_apply(nd)
+
+
+
+
+# Wunden je Bild: Funken sprühen stoßweise, ab mehr Schaden Qualm, bei schwerem Schaden Feuer
+func _wound_step(o: Dictionary, nd: Node3D, live: bool) -> void:
+	var wl: Array = nd.get_meta("wnd")
+	if state == "count" or state == "intro" or state == "menu":
+		for w in wl:
+			for kk in ["sp", "sm", "fi"]:
+				_qf(w[kk])
+		nd.remove_meta("wnd")
+		_wound_apply(nd)
+		return
+	var ht = float(nd.get_meta("hot", 0.0))
+	if ht > 0.0:
+		ht = maxf(0.0, ht - get_process_delta_time() / 6.0)   # frische Glut erlischt in ein paar Sekunden
+		nd.set_meta("hot", ht)
+		for mi in nd.get_meta("hull", []):
+			if is_instance_valid(mi):
+				(mi as MeshInstance3D).set_instance_shader_parameter("hot", ht * ht)
+	var dm = 1.0 - clampf(o.en, 0.0, 1.0)
+	var wk = float(fx.rak.get("wound", 1.0))
+	for w in wl:
+		var sv = float(w.sev)
+		if live and randf() < (0.012 + 0.05 * dm) * sv * wk:
+			(w.sp as GPUParticles3D).restart()
+		var smon = live and wk > 0.01 and (dm > 0.35 or sv > 1.6)
+		if (w.sm as GPUParticles3D).emitting != smon:
+			(w.sm as GPUParticles3D).emitting = smon
+		var fion = live and wk > 0.01 and (dm > 0.62 or sv > 2.6)
+		if (w.fi as GPUParticles3D).emitting != fion:
+			(w.fi as GPUParticles3D).emitting = fion
+		if smon:
+			(w.sm as GPUParticles3D).amount_ratio = clampf(0.3 + dm * 0.8, 0.3, 1.0)
+
+
+# Splitter fliegen von der getroffenen Stelle weg und bleiben auf der Fahrbahn liegen
+func _hit_shards(o: Dictionary, lx: float, lz: float, ly: float, k: float) -> void:
+	_crash_init()
+	var n = int(clampf(round(5.0 * k), 2.0, 10.0))
+	var ov = Vector2(lx, lz)
+	ov = ov.normalized() if ov.length() > 0.01 else Vector2(0.0, -1.0)
+	var shapes: Array = crash_m.shapes
+	for j in range(n):
+		var mi = MeshInstance3D.new()
+		mi.mesh = shapes[j % shapes.size()]
+		if j % 3 == 0:
+			var em: ShaderMaterial = (crash_m.ember as ShaderMaterial).duplicate()
+			em.set_shader_parameter("ph", randf() * 6.0)
+			mi.material_override = em
+		else:
+			mi.material_override = crash_m.char
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ch = Node3D.new()
+		ch.set_meta("rfx", true)
+		ch.set_meta("deb", true)
+		add_child(ch)
+		ch.add_child(mi)
+		var s3 = randf_range(0.3, 0.75)
+		mi.scale = Vector3.ONE * s3
+		var a = randf_range(-0.9, 0.9)
+		var dv = ov.rotated(a)
+		debris.append({"n": ch, "z": float(o.z) + lz, "lat": float(o.lat) + lx, "h": 0.25 + maxf(0.0, ly),
+			"vz": float(o.spd) * randf_range(0.55, 0.9) + dv.y * randf_range(1.5, 6.0), "vl": float(o.get("kl", 0.0)) * 0.5 + dv.x * randf_range(1.5, 6.0),
+			"vh": randf_range(1.5, 5.5), "rb": Basis(), "av": Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)).normalized() * randf_range(6.0, 18.0),
+			"r": 0.06 * s3, "t": 0.0, "m": null, "sp": 0.0, "hit": false, "kt": 0.0, "wreck": false, "small": true})
+		hshards.append(ch)
+	while hshards.size() > 60:
+		_qf(hshards[0])
+		hshards.remove_at(0)
+
+
+# Druckwelle einer Explosion: Schiffe in der Nähe werden weggeschoben (ohne Wunde), je näher, desto stärker
+func _blast_push(z: float, lat: float, r: float, k: float, skip: int) -> void:
+	if state != "race":
+		return
+	for o in ships:
+		if o.out or int(o.idx) == skip:
+			continue
+		var dz = float(o.z) - z
+		var dl = float(o.lat) - lat
+		var d = sqrt(dz * dz + dl * dl)
+		if d > r:
+			continue
+		var w = (1.0 - d / r)
+		w *= w
+		_impact(o, -dl, -dz, 0.0, dl / maxf(d, 0.05), dz / maxf(d, 0.05), k * w, false)
+
+
 # Rauchfahne der Rakete: Rauch-Wölkchen (wie bei den Explosionen) bleiben in der Luft stehen,
 # wachsen und verblassen; vorbeifliegende Schiffe wirbeln sie auf
 func _rk_trail(sh: Dictionary, f: Dictionary, dt: float) -> void:
@@ -10271,6 +10527,7 @@ func _braid(sh: Dictionary, n: int) -> void:
 
 # Rakete geht hoch: normal ein schwarzes Loch, Super-Rakete (Streubombe) zerplatzt in fünf kleine über die ganze Breite
 func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
+	_blast_push(z, lat, 3.2, 0.7, hit)
 	if not sh.get("cl", false):
 		_gbomb(z, lat, sh.own, hit, 1.0, sh.get("sup", false))
 		return
@@ -11329,6 +11586,8 @@ const FX_INFO = {
 	"rak.hue": "Dreht die Farbe der Raketen.",
 	"rak.smoke": "Rauchfahne hinter der Rakete (0 = aus).",
 	"rak.flame": "Größe der Antriebsflamme.",
+	"rak.push": "Wie stark ein Treffer das Schiff wegstößt, dreht und hochwirft (je nach Einschlagstelle).",
+	"rak.wound": "Wie deutlich Treffer am Schiff zu sehen sind: Brandflecken, Funken, Qualm, Feuer.",
 	"jungle.trees": "Wie viele Bäume am Rand stehen. Weniger = schneller auf dem Handy.",
 	"jungle.under": "Menge an Büschen und Farnen. Weniger = schneller.",
 	"jungle.flies": "Anzahl der Glühwürmchen.",
@@ -12455,7 +12714,19 @@ func _weapons(dt: float, racing: bool) -> void:
 		if hit != null:
 			if not _prot(hit):
 				hit.slow = minf(hit.slow, 0.35)
-				hit.vpsi += randf_range(-0.25, 0.25)
+			# Einschlagstelle: von hinten (oder vorn, je nach Flugrichtung), seitlich dort, wo die Rakete herkam
+			var rdir = signf(float(sh.get("dir", 1.0)))
+			var ilx = clampf(float(sh.lat) - float(hit.lat), -0.33, 0.33) + randf_range(-0.12, 0.12)
+			var ilz = -rdir * randf_range(0.35, 0.7)
+			var ily = randf_range(0.0, 0.22)
+			if sh.get("mega", false):
+				for j in range(3):
+					var jl = ilx + [0.0, -0.22, 0.22][j]
+					var jz = ilz + [0.0, 0.2, 0.4][j] * rdir
+					_after(0.07 * j + 0.001, func(): _impact(hit, jl, jz, ily, -jl * 0.6, rdir, 0.75, true))
+			else:
+				var ik = 1.35 if (sh.get("sup", false) or sh.get("cl", false)) else (0.8 if sh.pl else 1.0)
+				_impact(hit, ilx, ilz, ily, -ilx * 0.6, rdir, ik, true)
 			if sh.get("mega", false):
 				# Mega-Salve: fester Schaden (40 %); jede der drei Raketen reißt ein kleineres schwarzes Loch,
 				# leicht versetzt – zusammen größer als bei der normalen Rakete (Schaden kommt nur einmal oben)
@@ -14558,6 +14829,16 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	var fwd: float = s.spd * cos(s.vpsi)
 	s.z += fwd * dt
 	s.lat += s.spd * sin(s.vpsi) * dt
+	# Treffer-Stoß: Seitenschub und Drehimpuls klingen ab (aus _impact)
+	var kl = float(s.get("kl", 0.0))
+	if absf(kl) > 0.001:
+		s.lat += kl * dt
+		s.kl = kl * exp(-dt * 2.2)
+	var kyw = float(s.get("kyw", 0.0))
+	if absf(kyw) > 0.001:
+		s.psi = clampf(s.psi + kyw * dt, -0.9, 0.9)
+		s.vpsi = clampf(s.vpsi + kyw * dt * 0.55, -0.9, 0.9)
+		s.kyw = kyw * exp(-dt * 3.0)
 	# Sprung: über der Lücke fliegt er, Schwerkraft holt ihn zurück (Weite begrenzt)
 	if not s.air and T.gap(s.z):
 		s.air = true
@@ -16093,6 +16374,13 @@ func _shot() -> void:
 				shot_s = a
 	if shot_s == "":
 		return
+	if OS.get_environment("WNDT") != "" and state == "lab":
+		var wi = [90, 102, 114, 126].find(shot_n)
+		if wi >= 0:
+			ships[0].en = 0.9 - 0.2 * wi
+			var pts = [[-0.3, -0.6, 0.1], [0.3, -0.5, 0.15], [-0.25, 0.2, 0.2], [0.2, -0.65, 0.0]]
+			var pp = pts[wi]
+			_impact(ships[0], pp[0], pp[1], pp[2], -pp[0] * 0.6, 1.0, 1.0, true)
 	if OS.get_environment("CMTAP") != "":
 		# nur zum Testen: Daumen-Tipps während des Comics simulieren und mitschreiben, was der Comic macht
 		var fr_n = Engine.get_process_frames()
@@ -16196,6 +16484,18 @@ func _shot() -> void:
 							_fire_w(ships[0], "lenk", false)
 					if shot_n % 4 == 0:
 						print("MC n=", shot_n, " ts=", snappedf(Engine.time_scale, 0.01), " ci=", snappedf(float(mc.get("ci", -1.0)), 0.01), " on=", not mc.is_empty(), " hold=", snappedf(float(mc.get("hold", -9.0)), 0.01), " camd=", snappedf(cam.global_position.distance_to((ships[0].node as Node3D).global_position), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " shots=", shots.size(), " spd=", snappedf(float(ships[0].spd), 0.1), "/", snappedf(float(ships[1].spd), 0.1), " dz=", snappedf(float(ships[1].z) - (float(shots[0].z) if shots.size() > 0 else 0.0), 0.1), " base=", base_spd)
+				if OS.get_environment("WNDT") != "":   # Test: Treffer am eigenen Schiff (Stoß, Wunden, Splitter)
+					var wn = [24, 34, 44, 54]
+					var wi = wn.find(shot_n)
+					if wi >= 0:
+						ships[0].en = 0.9 - 0.2 * wi
+						ships[0].shield = 0.0
+						var pts = [[-0.3, -0.6, 0.1], [0.3, -0.5, 0.15], [-0.25, 0.2, 0.2], [0.2, -0.65, 0.0]]
+						var pp = pts[wi]
+						_impact(ships[0], pp[0], pp[1], pp[2], -pp[0] * 0.6, 1.0, 1.0, true)
+						print("WNDT hit ", wi, " kl=", snappedf(float(ships[0].kl), 0.01), " kyw=", snappedf(float(ships[0].kyw), 0.01), " wnd=", ((ships[0].node as Node3D).get_meta("wnd", []) as Array).size())
+					if shot_n > 24 and shot_n % 3 == 0:
+						print("WNDT n=", shot_n, " lat=", snappedf(float(ships[0].lat), 0.01), " psi=", snappedf(float(ships[0].psi), 0.02), " roll=", snappedf(float(ships[0].roll), 0.02), " jy=", snappedf(float(ships[0].get("jy", 0.0)), 0.01))
 				if OS.get_environment("WALLT") != "":   # Test: eigene Wand, durchfahren, dann Rakete von hinten
 					if shot_n == 20:
 						_fire_w(ships[0], "wand", false)
@@ -16657,6 +16957,15 @@ func _pose_all(dt: float) -> void:
 		var SX: Dictionary = fx.ship
 		var bob = 0.012 * float(SX.bob) * sin(tt * 2.7 + s.ai)
 		var pos: Vector3 = f.c + f.uu * (0.16 * float(SX.height) + s.h + bob)
+		# Treffer: das Schiff wird kurz hochgeworfen und federt zurück
+		var jv = float(s.get("jv", 0.0))
+		var jy = float(s.get("jy", 0.0))
+		if absf(jv) > 0.0005 or absf(jy) > 0.0005:
+			jv += (-70.0 * jy - 9.0 * jv) * dt
+			jy += jv * dt
+			s.jv = jv
+			s.jy = jy
+			pos += f.uu * jy
 		var dir: Vector3 = (f.fw * cos(s.psi) + f.rr * sin(s.psi)).normalized()
 		if state != "replay" and state != "kill":
 			# Feder: Neigen in Kurven und Nicken beim Beschleunigen schwingen je nach „Wobble“ nach
