@@ -866,7 +866,9 @@ func _post_update(dt: float) -> void:
 	var best = null
 	var bk = 0.0
 	for e in fxs:
-		if e.get("gb", false):
+		# das echte Loch vom Treffer (in der Wiederholung angehalten und unsichtbar) darf den Bildschirm-Sog nicht
+		# auslösen – sonst erschien am Ziel ein schwarzes Loch, während die Raketen in der Zeitlupe noch anflogen
+		if e.get("gb", false) and not (state == "kill" and e.get("kch", false)):
 			var k = clampf(1.0 - (e.pos - cam.global_position).length() / 50.0, 0.0, 1.0)
 			if not cam.is_position_behind(e.pos) and k > bk:
 				bk = k
@@ -9787,7 +9789,7 @@ func _kc_passes(t0: float, vi: int, sid: int) -> Array:
 
 # Rauchfahne der Raketen in der Einschlag-Wiederholung: graue Wölkchen an den Stellen, an denen dieselbe
 # Rakete in den Aufnahmebildern davor war – folgt also der echten Flugbahn, wird nach hinten breiter und blasser
-const SMOKE_N = 12
+const SMOKE_N = 22
 func _rp_smoke(F: Array, W: Array) -> void:
 	var on = state == "kill" and kc.get("ir", false)
 	var n = W.size() * SMOKE_N if on else 0
@@ -9816,7 +9818,7 @@ func _rp_smoke(F: Array, W: Array) -> void:
 		var key = int(wv[7]) * 16 + int(wv[5]) if wv.size() >= 8 else -1
 		for k in range(SMOKE_N):
 			var mi: MeshInstance3D = pz[j * SMOKE_N + k]
-			var fi = i0 - (k + 1) * 2   # alle 2 Aufnahmebilder (1/15 s) ein Wölkchen
+			var fi = i0 - (k + 1)   # jedes Aufnahmebild (1/30 s) ein Wölkchen
 			var hp = null
 			if key >= 0 and fi >= 0 and fi < F.size():
 				for w in F[fi].w:
@@ -9830,11 +9832,15 @@ func _rp_smoke(F: Array, W: Array) -> void:
 			hz -= T.LAP * round((hz - ref) / T.LAP)
 			var hf = T.sframe(hz, float(hp[1]))
 			var age = float(k + 1) / SMOKE_N
-			mi.global_position = hf.c + hf.uu * (0.27 + 0.25 * age)
-			var sz = 0.22 + 0.9 * age
+			# an der Stelle, an der die Rakete damals war – mit ihrem Zopf-Versatz: bei der Mega dreht sich die Fahne als Spirale
+			var hwo: Vector3 = _braid_off(hf, int(hp[4]), int(hp[5]), float(hp[6])) if (hp as Array).size() >= 7 else Vector3.ZERO
+			mi.global_position = hf.c + hf.uu * (0.25 + 0.2 * age) + hwo
+			var sz = (0.3 + 1.2 * age) * sqrt(maxf(0.05, float(fx.rak.get("smoke", 1.2))))
 			mi.scale = Vector3(sz, sz, sz)
-			var gr = 0.62 - 0.2 * age
-			((mi.material_override) as StandardMaterial3D).albedo_color = Color(gr, gr, gr * 1.04, 0.6 * (1.0 - age))
+			# frisch hinter der Düse noch vom Feuer angeleuchtet, dann hellgrau und durchsichtiger
+			var warm = clampf(1.0 - age * 4.0, 0.0, 1.0)
+			var gr = 0.85 - 0.25 * age
+			((mi.material_override) as StandardMaterial3D).albedo_color = Color(gr + 0.6 * warm, gr + 0.2 * warm, gr * 1.03, 0.75 * (1.0 - age) * minf(1.0, float(fx.rak.get("smoke", 1.2))))
 
 
 func _kc_cap(pos: Vector3, r: float, fr := 0.3) -> float:
@@ -10613,11 +10619,11 @@ func _hit_shards(o: Dictionary, lx: float, lz: float, ly: float, k: float) -> vo
 
 
 # Druckwelle einer Explosion: Schiffe in der Nähe werden weggeschoben (ohne Wunde), je näher, desto stärker
-func _blast_push(z: float, lat: float, r: float, k: float, skip: int) -> void:
+func _blast_push(z: float, lat: float, r: float, k: float, skip: int, own := -1) -> void:
 	if state != "race":
 		return
 	for o in ships:
-		if o.out or int(o.idx) == skip:
+		if o.out or int(o.idx) == skip or int(o.idx) == own:   # die eigene Rakete schubst den Schützen nicht
 			continue
 		var dz = float(o.z) - z
 		var dl = float(o.lat) - lat
@@ -10797,7 +10803,7 @@ func _braid(sh: Dictionary, n: int) -> void:
 
 # Rakete geht hoch: normal ein schwarzes Loch, Super-Rakete (Streubombe) zerplatzt in fünf kleine über die ganze Breite
 func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
-	_blast_push(z, lat, 3.2, 0.7, hit)
+	_blast_push(z, lat, 3.2, 0.7, hit, int(sh.get("own", -1)))
 	if not sh.get("cl", false):
 		_gbomb(z, lat, sh.own, hit, 1.0, sh.get("sup", false))
 		return
@@ -13688,16 +13694,49 @@ func _replay(dt: float) -> void:
 	var W: Array = _rp_shots(F, rp.i, u)
 	rp.w = W
 	var ps = _pool("shots", W.size(), func():
-		var cap = CapsuleMesh.new()   # Plasma-Flamme
-		cap.radius = 0.028
-		cap.height = 0.2
-		var mi = _glow_node(cap, Color(1.0, 0.6, 0.2), 8.0)
+		# dieselbe kräftige Flamme wie im Rennen: heißer Kern, orangener Mantel, Glutball (von hinten sichtbar)
+		var cap = CapsuleMesh.new()
+		cap.radius = 0.06
+		cap.height = 0.75
+		var mi = _glow_node(cap, Color(1.0, 0.72, 0.3), 9.0)
 		mi.mesh = null
 		var fl = MeshInstance3D.new()
+		fl.name = "flame"
 		fl.mesh = cap
 		fl.material_override = mi.material_override
-		fl.position = Vector3(0, -0.36 - 0.07, 0)
+		fl.position = Vector3(0, -0.36 - 0.3, 0)
 		mi.add_child(fl)
+		var cap2 = CapsuleMesh.new()
+		cap2.radius = 0.145
+		cap2.height = 1.65
+		var om = StandardMaterial3D.new()
+		om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		om.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		om.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+		om.albedo_color = Color(1.9, 0.62, 0.12, 0.42)
+		var fo = MeshInstance3D.new()
+		fo.mesh = cap2
+		fo.material_override = om
+		fo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		fo.position = Vector3(0, -0.34, 0)
+		fl.add_child(fo)
+		var gq = QuadMesh.new()
+		gq.size = Vector2(0.95, 0.95)
+		var gm = StandardMaterial3D.new()
+		gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		gm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		gm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+		gm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		gm.albedo_texture = _puff_tex()
+		gm.albedo_color = Color(2.6, 1.3, 0.4, 0.95)
+		var gb = MeshInstance3D.new()
+		gb.mesh = gq
+		gb.material_override = gm
+		gb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		gb.position = Vector3(0, 0.19, 0)
+		fl.add_child(gb)
 		mi.add_child(_rocket_model(0.72))
 		# Plasmaschweif (nur in der Einschlag-Wiederholung): langer, heller Streifen hinter der Rakete,
 		# damit man sie auch von Weitem anfliegen sieht
@@ -13771,6 +13810,10 @@ func _replay(dt: float) -> void:
 			(trn as Node3D).visible = state == "kill" and kc.get("ir", false) and int(kc.get("pass", 0)) == 1 and st >= RK_DROP
 			(trn as Node3D).scale = Vector3(1.0, clampf((st - RK_DROP) / 0.3, 0.2, 1.0), 1.0)
 		ps[i].global_transform = Transform3D(rb.scaled(Vector3(rsc, rsc, rsc)), fr.c + fr.uu * hy + wo)
+		var fln2 = ps[i].get_node_or_null("flame")
+		if fln2 != null:
+			var fk2 = (0.8 + 0.4 * randf()) * (0.45 if (state == "kill" and int(kc.get("pass", 0)) == 0) else 1.0) * float(fx.rak.get("flame", 1.0))
+			(fln2 as Node3D).scale = Vector3(fk2 * 0.9, fk2, fk2 * 0.9) if st >= RK_DROP else Vector3.ONE * 0.001
 	_rp_smoke(F, W)
 	var pm = _pool("mines", f0.m.size(), func():
 		return _glow_node(_lowsphere(0.12, 12, 6), Color(1, 0.15, 0.1), 6.0))
