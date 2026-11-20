@@ -8720,6 +8720,11 @@ func _rp_rebuild_fx() -> void:
 			var age: float = rp.t - F[j].t
 			if age < 0.0 or age > durs.get(ev[0], 0.0):
 				continue
+			if state == "kill" and kc.get("ir", false) and int(kc.get("pass", -1)) == 0 and (ev[0] == "boom" or ev[0] == "gb"):
+				var dzz = float(ev[1]) - float((kc.imp as Vector2).x)
+				dzz -= T.LAP * round(dzz / T.LAP)
+				if absf(dzz) < 30.0:
+					continue   # erster Blickwinkel: am Ziel noch nichts explodieren lassen (siehe _replay)
 			fx_age = age
 			match ev[0]:
 				"boom":
@@ -13609,6 +13614,16 @@ func _replay(dt: float) -> void:
 	while rp.ei < rp.i:
 		rp.ei += 1
 		for ev in F[rp.ei].ev:
+			# Einschlag-Wiederholung, erster Blickwinkel (hinter der Rakete, endet kurz VOR dem Treffer):
+			# am Ziel darf hier noch nichts explodieren – was in diesem Abschnitt dort knallt, gehört nicht dazu
+			if state == "kill" and kc.get("ir", false) and int(kc.get("pass", -1)) == 0 and ev[0] in ["boom", "gb", "big", "shat"]:
+				var ezz = float(ships[ev[1]].z) if ev[0] == "shat" else float(ev[1])
+				var dzz = ezz - float((kc.imp as Vector2).x)
+				dzz -= T.LAP * round(dzz / T.LAP)
+				if absf(dzz) < 30.0:
+					if OS.get_environment("KCDBG") != "":
+						print("KCGUARD skip ", ev[0], " dz=", snappedf(dzz, 0.1), " t=", snappedf(float(F[rp.ei].t) - float(kc.t0), 0.02))
+					continue
 			match ev[0]:
 				"boom":
 					_explode(ev[1], ev[2], ev[3], ev[4] if ev.size() > 4 else 1.0)
@@ -14539,7 +14554,10 @@ func _kc_cam_imp() -> bool:
 		fl.light_specular = 0.0   # keine grellen Glanzflecken auf der nassen Fahrbahn
 		add_child(fl)
 		kc.fill = fl
-	kc.fill.global_position = ro.lerp(ta, 0.25) + up * 0.6
+	# nur wenn die Kamera nah am Ziel ist und dicht beim Ziel – vorher (Kamera hinter der Rakete, Ziel noch weit weg)
+	# leuchtete es mitten auf der Fahrbahn auf und sah aus wie eine Explosion vor dem Einschlag
+	kc.fill.visible = ro.distance_to(I) < 9.0
+	kc.fill.global_position = I.lerp(ro, 0.35) + up * 0.6
 	_flash_fade(0.05)
 	# Test: Bilder bei Durchgang:Zeit (IMPSHOT="0:-0.8,1:0.0,2:0.2")
 	if OS.get_environment("IMPSHOT") != "":
@@ -16804,6 +16822,8 @@ func _shot() -> void:
 					if shot_n == 30:
 						ships[1].z = ships[0].z + float(OS.get_environment("MCT"))
 						ships[1].lat = ships[0].lat + float(OS.get_environment("MCL")) if OS.get_environment("MCL") != "" else ships[0].lat + 0.8
+						if OS.get_environment("MCEN") != "":
+							ships[1].en = float(OS.get_environment("MCEN"))
 						if OS.get_environment("MCAWAY") != "":
 							for oi in range(2, ships.size()):
 								ships[oi].z = ships[0].z - 40.0 - 8.0 * oi
