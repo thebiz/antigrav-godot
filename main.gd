@@ -10694,11 +10694,15 @@ func _rocket_model(sc: float) -> Node3D:
 	return m
 
 
+# Raketenflamme – überall gleich (Rennen, Raketenkamera, Zeitlupe): Kern-Radius, Kern-Länge, Mantel ×Radius, ×Länge, Glutball
+const RK_FL = [0.04, 0.42, 2.2, 1.7, 0.5]
+
+
 func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0, cl := false, sp := false) -> void:
 	var X: Dictionary = fx.rak
 	var cap = CapsuleMesh.new()   # Plasma-Flamme am Heck (glüht, flackert)
-	cap.radius = 0.06 * float(X.size)
-	cap.height = 0.75 * float(X.size)
+	cap.radius = RK_FL[0] * float(X.size)
+	cap.height = RK_FL[1] * float(X.size)
 	# Flamme immer in Feuerfarben (unabhängig vom Farbregler der Rakete – sonst wird sie blau und unsichtbar)
 	var mi = _glow_node(cap, Color(1.0, 0.72, 0.3), 9.0)
 	var rl = 0.72 * float(X.size) * (1.35 if (cl or sp) else 1.0)   # Länge des Modells
@@ -10713,23 +10717,23 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	mi.set_meta("fl", fl)
 	# äußerer Flammenschein: breiter, länger, orange, additiv – macht den Antrieb auch von hinten sichtbar
 	var cap2 = CapsuleMesh.new()
-	cap2.radius = cap.radius * 2.4
-	cap2.height = cap.height * 2.2
+	cap2.radius = cap.radius * RK_FL[2]
+	cap2.height = cap.height * RK_FL[3]
 	var om = StandardMaterial3D.new()
 	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	om.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	om.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	om.albedo_color = Color(1.9, 0.62, 0.12, 0.42)
+	om.albedo_color = Color(1.9, 0.62, 0.12, 0.3)
 	var fo = MeshInstance3D.new()
 	fo.mesh = cap2
 	fo.material_override = om
 	fo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	fo.position = Vector3(0, -cap.height * 0.45, 0)
+	fo.position = Vector3(0, -cap.height * 0.4, 0)
 	fl.add_child(fo)
 	# Glutball als Billboard: von hinten (Raketenkamera) sieht man die Kapseln nur von vorne – der Ball leuchtet aus jeder Richtung
 	var gq = QuadMesh.new()
-	gq.size = Vector2(0.95, 0.95) * float(X.size)
+	gq.size = Vector2(RK_FL[4], RK_FL[4]) * float(X.size)
 	var gm = StandardMaterial3D.new()
 	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	gm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -10737,7 +10741,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	gm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	gm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	gm.albedo_texture = _puff_tex()
-	gm.albedo_color = Color(2.6, 1.3, 0.4, 0.95)
+	gm.albedo_color = Color(2.2, 1.1, 0.35, 0.8)
 	var gb = MeshInstance3D.new()
 	gb.mesh = gq
 	gb.material_override = gm
@@ -13081,7 +13085,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			sh.n.global_transform = Transform3D(bb, bp + _braid_off(f, bn, 0, sh.t))
 			var fln = sh.n.get_meta("fl", null)
 			if fln != null and is_instance_valid(fln):
-				var fk = (0.75 + 0.5 * randf()) * maxf(0.01, float(fx.rak.get("flame", 1.0))) * (0.4 if (not mc.is_empty() and is_same(mc.get("sh"), sh)) else 1.0)   # Antrieb flackert; in der Raketenkamera kürzer (zeigt auf die Kamera)
+				var fk = (0.75 + 0.5 * randf()) * maxf(0.01, float(fx.rak.get("flame", 1.0))) * 1.0   # Antrieb flackert – überall gleich groß
 				var olt = sh.n.get_meta("lt", null)
 				if olt != null and is_instance_valid(olt):
 					if not (olt as OmniLight3D).has_meta("e0"):
@@ -13696,33 +13700,33 @@ func _replay(dt: float) -> void:
 	var ps = _pool("shots", W.size(), func():
 		# dieselbe kräftige Flamme wie im Rennen: heißer Kern, orangener Mantel, Glutball (von hinten sichtbar)
 		var cap = CapsuleMesh.new()
-		cap.radius = 0.06
-		cap.height = 0.75
+		cap.radius = RK_FL[0]
+		cap.height = RK_FL[1]
 		var mi = _glow_node(cap, Color(1.0, 0.72, 0.3), 9.0)
 		mi.mesh = null
 		var fl = MeshInstance3D.new()
 		fl.name = "flame"
 		fl.mesh = cap
 		fl.material_override = mi.material_override
-		fl.position = Vector3(0, -0.36 - 0.3, 0)
+		fl.position = Vector3(0, -0.36 - RK_FL[1] * 0.35, 0)
 		mi.add_child(fl)
 		var cap2 = CapsuleMesh.new()
-		cap2.radius = 0.145
-		cap2.height = 1.65
+		cap2.radius = RK_FL[0] * RK_FL[2]
+		cap2.height = RK_FL[1] * RK_FL[3]
 		var om = StandardMaterial3D.new()
 		om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		om.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		om.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-		om.albedo_color = Color(1.9, 0.62, 0.12, 0.42)
+		om.albedo_color = Color(1.9, 0.62, 0.12, 0.3)
 		var fo = MeshInstance3D.new()
 		fo.mesh = cap2
 		fo.material_override = om
 		fo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		fo.position = Vector3(0, -0.34, 0)
+		fo.position = Vector3(0, -RK_FL[1] * 0.4, 0)
 		fl.add_child(fo)
 		var gq = QuadMesh.new()
-		gq.size = Vector2(0.95, 0.95)
+		gq.size = Vector2(RK_FL[4], RK_FL[4])
 		var gm = StandardMaterial3D.new()
 		gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		gm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -13730,12 +13734,12 @@ func _replay(dt: float) -> void:
 		gm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 		gm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 		gm.albedo_texture = _puff_tex()
-		gm.albedo_color = Color(2.6, 1.3, 0.4, 0.95)
+		gm.albedo_color = Color(2.2, 1.1, 0.35, 0.8)
 		var gb = MeshInstance3D.new()
 		gb.mesh = gq
 		gb.material_override = gm
 		gb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		gb.position = Vector3(0, 0.19, 0)
+		gb.position = Vector3(0, RK_FL[1] * 0.25, 0)
 		fl.add_child(gb)
 		mi.add_child(_rocket_model(0.72))
 		# Plasmaschweif (nur in der Einschlag-Wiederholung): langer, heller Streifen hinter der Rakete,
@@ -13812,7 +13816,7 @@ func _replay(dt: float) -> void:
 		ps[i].global_transform = Transform3D(rb.scaled(Vector3(rsc, rsc, rsc)), fr.c + fr.uu * hy + wo)
 		var fln2 = ps[i].get_node_or_null("flame")
 		if fln2 != null:
-			var fk2 = (0.8 + 0.4 * randf()) * (0.45 if (state == "kill" and int(kc.get("pass", 0)) == 0) else 1.0) * float(fx.rak.get("flame", 1.0))
+			var fk2 = (0.75 + 0.5 * randf()) * maxf(0.01, float(fx.rak.get("flame", 1.0)))   # wie im Rennen
 			(fln2 as Node3D).scale = Vector3(fk2 * 0.9, fk2, fk2 * 0.9) if st >= RK_DROP else Vector3.ONE * 0.001
 	_rp_smoke(F, W)
 	var pm = _pool("mines", f0.m.size(), func():
@@ -17624,7 +17628,15 @@ func _mc_cam(dt: float) -> bool:
 			# Blick stur in Flugrichtung (Rakete wie mit Kamera auf dem Rücken), nur leicht mit der Seitenlage der Rakete
 			var f2 = T.sframe(float(sh.z) + 10.0 * float(sh.dir), float(sh.lat))
 			var look: Vector3 = f2.c + f2.uu * 0.3
-			var want = P - fw * 1.9 + f.uu * 0.55   # etwas weiter hinten: Flamme und Rauch am Heck bleiben im Bild
+			# Ziel voraus (bis 150 m): Blick zu ihm hin, damit man den Gegner vor dem Einschlag schon sieht
+			var tgm = sh.get("tg")
+			if tgm != null and not tgm.out and is_instance_valid(tgm.node):
+				var dzt2 = (float(tgm.z) - float(sh.z)) * float(sh.dir)
+				dzt2 -= T.LAP * floor(dzt2 / T.LAP)
+				if dzt2 < 150.0:
+					var tpp: Vector3 = (tgm.node as Node3D).global_position
+					look = look.lerp(tpp, clampf(1.2 - dzt2 / 150.0, 0.3, 0.9))
+			var want = P - fw * 2.2 + f.uu * 0.75   # etwas höher: die Rakete sitzt unten im Bild, der Blick nach vorn bleibt frei
 			if float(sh.t) < float(sh.get("drp", 0.0)) + 0.15 and float(sh.get("drp", 0.0)) > 0.0:
 				# Ausklinken: schräg hinten seitlich, etwas tiefer – man sieht sie absacken und zünden
 				want = P - fw * 2.0 + f.rr * 1.35 + f.uu * 0.6
