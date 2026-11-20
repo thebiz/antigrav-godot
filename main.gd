@@ -17473,7 +17473,7 @@ func _mc_end() -> void:
 	if mc.is_empty():
 		return
 	if mc.has("mk") and is_instance_valid(mc.mk):
-		(mc.mk as Node3D).queue_free()
+		(mc.mk as Node).queue_free()   # ist ein 2D-Element (TextureRect) – „as Node3D“ ergab null und brachte das Spiel zum Absturz
 	if mc.has("ci") and state != "kill":
 		Engine.time_scale = 1.0
 		AudioServer.playback_speed_scale = 1.0
