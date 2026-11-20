@@ -9481,7 +9481,7 @@ func _fb_update(dt: float) -> void:
 			fbs.remove_at(i)
 			continue
 		var mi: MeshInstance3D = e.n
-		mi.visible = e.t >= 0.0
+		mi.visible = e.t >= 0.0 and not (state == "kill" and e.get("kch", false))   # Live-Explosion/Rauch nicht in die Wiederholung mogeln
 		var uu = clampf(u, 0.0, 1.0)
 		mi.set_instance_shader_parameter("fr", uu * (float(e.n0) - 1.001))
 		mi.set_instance_shader_parameter("al", clampf((1.0 - uu) * 3.0, 0.0, 1.0))
@@ -9537,7 +9537,7 @@ func _fb_update(dt: float) -> void:
 		e.p = p
 		e.v = v
 		var mi: MeshInstance3D = e.n
-		mi.visible = e.t >= 0.0
+		mi.visible = e.t >= 0.0 and not (state == "kill" and e.get("kch", false))   # Live-Explosion/Rauch nicht in die Wiederholung mogeln
 		mi.global_position = p
 		var age = clampf(e.t / e.life, 0.0, 1.0)
 		mi.scale = Vector3.ONE * float(e.sz) * (1.0 + age * (2.6 if e.get("rk", false) else 0.9))
@@ -14181,7 +14181,7 @@ func _kc_start() -> void:
 	# laufende Effekte ausblenden (sie laufen unsichtbar weiter)
 	var hidden = []
 	for n in get_children():
-		if (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D or n.has_meta("deb")) and not tun_l.has(n) and n.visible:
+		if (n is GPUParticles3D or n is MeshInstance3D or n is OmniLight3D or n is Decal or n.has_meta("deb")) and not tun_l.has(n) and n.visible:
 			n.visible = false
 			hidden.append(n)
 	# Ort des Treffers vorab aus der Aufnahme (für die feste Kamera beim Einschlag)
@@ -14202,7 +14202,29 @@ func _kc_start() -> void:
 					if dd < qbest:
 						qbest = dd
 						qdir = qk[1]
-	kc = {"qd": qdir, "t0": t0, "end": t0 + 2.4, "victim": kc_pending.idx, "imp": dzl, "kind": kc_pending.kind, "saved": saved, "hidden": hidden,
+	# Qualm, Feuer und Funken AM Schiff (Schadens- und Treffer-Emitter) haben ihre Partikel in den Sekunden nach dem
+	# echten Treffer in die Welt gestreut – die hingen in der Wiederholung als „Explosion“ schon vor dem Einschlag da.
+	# Während der Wiederholung ausblenden, ebenso die Brandflecken auf der Hülle (der Treffer kommt ja erst noch)
+	var ovl = []
+	for o in ships:
+		var snd: Node3D = o.node
+		if not is_instance_valid(snd):
+			continue
+		for gp in snd.find_children("*", "GPUParticles3D", true, false):
+			if (gp as Node3D).visible:
+				(gp as Node3D).visible = false
+				hidden.append(gp)
+		for hm in snd.get_meta("hull", []):
+			if is_instance_valid(hm) and (hm as MeshInstance3D).material_overlay != null:
+				ovl.append([hm, (hm as MeshInstance3D).material_overlay])
+				(hm as MeshInstance3D).material_overlay = null
+	# Feuerbälle und Rauch vom echten Treffer laufen noch: in der Wiederholung ausblenden – sonst sieht man
+	# die Explosion schon, bevor die Rakete (in der Wiederholung) überhaupt angekommen ist
+	for e in fbs:
+		e.kch = true
+	for e in smk:
+		e.kch = true
+	kc = {"qd": qdir, "t0": t0, "end": t0 + 2.4, "victim": kc_pending.idx, "imp": dzl, "kind": kc_pending.kind, "saved": saved, "hidden": hidden, "ovl": ovl,
 		"before": get_children(), "fxs": fxs.duplicate(), "zaps": zaps.duplicate(), "top": hud.top.text, "side": 1.0 if randf() < 0.5 else -1.0,
 		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0, "ir": imp, "passes": passes, "pass": 0, "kill": ships[kc_pending.idx].out}
 	if OS.get_environment("KCDBG") != "":
@@ -14343,6 +14365,9 @@ func _kc_end() -> void:
 	for n in kc.hidden:
 		if is_instance_valid(n):
 			n.visible = true
+	for ov in kc.get("ovl", []):
+		if is_instance_valid(ov[0]):
+			(ov[0] as MeshInstance3D).material_overlay = ov[1]
 	if quake == null:
 		_rset("qs", 0.0)
 	if quake2 == null:
@@ -14526,6 +14551,36 @@ func _kc_cam_imp() -> bool:
 			var wp: Vector3 = fw2.c + fw2.uu * 0.25
 			print("KCRK own=", w[2], " dz=", snappedf(float(w[0]) - vz, 0.1), " scr=", cam.unproject_position(wp), " inf=", cam.is_position_in_frustum(wp), " shipscr=", cam.unproject_position(V))
 	if OS.get_environment("KCDBG") != "":
+		var nfb = 0
+		var nfk = 0
+		for e in fbs:
+			if (e.n as Node3D).visible:
+				nfb += 1
+				if e.get("kch", false):
+					nfk += 1
+		var nsm = 0
+		var nsr = 0
+		for e in smk:
+			if (e.n as Node3D).visible:
+				nsm += 1
+				if e.get("rk", false):
+					nsr += 1
+		var vis = {}
+		for n in get_children():
+			if n is GeometryInstance3D and (n as Node3D).visible and (n as Node3D).global_position.distance_to(I) < 8.0:
+				var key = n.get_class() + ":" + str((n as GeometryInstance3D).material_override.resource_name if (n as GeometryInstance3D).material_override != null else "")
+				vis[key] = vis.get(key, 0) + 1
+				if n is GPUParticles3D:
+					var gp := n as GPUParticles3D
+					print("  GP amt=", gp.amount, " life=", gp.lifetime, " emit=", gp.emitting, " one=", gp.one_shot, " d=", snappedf(gp.global_position.distance_to(I), 0.1), " before=", (kc.before as Array).has(n), " meta=", gp.get_meta_list(), " pm=", gp.draw_pass_1.resource_name if gp.draw_pass_1 else "", " sc=", gp.scale)
+		if int(kc.pass) == 0 and absf(rel + 0.3) < 0.03:
+			for o in ships:
+				var np: Vector3 = (o.node as Node3D).global_position
+				print("  SHIPSCR idx=", o.idx, " scr=", cam.unproject_position(np), " behind=", cam.is_position_behind(np), " d=", snappedf(cam.global_position.distance_to(np), 0.1), " vis=", (o.node as Node3D).visible, " sh=", snappedf(float(o.shield), 0.01), " orbs=", o.orbs)
+			for w in rp.get("w", []):
+				var fw3 = T.sframe(float(w[0]), float(w[1]))
+				print("  RKSCR scr=", cam.unproject_position(fw3.c + fw3.uu * 0.25), " own=", w[2])
+		print("KCVIS pass=", kc.pass, " rel=", snappedf(rel, 0.01), " fb=", nfb, "/", nfk, " smk=", nsm, " rk=", nsr, " near=", vis)
 		print("KCIMP pass=", kc.pass, " rel=", snappedf(rel, 0.01), " camfw·toImpact=", snappedf((-cam.global_transform.basis.z).dot((I - ro).normalized()), 0.02), " dist=", snappedf(ro.distance_to(I), 0.1), " tight=", tight, " pipe=", pf)
 	return true
 
