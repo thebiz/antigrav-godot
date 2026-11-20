@@ -12866,6 +12866,8 @@ func _weapons(dt: float, racing: bool) -> void:
 					if o.idx != sh.own and not o.out and (o.z - sh.z) * sdir > -1.0 and (o.z - sh.z) * sdir < bd:
 						bd = (o.z - sh.z) * sdir
 						sh.tg = o
+			if mg and sh.tg != null:
+				z0 += _mega_lap(sh)   # Trefferprüfung: Weg in diesem Bild mit verschieben
 			if sh.tg != null:
 				# je näher, desto härter auf die Spur des Ziels – die Lenkrakete schlägt direkt ein
 				var dzt = absf(sh.tg.z - sh.z)
@@ -16096,9 +16098,9 @@ func _process(delta: float) -> void:
 	_cp("kc_check")
 	_kc_check()
 	_test_mega(get_process_delta_time())
-	# Rundenkopien mitwandern lassen
+	# Rundenkopien mitwandern lassen (Raketenkamera: um die Rakete herum – sie fliegt oft weit vor dir)
 	_cp("lap_tunnel")
-	_lap_pos(g.z)
+	_lap_pos(cam.global_position.z if not mc.is_empty() else g.z)
 	_tunnel(dt)
 	_cp("pose")
 	_pose_all(dt)
@@ -17541,6 +17543,37 @@ func _drop_end() -> void:
 	if mc.is_empty() and kc.is_empty():
 		Engine.time_scale = 1.0
 		AudioServer.playback_speed_scale = 1.0
+
+
+# Mega-Rakete in dieselbe Runde wie ihr Ziel legen. Die Strecke wiederholt sich jede Runde, die Welt aber nicht:
+# Runde 2 liegt 700 m weiter als Runde 1. Jagt die Mega einen Gegner, der hinter dir fährt, holt sie ihn erst
+# nach fast einer Runde ein – in Weltkoordinaten flog sie dabei eine Runde VOR ihm her, also 600–700 m von ihm weg,
+# und die Raketenkamera konnte ihn nie zeigen. Jetzt fliegt sie in seiner Runde (gleiche Stelle der Strecke, sieht
+# genauso aus) und hat ihn tatsächlich vor sich. Kamera und Schweif werden mit verschoben, man sieht keinen Sprung.
+func _mega_lap(sh: Dictionary) -> float:
+	var tz = float(sh.tg.z)
+	var want = tz - fposmod(tz - float(sh.z), T.LAP)   # gleiche Stelle der Strecke, aber hinter dem Ziel
+	var sft = want - float(sh.z)
+	if absf(sft) < T.LAP * 0.5:
+		return 0.0
+	sh.z = want
+	if sh.has("z0"):
+		sh.z0 = float(sh.z0) + sft
+	var off = Vector3(0, 0, sft)
+	if is_instance_valid(sh.get("n")):
+		(sh.n as Node3D).global_position += off
+	for e in sh.get("ex", []):
+		if is_instance_valid(e):
+			(e as Node3D).global_position += off
+	if not mc.is_empty() and mc.get("sh") == sh:
+		mc.p = (mc.p as Vector3) + off
+		mc.l = (mc.l as Vector3) + off
+		mc.pm = (mc.pm as Vector3) + off
+		if mc.has("tp"):
+			mc.tp = (mc.tp as Vector3) + off
+		cam.global_position += off
+		_mcl("RUNDE verschoben um %.0f m (Rakete jetzt z=%.1f, Ziel z=%.1f)" % [sft, float(sh.z), tz])
+	return sft
 
 
 func _mc_start(sh: Dictionary) -> void:
