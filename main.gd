@@ -13374,6 +13374,10 @@ func _fx_update(dt: float) -> void:
 	_fb_update(dt)
 	for i in range(fxs.size() - 1, -1, -1):
 		var e = fxs[i]
+		# Effekte vom echten Treffer (z. B. die schwarzen Löcher der Mega-Salve mit ihrem späten Knall) während der
+		# Wiederholung anhalten – sonst knallte es dort schon, während die Raketen in der Zeitlupe noch anfliegen
+		if state == "kill" and e.get("kch", false):
+			continue
 		if e.get("gb", false):
 			if _gb_update(e, dt):
 				fxs.remove_at(i)
@@ -14224,6 +14228,8 @@ func _kc_start() -> void:
 		e.kch = true
 	for e in smk:
 		e.kch = true
+	for e in fxs:
+		e.kch = true
 	kc = {"qd": qdir, "t0": t0, "end": t0 + 2.4, "victim": kc_pending.idx, "imp": dzl, "kind": kc_pending.kind, "saved": saved, "hidden": hidden, "ovl": ovl,
 		"before": get_children(), "fxs": fxs.duplicate(), "zaps": zaps.duplicate(), "top": hud.top.text, "side": 1.0 if randf() < 0.5 else -1.0,
 		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0, "ir": imp, "passes": passes, "pass": 0, "kill": ships[kc_pending.idx].out}
@@ -14580,6 +14586,7 @@ func _kc_cam_imp() -> bool:
 			for w in rp.get("w", []):
 				var fw3 = T.sframe(float(w[0]), float(w[1]))
 				print("  RKSCR scr=", cam.unproject_position(fw3.c + fw3.uu * 0.25), " own=", w[2])
+
 		print("KCVIS pass=", kc.pass, " rel=", snappedf(rel, 0.01), " fb=", nfb, "/", nfk, " smk=", nsm, " rk=", nsr, " near=", vis)
 		print("KCIMP pass=", kc.pass, " rel=", snappedf(rel, 0.01), " camfw·toImpact=", snappedf((-cam.global_transform.basis.z).dot((I - ro).normalized()), 0.02), " dist=", snappedf(ro.distance_to(I), 0.1), " tight=", tight, " pipe=", pf)
 	return true
@@ -16797,6 +16804,9 @@ func _shot() -> void:
 					if shot_n == 30:
 						ships[1].z = ships[0].z + float(OS.get_environment("MCT"))
 						ships[1].lat = ships[0].lat + float(OS.get_environment("MCL")) if OS.get_environment("MCL") != "" else ships[0].lat + 0.8
+						if OS.get_environment("MCAWAY") != "":
+							for oi in range(2, ships.size()):
+								ships[oi].z = ships[0].z - 40.0 - 8.0 * oi
 						if OS.get_environment("MCB") != "":
 							ships[1].boost = float(OS.get_environment("MCB"))
 						if OS.get_environment("MCRAK") != "":
