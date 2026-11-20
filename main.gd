@@ -16807,7 +16807,7 @@ func _shot() -> void:
 						ships[1].lat = ships[0].lat
 						ships[1].spd = ships[0].spd
 				if OS.get_environment("MCT") != "":   # Test: Gegner vor dich setzen und Lenkrakete feuern (Raketenkamera)
-					if shot_n == 30:
+					if shot_n == (int(OS.get_environment("MCN")) if OS.get_environment("MCN") != "" else 30):
 						ships[1].z = ships[0].z + float(OS.get_environment("MCT"))
 						ships[1].lat = ships[0].lat + float(OS.get_environment("MCL")) if OS.get_environment("MCL") != "" else ships[0].lat + 0.8
 						if OS.get_environment("MCEN") != "":
@@ -17527,20 +17527,23 @@ var heat_mat: ShaderMaterial
 
 
 func _heat_on(o) -> void:
-	if o == null or not is_instance_valid(o.node):
+	# Wärmebild: alle gegnerischen Schiffe sind warm und glühen rot – nicht nur das Ziel.
+	# (Die Mega trifft jedes Schiff, an dem sie vorbeikommt; wer nicht Ziel war, blieb sonst kalt und unsichtbar.)
+	if mc.has("heat"):
 		return
-	if mc.has("heat") and is_same(mc.heat, o):
-		return
-	_heat_off()
 	if heat_mat == null:
 		heat_mat = _shader_mat(HEAT_SH)
+	var own = int((mc.sh as Dictionary).get("own", 0)) if mc.has("sh") else 0
 	var lst = []
-	for mi in (o.node as Node3D).find_children("*", "MeshInstance3D", true, false):
-		var m3 := mi as MeshInstance3D
-		if m3.material_override != null or m3.mesh == null:
+	for s2 in ships:
+		if int(s2.idx) == own or s2.out or not is_instance_valid(s2.node):
 			continue
-		lst.append([m3, m3.material_overlay])
-		m3.material_overlay = heat_mat
+		for mi in (s2.node as Node3D).find_children("*", "MeshInstance3D", true, false):
+			var m3 := mi as MeshInstance3D
+			if m3.material_override != null or m3.mesh == null:
+				continue
+			lst.append([m3, m3.material_overlay])
+			m3.material_overlay = heat_mat
 	mc.heat = o
 	mc.heatl = lst
 
@@ -17604,6 +17607,8 @@ func _mc_mark(tg) -> void:
 	# als 2D-Fleck über dem Bild (HUD): die Tempo-Unschärfe der Raketenkamera verwischt sonst alles in der Ferne.
 	# Ist das Ziel nicht im Bild (weit voraus hinter Kurven, oder die Rakete muss erst eine Runde drehen),
 	# sitzt der Wärmefleck am Bildrand in seiner Richtung, mit Name und Entfernung.
+	if OS.get_environment("KCDBG") != "" and (tg == null or tg.out or not (tg.node as Node3D).visible):
+		print("MCMK hidden t=", snappedf(race_t, 0.01), " tg=", tg.idx if tg != null else -1, " out=", tg.out if tg != null else false)
 	if tg == null or tg.out or not is_instance_valid(tg.node) or not (tg.node as Node3D).visible:
 		if mc.has("mk") and is_instance_valid(mc.mk):
 			(mc.mk as CanvasItem).visible = false
@@ -17663,7 +17668,7 @@ func _mc_mark(tg) -> void:
 	lb.size = Vector2(320, 36)
 	lb.position = Vector2(clampf(sp.x - 160.0, 6.0, vp.x - 326.0), clampf(sp.y + sz * 0.5 + 4.0, 0.0, vp.y - 40.0))
 	if OS.get_environment("KCDBG") != "":
-		print("MCMK d=", snappedf(d, 0.1), " along=", snappedf(dt_m, 0.1), " in=", inside, " scr=", sp, " sz=", snappedf(sz, 1), " txt=", lb.text)
+		print("MCMK t=", snappedf(race_t, 0.01), " nv=", (tg.node as Node3D).is_visible_in_tree(), " d=", snappedf(d, 0.1), " along=", snappedf(dt_m, 0.1), " in=", inside, " scr=", sp, " sz=", snappedf(sz, 1), " txt=", lb.text)
 
 
 func _mc_cam(dt: float) -> bool:
