@@ -57,7 +57,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1, "tmega": 0}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -8431,6 +8431,13 @@ func _menu() -> void:
 		_save_cfg()
 		bmc.text = "Missile cam: " + ("On" if int(cfg.mcam) == 1 else "Off"))
 	sp.add_child(bmc)
+	var btm = _btn("Test: Mega homing always: " + ("On" if int(cfg.get("tmega", 0)) == 1 else "Off"))
+	btm.add_theme_font_size_override("font_size", 30)
+	btm.pressed.connect(func():
+		cfg.tmega = 1 - int(cfg.get("tmega", 0))
+		_save_cfg()
+		btm.text = "Test: Mega homing always: " + ("On" if int(cfg.tmega) == 1 else "Off"))
+	sp.add_child(btm)
 	var HN = ["Classic", "Dragon gauge", "Gothic altar"]
 	var bhd = _btn("HUD style: " + HN[clampi(int(cfg.get("hud", 2)), 0, 2)])
 	bhd.add_theme_font_size_override("font_size", 30)
@@ -16080,6 +16087,7 @@ func _process(delta: float) -> void:
 	_record(dt)
 	_cp("kc_check")
 	_kc_check()
+	_test_mega(get_process_delta_time())
 	# Rundenkopien mitwandern lassen
 	_cp("lap_tunnel")
 	_lap_pos(g.z)
@@ -17480,9 +17488,73 @@ func _mc_start(sh: Dictionary) -> void:
 	hud.mcl = lb
 
 
+# Testschalter: Mega-Lenkrakete gleich beim Start und 2 s nach jedem Abfeuern wieder – zum Ausprobieren
+var tmega_t = 0.0
+
+
+func _test_mega(dt: float) -> void:
+	if int(cfg.get("tmega", 0)) != 1 or state != "race" or ships.is_empty() or free_ride:
+		return
+	var g: Dictionary = ships[0]
+	if g.out or g.wpn != "" or not mc.is_empty() or not kc.is_empty():
+		tmega_t = 0.0
+		return
+	tmega_t += dt
+	if tmega_t >= 2.0 or race_t < 1.0:
+		g.wpn = "lenk"
+		g.wpc = 1
+		g.sup = true
+		g.mega = true
+		tmega_t = 0.0
+		if OS.get_environment("KCDBG") != "":
+			print("TMEGA given t=", snappedf(race_t, 0.01))
+
+
+# Wärmebild: der Gegner selbst glüht (seine Hülle wird während der Raketenkamera weiß-heiß überzogen),
+# dazu der Wärmefleck als Ebene darüber – so ist er auch hinter Nebel und auf große Entfernung zu sehen
+const HEAT_SH = """
+shader_type spatial;
+render_mode unshaded, fog_disabled, cull_disabled, depth_draw_never, blend_mix;
+void fragment(){
+	float fr = 1.0 - abs(dot(NORMAL, VIEW));
+	ALBEDO = mix(vec3(1.0, 0.95, 0.75), vec3(1.0, 0.55, 0.15), fr);
+	ALPHA = 1.0;
+}
+"""
+var heat_mat: ShaderMaterial
+
+
+func _heat_on(o) -> void:
+	if o == null or not is_instance_valid(o.node):
+		return
+	if mc.has("heat") and is_same(mc.heat, o):
+		return
+	_heat_off()
+	if heat_mat == null:
+		heat_mat = _shader_mat(HEAT_SH)
+	var lst = []
+	for mi in (o.node as Node3D).find_children("*", "MeshInstance3D", true, false):
+		var m3 := mi as MeshInstance3D
+		if m3.material_override != null or m3.mesh == null:
+			continue
+		lst.append([m3, m3.material_overlay])
+		m3.material_overlay = heat_mat
+	mc.heat = o
+	mc.heatl = lst
+
+
+func _heat_off() -> void:
+	for it in mc.get("heatl", []):
+		if is_instance_valid(it[0]):
+			(it[0] as MeshInstance3D).material_overlay = it[1]
+	mc.erase("heat")
+	mc.erase("heatl")
+
+
 func _mc_end() -> void:
 	if mc.is_empty():
 		return
+	_heat_off()
 	if mc.has("mk") and is_instance_valid(mc.mk):
 		(mc.mk as Node).queue_free()   # ist ein 2D-Element (TextureRect) – „as Node3D“ ergab null und brachte das Spiel zum Absturz
 	if mc.has("ci") and state != "kill":
@@ -17616,6 +17688,7 @@ func _mc_cam(dt: float) -> bool:
 				want = P - fw * 2.0 + f.rr * 1.35 + f.uu * 0.6
 				look = P + fw * 0.9
 			_mc_mark(sh.get("tg"))
+			_heat_on(sh.get("tg"))
 			mc.p = want if mc.new else (mc.p as Vector3).lerp(want, 1.0 - exp(-dt * 20.0))
 			mc.l = look if mc.new else (mc.l as Vector3).lerp(look, 1.0 - exp(-dt * 14.0))
 			mc.pm = P
@@ -17625,6 +17698,7 @@ func _mc_cam(dt: float) -> bool:
 			mc.hold = 1.6 if mc.has("ci") else 1.2   # Einschlag: noch kurz draufhalten
 			if mc.has("mk") and is_instance_valid(mc.mk):
 				(mc.mk as CanvasItem).visible = false
+			_heat_off()
 			mc.l = mc.get("tp", mc.pm) if mc.has("ci") else mc.pm
 	else:
 		var rdt = dt / maxf(0.05, Engine.time_scale) if mc.has("ci") else dt
