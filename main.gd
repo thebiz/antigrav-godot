@@ -8438,6 +8438,12 @@ func _menu() -> void:
 		_save_cfg()
 		btm.text = "Test: Mega homing always: " + ("On" if int(cfg.tmega) == 1 else "Off"))
 	sp.add_child(btm)
+	var bml = _btn("Copy missile-cam log")
+	bml.add_theme_font_size_override("font_size", 30)
+	bml.pressed.connect(func():
+		DisplayServer.clipboard_set(_mcl_text())
+		_toast("Copied – paste it in the chat"))
+	sp.add_child(bml)
 	var HN = ["Classic", "Dragon gauge", "Gothic altar"]
 	var bhd = _btn("HUD style: " + HN[clampi(int(cfg.get("hud", 2)), 0, 2)])
 	bhd.add_theme_font_size_override("font_size", 30)
@@ -12956,6 +12962,8 @@ func _weapons(dt: float, racing: bool) -> void:
 			# welche Rakete getroffen hat (die Einschlag-Wiederholung richtet sich nach ihr)
 			if not kc_pending.is_empty() and int(kc_pending.get("idx", -1)) == int(hit.idx) and not kc_pending.has("sid"):
 				kc_pending.sid = int(sh.get("id", 0))
+			if not mc.is_empty() and mc.get("sh") == sh:
+				_mcl("TREFFER %s (ziel war %s) z=%.1f lat=%.2f" % [NAMES[int(hit.idx)] if int(hit.idx) < NAMES.size() else str(hit.idx), (NAMES[int(sh.tg.idx)] if sh.tg != null else "keins"), float(hit.z), float(hit.lat)])
 			# Raketenkamera dabei: den Einschlag gleich noch einmal zeigen – Zeitlupe aus drei Blickwinkeln
 			if int(sh.own) == 0 and not mc.is_empty() and mc.sh == sh and kc.is_empty() and state == "race" and not free_ride:
 				if kc_pending.is_empty():
@@ -17422,6 +17430,74 @@ func _pose_all(dt: float) -> void:
 # Feuerst du eine Lenkrakete, fliegt die Kamera mit ihr bis zum Einschlag, bleibt danach noch gut eine Sekunde
 # auf der Explosion und springt dann zurück. Solange steuert der Autopilot (und du bist geschützt).
 var mc = {}
+# Protokoll der letzten Raketenkamera (Einstellungen → „Copy missile-cam log“): wo ist das Ziel, ist es im Bild, leuchtet es
+var mc_log: Array = []
+var mc_log_t = 0.0
+
+
+func _mcl(msg: String) -> void:
+	mc_log.append("%6.2f  %s" % [race_t, msg])
+	if OS.get_environment("KCDBG") != "":
+		print("MCLOG ", mc_log[mc_log.size() - 1])
+	if mc_log.size() > 400:
+		mc_log.pop_front()
+
+
+func _mcl_save() -> void:
+	var f = FileAccess.open(DG_DIR + "/mclog.txt", FileAccess.WRITE)
+	if f != null:
+		f.store_string("\n".join(mc_log))
+		f.close()
+
+
+func _mcl_text() -> String:
+	var t = "\n".join(mc_log)
+	if t == "":
+		t = FileAccess.get_file_as_string(DG_DIR + "/mclog.txt")
+	return "AntiGrav 3D – Raketenkamera-Protokoll\nVersion: %s · Gerät: %s · Bild %s · Renderer %s\n\n%s" % [
+		str(ProjectSettings.get_setting("application/config/version", "?")), OS.get_model_name(), str(get_viewport().get_visible_rect().size),
+		str(ProjectSettings.get_setting("rendering/renderer/rendering_method.mobile" if OS.has_feature("mobile") else "rendering/renderer/rendering_method")), t]
+
+
+func _mcl_tick() -> void:
+	# alle 0,1 s: Rakete, Ziel, Abstand, Bildposition, Sichtbarkeit, Leuchten; dazu alle anderen Gegner
+	if mc.is_empty() or not mc.has("sh"):
+		return
+	var now = Time.get_ticks_msec() / 1000.0
+	if now - mc_log_t < 0.1:
+		return
+	mc_log_t = now
+	var sh: Dictionary = mc.sh
+	var tg = sh.get("tg")
+	var line = "rk z=%.1f lat=%.2f t=%.2f ts=%.2f hold=%.2f vm=%d" % [float(sh.z), float(sh.lat), float(sh.t), Engine.time_scale, float(mc.hold), int(post.get_shader_parameter("vm")) if post != null else -1]
+	if tg == null:
+		line += " | KEIN ZIEL"
+	else:
+		var tp: Vector3 = (tg.node as Node3D).global_position if is_instance_valid(tg.node) else Vector3.ZERO
+		var along = fposmod(float(tg.z) - float(sh.z), T.LAP) if sh.get("mega", false) else float(tg.z) - float(sh.z)
+		var beh = cam.is_position_behind(tp)
+		var sp: Vector2 = cam.unproject_position(tp)
+		var vs = get_viewport().get_visible_rect().size
+		var onscr = not beh and sp.x >= 0.0 and sp.x <= vs.x and sp.y >= 0.0 and sp.y <= vs.y
+		var hn = 0
+		var ho = 0
+		for it in mc.get("heatl", []):
+			if is_instance_valid(it[0]) and (tg.node as Node).is_ancestor_of(it[0]):
+				hn += 1
+				if (it[0] as MeshInstance3D).material_overlay == heat_mat:
+					ho += 1
+		line += " | ziel=%s z=%.1f lat=%.2f weg=%.1fm luft=%.1fm hinten=%s bild=%s scr=(%d,%d) sichtbar=%s out=%s glut=%d/%d" % [
+			NAMES[int(tg.idx)] if int(tg.idx) < NAMES.size() else str(tg.idx), float(tg.z), float(tg.lat), along, tp.distance_to(cam.global_position),
+			"ja" if beh else "nein", "JA" if onscr else "nein", int(sp.x), int(sp.y), "ja" if (tg.node as Node3D).is_visible_in_tree() else "NEIN", "ja" if tg.out else "nein", ho, hn]
+		if mc.has("mk") and is_instance_valid(mc.mk):
+			line += " fleck=%s" % ("an" if (mc.mk as CanvasItem).visible else "aus")
+	var oth = []
+	for o in ships:
+		if int(o.idx) == int(sh.own) or (tg != null and o == tg):
+			continue
+		oth.append("%s %.0fm%s" % [NAMES[int(o.idx)] if int(o.idx) < NAMES.size() else str(o.idx), fposmod(float(o.z) - float(sh.z), T.LAP), " raus" if o.out else ""])
+	line += " | andere: " + ", ".join(oth)
+	_mcl(line)
 
 
 # ---------------------------------------------------------------- Ausklink-Close-up
@@ -17471,6 +17547,14 @@ func _mc_start(sh: Dictionary) -> void:
 	if int(cfg.get("mcam", 1)) != 1 or state != "race":   # immer mitfliegen – auch ohne Ziel, bis sie verpufft
 		return
 	mc = {"sh": sh, "t": 0.0, "hold": -1.0, "p": Vector3.ZERO, "l": Vector3.ZERO, "pm": Vector3.ZERO, "up": Vector3.UP, "new": true}
+	mc_log.clear()
+	mc_log_t = 0.0
+	var pl0: Dictionary = ships[0]
+	var zs = []
+	for o in ships:
+		zs.append("%s z=%.1f%s" % [NAMES[int(o.idx)] if int(o.idx) < NAMES.size() else str(o.idx), float(o.z), " raus" if o.out else ""])
+	_mcl("START mega=%s schuetze z=%.1f lat=%.2f ziel=%s rundenlaenge=%.0f | %s" % [str(sh.get("mega", false)), float(pl0.z), float(pl0.lat),
+		(NAMES[int(sh.tg.idx)] if sh.get("tg") != null else "keins"), T.LAP, ", ".join(zs)])
 	_flash(Color(1, 1, 1), 0.12)
 	if hud.has("mcl") and is_instance_valid(hud.mcl):
 		hud.mcl.queue_free()
@@ -17579,6 +17663,8 @@ func _heat_off() -> void:
 func _mc_end() -> void:
 	if mc.is_empty():
 		return
+	_mcl("ENDE state=%s kc=%s" % [str(state), str(not kc.is_empty())])
+	_mcl_save()
 	_heat_off()
 	if mc.has("mk") and is_instance_valid(mc.mk):
 		(mc.mk as Node).queue_free()   # ist ein 2D-Element (TextureRect) – „as Node3D“ ergab null und brachte das Spiel zum Absturz
@@ -17751,6 +17837,7 @@ func _mc_cam(dt: float) -> bool:
 			mc.up = f.uu
 			mc.new = false
 		else:
+			_mcl("HALT rakete_da=%s t=%.2f" % [str(shots.has(sh)), float(mc.t)])
 			mc.hold = 1.6 if mc.has("ci") else 1.2   # Einschlag: noch kurz draufhalten
 			if mc.has("mk") and is_instance_valid(mc.mk):
 				(mc.mk as CanvasItem).visible = false
@@ -17771,6 +17858,7 @@ func _mc_cam(dt: float) -> bool:
 	if ((mc.l as Vector3) - (mc.p as Vector3)).length() > 0.01:
 		cam.look_at(mc.l, mc.up)
 	cam.fov = 74.0
+	_mcl_tick()
 	return true
 
 
