@@ -775,15 +775,17 @@ void fragment(){
 		th*=.92+.08*sin(SCREEN_UV.y/px.y*1.6+TIME*30.);   // feine Abtastzeilen
 		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.05;
 	}else if(vm==3){
-		// Raketenkamera-Wärmebild: Umgebung kühl (dunkelblau bis violett, Neon höchstens lauwarm rot),
-		// heiß ist nur, was wirklich glüht – Antriebsflammen und der Gegner (dessen Wärmefleck kommt als Ebene darüber)
+		// Raketenkamera-Wärmebild wie bei „Predator“: Umgebung kalt in Schwarz-Weiß,
+		// rot ist nur, was wirklich Wärme abgibt – Antriebsflammen und das Zielschiff (glüht, siehe _heat_on/_mc_mark)
+		float L0=dot(c0,vec3(.3,.55,.15));
 		float L=clamp(dot(col,vec3(.3,.55,.15)),0.,1.);
-		L=pow(L,.85)*.5;
-		vec3 th=vec3(.015,.02,.09)+vec3(.16,.02,.32)*smoothstep(.04,.28,L);
-		th=mix(th,vec3(.55,.06,.2),smoothstep(.3,.5,L));
-		th=mix(th,vec3(1.,.72,.12),smoothstep(.42,.5,L)*step(.93,dot(c0,vec3(.3,.55,.15))));
-		th*=.9+.1*sin(SCREEN_UV.y/px.y*1.4+TIME*36.);   // Abtastzeilen
-		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.06;
+		float gy=pow(L,.8)*.62;
+		vec3 th=vec3(gy);
+		float ht=smoothstep(.9,.98,L0);
+		th=mix(th,vec3(.95,.06,.04),ht);
+		th=mix(th,vec3(1.,.42,.32),smoothstep(.985,1.,L0)*ht);
+		th*=.93+.07*sin(SCREEN_UV.y/px.y*1.4+TIME*36.);   // Abtastzeilen
+		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.05;
 	}else if(vm==2){
 		// Gitter: nur Kanten bleiben, als grüne Leuchtlinien; was hell glüht (Schiffe, Antriebe, Geschosse), wird rot
 		vec2 d=px*1.5;
@@ -17517,7 +17519,7 @@ shader_type spatial;
 render_mode unshaded, fog_disabled, cull_disabled, depth_draw_never, blend_mix;
 void fragment(){
 	float fr = 1.0 - abs(dot(NORMAL, VIEW));
-	ALBEDO = mix(vec3(1.0, 0.95, 0.75), vec3(1.0, 0.55, 0.15), fr);
+	ALBEDO = vec3(1.0) * (1.0 - fr * 0.04);   // voll weiß = „heiß“: das Wärmebild färbt es rot
 	ALPHA = 1.0;
 }
 """
@@ -17557,6 +17559,8 @@ func _mc_end() -> void:
 	_heat_off()
 	if mc.has("mk") and is_instance_valid(mc.mk):
 		(mc.mk as Node).queue_free()   # ist ein 2D-Element (TextureRect) – „as Node3D“ ergab null und brachte das Spiel zum Absturz
+	if mc.has("mkl") and is_instance_valid(mc.mkl):
+		(mc.mkl as Node).queue_free()
 	if mc.has("ci") and state != "kill":
 		Engine.time_scale = 1.0
 		AudioServer.playback_speed_scale = 1.0
@@ -17585,12 +17589,11 @@ func _mc_ring_tex() -> ImageTexture:
 				var r = sqrt(px * px + py * py)
 				var hot = clampf(1.15 - r * 1.1, 0.0, 1.0)
 				var c: Color
-				if hot > 0.75:
-					c = Color(1.0, 1.0, 0.92).lerp(Color(1.0, 0.85, 0.3), (1.0 - hot) / 0.25)
-				elif hot > 0.4:
-					c = Color(1.0, 0.85, 0.3).lerp(Color(0.95, 0.2, 0.15), (0.75 - hot) / 0.35)
+				# Wärmefleck rot (wie das Wärmebild): heller Kern, nach außen dunkler und weich auslaufend
+				if hot > 0.7:
+					c = Color(1.0, 0.55, 0.45).lerp(Color(1.0, 0.12, 0.08), (1.0 - hot) / 0.3)
 				else:
-					c = Color(0.95, 0.2, 0.15).lerp(Color(0.4, 0.05, 0.4), (0.4 - hot) / 0.4)
+					c = Color(1.0, 0.12, 0.08).lerp(Color(0.55, 0.02, 0.02), (0.7 - hot) / 0.7)
 				c.a = smoothstep(0.0, 0.35, hot)
 				im.set_pixel(x, y, c)
 		mc_ring_tex = ImageTexture.create_from_image(im)
@@ -17598,10 +17601,14 @@ func _mc_ring_tex() -> ImageTexture:
 
 
 func _mc_mark(tg) -> void:
-	# als 2D-Ring über dem Bild (HUD): die Tempo-Unschärfe der Raketenkamera verwischt sonst alles in der Ferne
+	# als 2D-Fleck über dem Bild (HUD): die Tempo-Unschärfe der Raketenkamera verwischt sonst alles in der Ferne.
+	# Ist das Ziel nicht im Bild (weit voraus hinter Kurven, oder die Rakete muss erst eine Runde drehen),
+	# sitzt der Wärmefleck am Bildrand in seiner Richtung, mit Name und Entfernung.
 	if tg == null or tg.out or not is_instance_valid(tg.node) or not (tg.node as Node3D).visible:
 		if mc.has("mk") and is_instance_valid(mc.mk):
 			(mc.mk as CanvasItem).visible = false
+		if mc.has("mkl") and is_instance_valid(mc.mkl):
+			(mc.mkl as CanvasItem).visible = false
 		return
 	if not mc.has("mk") or not is_instance_valid(mc.mk):
 		var tr = TextureRect.new()
@@ -17609,25 +17616,54 @@ func _mc_mark(tg) -> void:
 		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		tr.stretch_mode = TextureRect.STRETCH_SCALE
 		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		tr.modulate = Color(1, 1, 1, 1)
 		hud.layer.add_child(tr)
 		mc.mk = tr
+		var lb = Label.new()
+		lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lb.add_theme_font_size_override("font_size", 26)
+		lb.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2))
+		lb.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+		lb.add_theme_constant_override("outline_size", 6)
+		hud.layer.add_child(lb)
+		mc.mkl = lb
 	var mk: TextureRect = mc.mk
+	var lb: Label = mc.mkl
 	var tp: Vector3 = (tg.node as Node3D).global_position + (tg.node as Node3D).global_transform.basis.y.normalized() * 0.15
 	var d = tp.distance_to(cam.global_position)
-	mk.visible = not cam.is_position_behind(tp)
+	var sh: Dictionary = mc.sh
+	var dt_m = fposmod(float(tg.z) - float(sh.z), T.LAP) if sh.get("mega", false) else absf(float(tg.z) - float(sh.z))   # Weg entlang der Strecke
 	var vp = get_viewport().get_visible_rect().size
-	# so groß wie das Schiff auf dem Schirm (etwa 1,6 m breit), aber nie kleiner als ein deutlicher Fleck
 	var foc = vp.y * 0.5 / tan(deg_to_rad(cam.fov) * 0.5)
 	var sz = clampf(1.6 / maxf(d, 0.5) * foc * 1.8, 80.0 * vp.x / 540.0, vp.x * 0.6)
 	var sp: Vector2 = cam.unproject_position(tp)
+	var mg = vp.x * 0.09
+	var inside = not cam.is_position_behind(tp) and sp.x > mg and sp.x < vp.x - mg and sp.y > vp.y * 0.12 and sp.y < vp.y * 0.78
+	if not inside:
+		# Richtung zum Ziel aus Sicht der Kamera, an den Bildrand geschoben
+		var lp: Vector3 = cam.global_transform.affine_inverse() * tp
+		var dv = Vector2(lp.x, -lp.y)
+		if dv.length() < 0.001:
+			dv = Vector2(0, 1)
+		dv = dv.normalized()
+		var c = Vector2(vp.x * 0.5, vp.y * 0.45)
+		var hx = vp.x * 0.5 - mg
+		var hy = vp.y * 0.33
+		var k = minf(hx / maxf(absf(dv.x), 0.001), hy / maxf(absf(dv.y), 0.001))
+		sp = c + dv * k
+		sz = 80.0 * vp.x / 540.0
+	mk.visible = true
 	mk.size = Vector2(sz, sz)
 	mk.position = sp - Vector2(sz, sz) * 0.5
 	mk.pivot_offset = Vector2(sz, sz) * 0.5
 	mk.rotation = 0.0
 	mk.modulate.a = 0.9 + 0.1 * sin(Time.get_ticks_msec() / 1000.0 * 14.0)   # flimmert leicht wie ein Wärmesensor
+	lb.visible = true
+	lb.text = "%s · %d m" % [String(NAMES[int(tg.idx)] if int(tg.idx) < NAMES.size() else "").to_upper(), int(round(dt_m))]
+	lb.size = Vector2(320, 36)
+	lb.position = Vector2(clampf(sp.x - 160.0, 6.0, vp.x - 326.0), clampf(sp.y + sz * 0.5 + 4.0, 0.0, vp.y - 40.0))
 	if OS.get_environment("KCDBG") != "":
-		print("MCMK d=", snappedf(d, 0.1), " vis=", mk.is_visible_in_tree(), " scr=", sp, " sz=", snappedf(sz, 1), " rect=", mk.get_global_rect(), " vp=", vp, " tex=", mk.texture != null, " lay=", (hud.layer as CanvasLayer).visible, " par=", mk.get_parent().name)
+		print("MCMK d=", snappedf(d, 0.1), " along=", snappedf(dt_m, 0.1), " in=", inside, " scr=", sp, " sz=", snappedf(sz, 1), " txt=", lb.text)
 
 
 func _mc_cam(dt: float) -> bool:
@@ -17698,6 +17734,8 @@ func _mc_cam(dt: float) -> bool:
 			mc.hold = 1.6 if mc.has("ci") else 1.2   # Einschlag: noch kurz draufhalten
 			if mc.has("mk") and is_instance_valid(mc.mk):
 				(mc.mk as CanvasItem).visible = false
+			if mc.has("mkl") and is_instance_valid(mc.mkl):
+				(mc.mkl as CanvasItem).visible = false
 			_heat_off()
 			mc.l = mc.get("tp", mc.pm) if mc.has("ci") else mc.pm
 	else:
