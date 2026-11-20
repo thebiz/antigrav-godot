@@ -17565,6 +17565,8 @@ func _mc_start(sh: Dictionary) -> void:
 func _mc_end() -> void:
 	if mc.is_empty():
 		return
+	if mc.has("mk") and is_instance_valid(mc.mk):
+		(mc.mk as Node3D).queue_free()
 	if mc.has("ci") and state != "kill":
 		Engine.time_scale = 1.0
 		AudioServer.playback_speed_scale = 1.0
@@ -17574,6 +17576,60 @@ func _mc_end() -> void:
 	hud.erase("mcl")
 	if state == "race":
 		_flash(Color(1, 1, 1), 0.1)
+
+
+# Zielmarkierung in der Raketenkamera: das Ziel ist auf große Entfernung im Nebel und vor der dunklen Strecke
+# kaum zu erkennen – ein leuchtender Ring um den Gegner (durch Nebel und Wände sichtbar, gleich groß auf dem Schirm)
+var mc_ring_tex: ImageTexture
+
+
+func _mc_ring_tex() -> ImageTexture:
+	if mc_ring_tex == null:
+		var n = 128
+		var im = Image.create(n, n, false, Image.FORMAT_RGBA8)
+		for y in range(n):
+			for x in range(n):
+				var px = (x + 0.5) / n * 2.0 - 1.0
+				var py = (y + 0.5) / n * 2.0 - 1.0
+				var r = sqrt(px * px + py * py)
+				var a = clampf((r - 0.66) / 0.05, 0.0, 1.0) * clampf((0.97 - r) / 0.05, 0.0, 1.0)
+				var ang = atan2(py, px) / TAU * 4.0 + 0.125
+				if fposmod(ang, 1.0) < 0.5:
+					a = 0.0
+				im.set_pixel(x, y, Color(1, 1, 1, a))
+		mc_ring_tex = ImageTexture.create_from_image(im)
+	return mc_ring_tex
+
+
+func _mc_mark(tg) -> void:
+	# als 2D-Ring über dem Bild (HUD): die Tempo-Unschärfe der Raketenkamera verwischt sonst alles in der Ferne
+	if tg == null or tg.out or not is_instance_valid(tg.node) or not (tg.node as Node3D).visible:
+		if mc.has("mk") and is_instance_valid(mc.mk):
+			(mc.mk as CanvasItem).visible = false
+		return
+	if not mc.has("mk") or not is_instance_valid(mc.mk):
+		var tr = TextureRect.new()
+		tr.texture = _mc_ring_tex()
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_SCALE
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tr.modulate = Color(1.0, 0.22, 0.18, 1.0)   # kräftiges Rot: hebt sich von Neon-Türkis und Flammen-Orange ab
+		hud.layer.add_child(tr)
+		mc.mk = tr
+	var mk: TextureRect = mc.mk
+	var tp: Vector3 = (tg.node as Node3D).global_position + (tg.node as Node3D).global_transform.basis.y.normalized() * 0.15
+	var d = tp.distance_to(cam.global_position)
+	mk.visible = not cam.is_position_behind(tp)
+	var vp = get_viewport().get_visible_rect().size
+	var sz = clampf(3000.0 / maxf(d, 1.0), 64.0, 200.0) * vp.x / 540.0   # nah größer, fern nie winzig
+	var sp: Vector2 = cam.unproject_position(tp)
+	mk.size = Vector2(sz, sz)
+	mk.position = sp - Vector2(sz, sz) * 0.5
+	mk.pivot_offset = Vector2(sz, sz) * 0.5
+	mk.rotation = Time.get_ticks_msec() / 1000.0 * 1.4   # dreht sich langsam wie ein Zielring
+	mk.modulate.a = 0.8 + 0.2 * sin(Time.get_ticks_msec() / 1000.0 * 9.0)
+	if OS.get_environment("KCDBG") != "":
+		print("MCMK d=", snappedf(d, 0.1), " vis=", mk.is_visible_in_tree(), " scr=", sp, " sz=", snappedf(sz, 1), " rect=", mk.get_global_rect(), " vp=", vp, " tex=", mk.texture != null, " lay=", (hud.layer as CanvasLayer).visible, " par=", mk.get_parent().name)
 
 
 func _mc_cam(dt: float) -> bool:
@@ -17628,19 +17684,12 @@ func _mc_cam(dt: float) -> bool:
 			# Blick stur in Flugrichtung (Rakete wie mit Kamera auf dem Rücken), nur leicht mit der Seitenlage der Rakete
 			var f2 = T.sframe(float(sh.z) + 10.0 * float(sh.dir), float(sh.lat))
 			var look: Vector3 = f2.c + f2.uu * 0.3
-			# Ziel voraus (bis 150 m): Blick zu ihm hin, damit man den Gegner vor dem Einschlag schon sieht
-			var tgm = sh.get("tg")
-			if tgm != null and not tgm.out and is_instance_valid(tgm.node):
-				var dzt2 = (float(tgm.z) - float(sh.z)) * float(sh.dir)
-				dzt2 -= T.LAP * floor(dzt2 / T.LAP)
-				if dzt2 < 150.0:
-					var tpp: Vector3 = (tgm.node as Node3D).global_position
-					look = look.lerp(tpp, clampf(1.2 - dzt2 / 150.0, 0.3, 0.9))
-			var want = P - fw * 2.2 + f.uu * 0.75   # etwas höher: die Rakete sitzt unten im Bild, der Blick nach vorn bleibt frei
+			var want = P - fw * 1.9 + f.uu * 0.55   # wie vorher   # etwas weiter hinten: Flamme und Rauch am Heck bleiben im Bild
 			if float(sh.t) < float(sh.get("drp", 0.0)) + 0.15 and float(sh.get("drp", 0.0)) > 0.0:
 				# Ausklinken: schräg hinten seitlich, etwas tiefer – man sieht sie absacken und zünden
 				want = P - fw * 2.0 + f.rr * 1.35 + f.uu * 0.6
 				look = P + fw * 0.9
+			_mc_mark(sh.get("tg"))
 			mc.p = want if mc.new else (mc.p as Vector3).lerp(want, 1.0 - exp(-dt * 20.0))
 			mc.l = look if mc.new else (mc.l as Vector3).lerp(look, 1.0 - exp(-dt * 14.0))
 			mc.pm = P
