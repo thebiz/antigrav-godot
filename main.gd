@@ -10263,172 +10263,79 @@ var chip_cache = {}
 
 
 func _hull_chip(o: Dictionary, lx: float, lz: float, ly: float, k: float) -> void:
+	# Ein Stück Hülle bricht heraus: ein zackiges Blechteil in der Lackierung des Schiffs fliegt davon, an der
+	# Stelle bleibt ein großer verkohlter Krater. (Früher wurde dafür das Modell selbst zerschnitten – das konnte
+	# auf dem Handy im Grafiktreiber abstürzen, deshalb jetzt ein eigenes, kleines Bruchstück.)
 	var nd: Node3D = o.node
 	if not is_instance_valid(nd):
 		return
 	var f = T.sframe(o.z, o.lat)
 	var wp: Vector3 = nd.global_position + f.rr * lx + f.fw * lz + f.uu * (ly + 0.08)
-	# nächstes Hüllenteil (bei mehrteiligen Modellen ggf. ein ganzer Flügel/Aufbau)
-	var best: MeshInstance3D = null
+	var mat: Material = null
 	var bd = 1e9
 	for mi in nd.find_children("*", "MeshInstance3D", true, false):
 		var m3 := mi as MeshInstance3D
 		if m3.material_override != null or m3.mesh == null or not m3.is_visible_in_tree():
 			continue
-		var ab: AABB = m3.global_transform * m3.get_aabb()
-		var d = ab.get_center().distance_to(wp) - ab.size.length() * 0.25
+		var d = m3.global_position.distance_to(wp)
 		if d < bd:
-			bd = d
-			best = m3
-	if best == null:
-		return
-	var inv: Transform3D = best.global_transform.affine_inverse()
-	var lp: Vector3 = inv * wp
-	var sc = inv.basis.get_scale().x
-	var r = randf_range(0.2, 0.3) * clampf(k, 0.8, 1.4) * sc
-	var mesh: Mesh = best.mesh
-	var key = mesh.get_rid().get_id()
-	if not chip_cache.has(key):
-		var surfs = []
-		for si in range(mesh.get_surface_count()):
-			var ar = mesh.surface_get_arrays(si)
-			surfs.append(ar)
-		chip_cache[key] = surfs
-	var surfs: Array = chip_cache[key]
+			var am0 = m3.get_active_material(0)
+			if am0 != null:
+				bd = d
+				mat = am0
+	var pm: Material = null
+	if mat is BaseMaterial3D:
+		pm = (mat as BaseMaterial3D).duplicate()
+		(pm as BaseMaterial3D).cull_mode = BaseMaterial3D.CULL_DISABLED
+	else:
+		var sm = StandardMaterial3D.new()
+		sm.albedo_color = Color(0.55, 0.56, 0.6)
+		sm.metallic = 0.7
+		sm.roughness = 0.4
+		sm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		pm = sm
+	# zackige Scherbe: Fächer aus 7 Zacken, leicht gewölbt
+	var vs = PackedVector3Array()
+	var ns = PackedVector3Array()
+	var uv = PackedVector2Array()
+	var rad = randf_range(0.14, 0.22) * clampf(k, 0.8, 1.4)
+	var u0 = Vector2(randf(), randf())
+	var pts = []
+	for q in range(7):
+		var a = TAU * q / 7.0 + randf_range(-0.25, 0.25)
+		var rr = rad * randf_range(0.55, 1.15)
+		pts.append(Vector3(cos(a) * rr, randf_range(-0.02, 0.02), sin(a) * rr))
+	for q in range(7):
+		var a: Vector3 = pts[q]
+		var b: Vector3 = pts[(q + 1) % 7]
+		for v in [Vector3(0, 0.03, 0), a, b]:
+			vs.append(v)
+			ns.append(Vector3.UP)
+			uv.append(u0 + Vector2(v.x, v.z) * 0.6)
+	var arr = []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = vs
+	arr[Mesh.ARRAY_NORMAL] = ns
+	arr[Mesh.ARRAY_TEX_UV] = uv
 	var am = ArrayMesh.new()
-	var cen = Vector3.ZERO
-	var tot = 0
-	var outs = []
-	var keeps = []
-	var cut = false
-	for si in range(surfs.size()):
-		var ar: Array = surfs[si]
-		var vs: PackedVector3Array = ar[Mesh.ARRAY_VERTEX]
-		var ns = ar[Mesh.ARRAY_NORMAL]
-		var uvs = ar[Mesh.ARRAY_TEX_UV]
-		var ix = ar[Mesh.ARRAY_INDEX]
-		var nt = (ix.size() if ix != null and ix.size() > 0 else vs.size()) / 3
-		var ov = PackedVector3Array()
-		var on = PackedVector3Array()
-		var ou = PackedVector2Array()
-		var hasix = ix != null and ix.size() > 0
-		var kp_ = PackedInt32Array()
-		# Kandidaten: Dreiecke, deren Mitte oder eine Ecke nah an der Einschlagstelle liegt (Low-Poly-Modelle haben
-		# große Dreiecke); die nächsten davon brechen heraus, höchstens ein kleiner Teil des Modells
-		var cand = []
-		for t in range(nt):
-			var j0 = ix[t * 3] if hasix else t * 3
-			var j1 = ix[t * 3 + 1] if hasix else t * 3 + 1
-			var j2 = ix[t * 3 + 2] if hasix else t * 3 + 2
-			var dc = ((vs[j0] + vs[j1] + vs[j2]) / 3.0).distance_to(lp)
-			var dv = minf(vs[j0].distance_to(lp), minf(vs[j1].distance_to(lp), vs[j2].distance_to(lp)))
-			if dc < r * 1.5 or dv < r:
-				cand.append([dc, t])
-		cand.sort_custom(func(p1, p2): return p1[0] < p2[0])
-		var cap_n = maxi(6, int(nt * 0.07))
-		var take = {}
-		for ci in range(mini(cand.size(), cap_n)):
-			take[cand[ci][1]] = true
-		for t in range(nt):
-			var i0 = ix[t * 3] if hasix else t * 3
-			var i1 = ix[t * 3 + 1] if hasix else t * 3 + 1
-			var i2 = ix[t * 3 + 2] if hasix else t * 3 + 2
-			if not take.has(t):
-				if hasix:
-					kp_.append(i0)
-					kp_.append(i1)
-					kp_.append(i2)
-				continue
-			if hasix:
-				cut = true
-			for ii in [i0, i1, i2]:
-				ov.append(vs[ii])
-				if ns != null and ns.size() > ii:
-					on.append(ns[ii])
-				if uvs != null and uvs.size() > ii:
-					ou.append(uvs[ii])
-				cen += vs[ii]
-				tot += 1
-		keeps.append(kp_ if hasix else null)
-		if ov.size() >= 9:
-			outs.append([si, ov, on, ou])
-	if tot < 9:
-		return
-	# Loch in die Hülle: dieses Teilmodell bekommt eine eigene Kopie ohne die herausgebrochenen Dreiecke
-	if cut:
-		var hm = ArrayMesh.new()
-		var okk = true
-		for si in range(surfs.size()):
-			if keeps[si] == null or (keeps[si] as PackedInt32Array).size() < 3:
-				okk = false
-				break
-		if okk:
-			for si in range(surfs.size()):
-				var src: Array = surfs[si]
-				var a2 = []
-				a2.resize(Mesh.ARRAY_MAX)
-				for ai in [Mesh.ARRAY_VERTEX, Mesh.ARRAY_NORMAL, Mesh.ARRAY_TANGENT, Mesh.ARRAY_COLOR, Mesh.ARRAY_TEX_UV, Mesh.ARRAY_TEX_UV2]:
-					a2[ai] = src[ai]
-				a2[Mesh.ARRAY_INDEX] = keeps[si]
-				hm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a2)
-				var m0 = best.get_active_material(si)
-				if m0 is BaseMaterial3D:
-					var dm0 = (m0 as BaseMaterial3D).duplicate()
-					dm0.cull_mode = BaseMaterial3D.CULL_DISABLED   # Rand des Lochs: man sieht die Innenseite
-					m0 = dm0
-				hm.surface_set_material(si, m0)
-			if not best.has_meta("omesh"):
-				best.set_meta("omesh", best.mesh)
-				var ovr = []
-				for si in range(best.get_surface_override_material_count()):
-					ovr.append(best.get_surface_override_material(si))
-				best.set_meta("oovr", ovr)
-			for si in range(best.get_surface_override_material_count()):
-				best.set_surface_override_material(si, null)
-			best.mesh = hm
-	cen /= float(tot)
-	for oo in outs:
-		var ov: PackedVector3Array = oo[1]
-		for j in range(ov.size()):
-			ov[j] -= cen
-		var arr = []
-		arr.resize(Mesh.ARRAY_MAX)
-		arr[Mesh.ARRAY_VERTEX] = ov
-		if (oo[2] as PackedVector3Array).size() == ov.size():
-			arr[Mesh.ARRAY_NORMAL] = oo[2]
-		if (oo[3] as PackedVector2Array).size() == ov.size():
-			arr[Mesh.ARRAY_TEX_UV] = oo[3]
-		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-		var mat = best.get_active_material(int(oo[0]))
-		if mat is BaseMaterial3D:
-			var dm = (mat as BaseMaterial3D).duplicate()
-			dm.cull_mode = BaseMaterial3D.CULL_DISABLED   # Bruchstück: auch von innen sichtbar
-			mat = dm
-		am.surface_set_material(am.get_surface_count() - 1, mat)
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	am.surface_set_material(0, pm)
 	var piece = MeshInstance3D.new()
 	piece.mesh = am
+	piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var ch = Node3D.new()
 	ch.set_meta("rfx", true)
 	ch.set_meta("deb", true)
 	add_child(ch)
 	ch.add_child(piece)
-	var wc: Vector3 = best.global_transform * cen
-	var fr = T.frame(float(o.z))
-	var B = Basis(-fr.rr, fr.uu, fr.fw)
-	piece.transform = Transform3D(B.inverse() * best.global_transform.basis, Vector3.ZERO)
-	var rel: Vector3 = wc - (fr.c + fr.rr * float(o.lat))
-	var dlat = rel.dot(fr.rr)
-	var dh = rel.dot(fr.uu)
 	var out = Vector2(lx, lz)
 	out = out.normalized() if out.length() > 0.01 else Vector2(0.0, -1.0)
-	debris.append({"n": ch, "z": float(o.z) + rel.dot(fr.fw), "lat": float(o.lat) + dlat, "h": maxf(0.15, dh),
+	debris.append({"n": ch, "z": float(o.z) + lz, "lat": float(o.lat) + lx, "h": 0.3 + maxf(0.0, ly),
 		"vz": float(o.spd) * randf_range(0.6, 0.85) + out.y * randf_range(2.0, 5.0), "vl": float(o.get("kl", 0.0)) * 0.6 + out.x * randf_range(3.0, 7.0),
 		"vh": randf_range(3.0, 6.5), "rb": Basis(), "av": Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)).normalized() * randf_range(8.0, 16.0),
 		"r": 0.12, "t": 0.0, "m": null, "sp": 0.0, "hit": false, "kt": 0.0, "wreck": false, "small": true})
 	hshards.append(ch)
 	o.chips = int(o.get("chips", 0)) + 1
-	if OS.get_environment("WNDT") != "":
-		print("CHIP tris=", tot / 3, " cut=", cut, " mesh=", best.name, " r=", snappedf(r, 0.01), " ev=", o.get("evk", "-"), " evt=", o.get("evt", -1))
 	# an der Bruchstelle: größerer verkohlter Krater
 	_wound(o, lx, lz, ly, 1.6)
 
