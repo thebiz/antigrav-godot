@@ -774,6 +774,16 @@ void fragment(){
 		th=mix(th,vec3(1.,1.,.9),smoothstep(.88,1.,L));
 		th*=.92+.08*sin(SCREEN_UV.y/px.y*1.6+TIME*30.);   // feine Abtastzeilen
 		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.05;
+	}else if(vm==3){
+		// Raketenkamera-Wärmebild: Umgebung kühl (dunkelblau bis violett, Neon höchstens lauwarm rot),
+		// heiß ist nur, was wirklich glüht – Antriebsflammen und der Gegner (dessen Wärmefleck kommt als Ebene darüber)
+		float L=clamp(dot(col,vec3(.3,.55,.15)),0.,1.);
+		L=pow(L,.85)*.5;
+		vec3 th=vec3(.015,.02,.09)+vec3(.16,.02,.32)*smoothstep(.04,.28,L);
+		th=mix(th,vec3(.55,.06,.2),smoothstep(.3,.5,L));
+		th=mix(th,vec3(1.,.72,.12),smoothstep(.42,.5,L)*step(.93,dot(c0,vec3(.3,.55,.15))));
+		th*=.9+.1*sin(SCREEN_UV.y/px.y*1.4+TIME*36.);   // Abtastzeilen
+		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.06;
 	}else if(vm==2){
 		// Gitter: nur Kanten bleiben, als grüne Leuchtlinien; was hell glüht (Schiffe, Antriebe, Geschosse), wird rot
 		vec2 d=px*1.5;
@@ -825,7 +835,8 @@ func _post_update(dt: float) -> void:
 		sp *= float(OS.get_environment("SPDK"))   # nur zum Testen: Tempo-Effekte stärker/schwächer/aus
 	if OS.get_environment("VMODE") != "":
 		cfg.vmode = int(OS.get_environment("VMODE"))   # nur zum Testen
-	_sp(post, "vm", int(cfg.get("vmode", 0)) if _ck_on() else 0)
+	# Raketenkamera im Flug: Wärmebild (Gegner glüht, siehe _mc_mark); sonst Cockpit-Sicht wie eingestellt
+	_sp(post, "vm", 3 if (not mc.is_empty() and mc.get("hold", 0.0) < 0.0 and state == "race") else (int(cfg.get("vmode", 0)) if _ck_on() else 0))
 	# Blackout: flackert beim Ausgehen kurz, bleibt dunkel, kommt am Ende flackernd zurück (wie Neonröhren)
 	if OS.get_environment("BLKT") != "" and state == "race" and blk_t <= 0.0 and race_t > float(OS.get_environment("BLKT")) and race_t < float(OS.get_environment("BLKT")) + 0.1:
 		blk_t = 5.0
@@ -17490,20 +17501,26 @@ func _mc_end() -> void:
 var mc_ring_tex: ImageTexture
 
 
+# Wärmefleck des Gegners im Wärmebild: weißer Kern, gelb, rot, nach außen weich auslaufend (wie ein Antrieb im IR-Bild)
 func _mc_ring_tex() -> ImageTexture:
 	if mc_ring_tex == null:
 		var n = 128
 		var im = Image.create(n, n, false, Image.FORMAT_RGBA8)
 		for y in range(n):
 			for x in range(n):
-				var px = (x + 0.5) / n * 2.0 - 1.0
-				var py = (y + 0.5) / n * 2.0 - 1.0
+				var px = ((x + 0.5) / n * 2.0 - 1.0) * 1.0
+				var py = ((y + 0.5) / n * 2.0 - 1.0) * 1.6   # etwas breiter als hoch – wie ein Schiff von hinten
 				var r = sqrt(px * px + py * py)
-				var a = clampf((r - 0.66) / 0.05, 0.0, 1.0) * clampf((0.97 - r) / 0.05, 0.0, 1.0)
-				var ang = atan2(py, px) / TAU * 4.0 + 0.125
-				if fposmod(ang, 1.0) < 0.5:
-					a = 0.0
-				im.set_pixel(x, y, Color(1, 1, 1, a))
+				var hot = clampf(1.15 - r * 1.1, 0.0, 1.0)
+				var c: Color
+				if hot > 0.75:
+					c = Color(1.0, 1.0, 0.92).lerp(Color(1.0, 0.85, 0.3), (1.0 - hot) / 0.25)
+				elif hot > 0.4:
+					c = Color(1.0, 0.85, 0.3).lerp(Color(0.95, 0.2, 0.15), (0.75 - hot) / 0.35)
+				else:
+					c = Color(0.95, 0.2, 0.15).lerp(Color(0.4, 0.05, 0.4), (0.4 - hot) / 0.4)
+				c.a = smoothstep(0.0, 0.35, hot)
+				im.set_pixel(x, y, c)
 		mc_ring_tex = ImageTexture.create_from_image(im)
 	return mc_ring_tex
 
@@ -17520,7 +17537,7 @@ func _mc_mark(tg) -> void:
 		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		tr.stretch_mode = TextureRect.STRETCH_SCALE
 		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		tr.modulate = Color(1.0, 0.22, 0.18, 1.0)   # kräftiges Rot: hebt sich von Neon-Türkis und Flammen-Orange ab
+		tr.modulate = Color(1, 1, 1, 1)
 		hud.layer.add_child(tr)
 		mc.mk = tr
 	var mk: TextureRect = mc.mk
@@ -17528,13 +17545,15 @@ func _mc_mark(tg) -> void:
 	var d = tp.distance_to(cam.global_position)
 	mk.visible = not cam.is_position_behind(tp)
 	var vp = get_viewport().get_visible_rect().size
-	var sz = clampf(3000.0 / maxf(d, 1.0), 64.0, 200.0) * vp.x / 540.0   # nah größer, fern nie winzig
+	# so groß wie das Schiff auf dem Schirm (etwa 1,6 m breit), aber nie kleiner als ein deutlicher Fleck
+	var foc = vp.y * 0.5 / tan(deg_to_rad(cam.fov) * 0.5)
+	var sz = clampf(1.6 / maxf(d, 0.5) * foc * 1.8, 80.0 * vp.x / 540.0, vp.x * 0.6)
 	var sp: Vector2 = cam.unproject_position(tp)
 	mk.size = Vector2(sz, sz)
 	mk.position = sp - Vector2(sz, sz) * 0.5
 	mk.pivot_offset = Vector2(sz, sz) * 0.5
-	mk.rotation = Time.get_ticks_msec() / 1000.0 * 1.4   # dreht sich langsam wie ein Zielring
-	mk.modulate.a = 0.8 + 0.2 * sin(Time.get_ticks_msec() / 1000.0 * 9.0)
+	mk.rotation = 0.0
+	mk.modulate.a = 0.9 + 0.1 * sin(Time.get_ticks_msec() / 1000.0 * 14.0)   # flimmert leicht wie ein Wärmesensor
 	if OS.get_environment("KCDBG") != "":
 		print("MCMK d=", snappedf(d, 0.1), " vis=", mk.is_visible_in_tree(), " scr=", sp, " sz=", snappedf(sz, 1), " rect=", mk.get_global_rect(), " vp=", vp, " tex=", mk.texture != null, " lay=", (hud.layer as CanvasLayer).visible, " par=", mk.get_parent().name)
 
@@ -17604,6 +17623,8 @@ func _mc_cam(dt: float) -> bool:
 			mc.new = false
 		else:
 			mc.hold = 1.6 if mc.has("ci") else 1.2   # Einschlag: noch kurz draufhalten
+			if mc.has("mk") and is_instance_valid(mc.mk):
+				(mc.mk as CanvasItem).visible = false
 			mc.l = mc.get("tp", mc.pm) if mc.has("ci") else mc.pm
 	else:
 		var rdt = dt / maxf(0.05, Engine.time_scale) if mc.has("ci") else dt
