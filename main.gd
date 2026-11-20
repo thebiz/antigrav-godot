@@ -8715,6 +8715,7 @@ func _rp_rebuild_fx() -> void:
 	live_bursts = 0
 	var durs = {"boom": _fx_dur("boom"), "gb": _fx_dur("gb"), "zap": _fx_dur("zap")}
 	var win = maxf(durs.boom, durs.gb)
+	rp_ev = true
 	while j >= 0 and F[j].t >= rp.t - win:
 		for ev in F[j].ev:
 			var age: float = rp.t - F[j].t
@@ -8734,6 +8735,7 @@ func _rp_rebuild_fx() -> void:
 				"zap":
 					_zap_ship(ships[ev[1]])
 		j -= 1
+	rp_ev = false
 	_fx_update(0.0)
 	fx_age = 0.0
 	fx_rebuild = false
@@ -9555,7 +9557,12 @@ func _fb_update(dt: float) -> void:
 
 
 # Gravitationsbombe: schwarzes Loch saugt Licht und Funken an, schnappt dann mit einer Welle zurück
+var rp_ev = false   # gerade laufen aufgezeichnete Ereignisse der Wiederholung
+
+
 func _gbomb(z: float, lat: float, own := -1, hit := -1, sc := 1.0, sup := false) -> void:
+	if state == "kill" and not rp_ev:
+		return   # nachzügelnde Live-Löcher (Zeitverzögerung) nicht in die Einschlag-Wiederholung platzen lassen
 	_pev("hole")
 	_rev(["gb", z, lat, sc])
 	_fx_res()
@@ -9968,6 +9975,8 @@ void fragment(){
 
 
 func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
+	if state == "kill" and not rp_ev:
+		return
 	_pev("boom" if not big else "BOOM")
 	_rev(["boom", z, lat, big, sc])
 	_fx_res()
@@ -12989,7 +12998,7 @@ func _weapons(dt: float, racing: bool) -> void:
 				for j in range(3):
 					var jl = ilx + [0.0, -0.22, 0.22][j]
 					var jz = ilz + [0.0, 0.2, 0.4][j] * rdir
-					_after(0.07 * j + 0.001, func(): _impact(hit, jl, jz, ily, -jl * 0.6, rdir, 0.75, true))
+					_impact(hit, jl, jz, ily, -jl * 0.6, rdir, 0.75, true)
 			else:
 				var ik = 1.35 if (sh.get("sup", false) or sh.get("cl", false)) else (0.8 if sh.pl else 1.0)
 				_impact(hit, ilx, ilz, ily, -ilx * 0.6, rdir, ik, true)
@@ -13003,7 +13012,9 @@ func _weapons(dt: float, racing: bool) -> void:
 				for j in range(3):
 					var oz = hz + [0.0, 1.3, 2.4][j]
 					var ol = clampf(hl + [0.0, -0.8, 0.8][j], -T.TW + 0.4, T.TW - 0.4)
-					_after(0.07 * j + 0.001, func(): _gbomb(oz, ol, -2, hi, 0.68))
+					# sofort (nicht zeitversetzt): sonst fielen die Löcher in die schon laufende Einschlag-Wiederholung
+					# und gingen dort auf, während die Raketen in der Zeitlupe noch 20 m entfernt waren
+					_gbomb(oz, ol, -2, hi, 0.68)
 			else:
 				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
@@ -13611,6 +13622,7 @@ func _replay(dt: float) -> void:
 	while rp.i < F.size() - 2 and F[rp.i + 1].t <= rp.t:
 		rp.i += 1
 	# Ereignisse der überflogenen Bilder auslösen
+	rp_ev = true
 	while rp.ei < rp.i:
 		rp.ei += 1
 		for ev in F[rp.ei].ev:
@@ -13638,6 +13650,7 @@ func _replay(dt: float) -> void:
 					_snd(ev[1], ev[2])
 				"shat":
 					_shatter(ships[ev[1]], ev[2])
+	rp_ev = false
 	_debris_update(dt)
 	if rp.t > F[F.size() - 1].t + 0.4:
 		_replay_end()
