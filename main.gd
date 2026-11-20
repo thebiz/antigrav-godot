@@ -703,6 +703,7 @@ uniform float shp=.6;
 uniform float grn=.035;
 uniform int vm=0;   // Cockpit-Sicht: 0 normal, 1 Infrarot, 2 Gitter
 uniform float bo=0.;   // Blackout: alles schwarz, nur Neon leuchtet weiter
+uniform vec4 hr0=vec4(0.);uniform vec4 hr1=vec4(0.);uniform vec4 hr2=vec4(0.);   // Wärmebild: Bildbereiche der gegnerischen Schiffe
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 // Filmkorn-Zufall ohne sin(): bleibt auch bei großen Pixelzahlen gleichmäßig (sin großer Werte wird auf Handy-GPUs ungenau → Muster)
 float hg(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
@@ -780,7 +781,14 @@ void fragment(){
 		float L=clamp(dot(col,vec3(.3,.55,.15)),0.,1.);
 		float gy=pow(L,.9)*.3;
 		vec3 th=vec3(gy*.9,gy*.95,gy*1.05);
-		float key=smoothstep(.75,.9,min(c0.r,c0.b))*(1.-smoothstep(.06,.16,c0.g));   // Kennfarbe der gegnerischen Schiffe
+		// Kennfarbe Magenta der gegnerischen Schiffe – nur innerhalb ihrer Bildbereiche gezählt (sonst würde rosa Neon mitglühen)
+		vec2 su=SCREEN_UV;
+		float inr=0.;
+		inr=max(inr,step(hr0.x,su.x)*step(su.x,hr0.z)*step(hr0.y,su.y)*step(su.y,hr0.w));
+		inr=max(inr,step(hr1.x,su.x)*step(su.x,hr1.z)*step(hr1.y,su.y)*step(su.y,hr1.w));
+		inr=max(inr,step(hr2.x,su.x)*step(su.x,hr2.z)*step(hr2.y,su.y)*step(su.y,hr2.w));
+		float mgn=(c0.r+c0.b)*.5-c0.g;
+		float key=inr*smoothstep(.12,.35,mgn)*(1.-smoothstep(.3,.5,abs(c0.r-c0.b)));
 		th=mix(th,vec3(1.,1.,.97),key);
 		th*=.93+.07*sin(SCREEN_UV.y/px.y*1.4+TIME*36.);   // Abtastzeilen
 		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.04;
@@ -17491,8 +17499,8 @@ func _mcl_tick() -> void:
 		line += " | ziel=%s z=%.1f lat=%.2f weg=%.1fm luft=%.1fm hinten=%s bild=%s scr=(%d,%d) sichtbar=%s out=%s glut=%d/%d" % [
 			NAMES[int(tg.idx)] if int(tg.idx) < NAMES.size() else str(tg.idx), float(tg.z), float(tg.lat), along, tp.distance_to(cam.global_position),
 			"ja" if beh else "nein", "JA" if onscr else "nein", int(sp.x), int(sp.y), "ja" if (tg.node as Node3D).is_visible_in_tree() else "NEIN", "ja" if tg.out else "nein", ho, hn]
-		if mc.has("mk") and is_instance_valid(mc.mk):
-			line += " fleck=%s" % ("an" if (mc.mk as CanvasItem).visible else "aus")
+		if mc.has("frz"):
+			line += " ERKANNT"
 	var oth = []
 	for o in ships:
 		if int(o.idx) == int(sh.own) or (tg != null and o == tg):
@@ -17659,9 +17667,14 @@ func _heat_on(o) -> void:
 	if mc.has("heat"):
 		# jedes Bild neu setzen: die Zielerfassung (_hull_update) nimmt ihren Überzug sonst wieder weg –
 		# und damit auch das Glühen (deshalb blieb das Zielschiff im Wärmebild dunkel)
+		_heat_rects(o)
+		var hoff = mc.get("hoff", false)   # beim Erkennen: Zielschiff blinkt (Glühen kurz aus)
 		for it in mc.heatl:
-			if is_instance_valid(it[0]) and (it[0] as MeshInstance3D).material_overlay != heat_mat:
-				(it[0] as MeshInstance3D).material_overlay = heat_mat
+			if not is_instance_valid(it[0]):
+				continue
+			var tgt_m = it[1] if (hoff and o != null and (o.node as Node).is_ancestor_of(it[0])) else heat_mat
+			if (it[0] as MeshInstance3D).material_overlay != tgt_m:
+				(it[0] as MeshInstance3D).material_overlay = tgt_m
 		if OS.get_environment("KCDBG") != "" and Engine.get_process_frames() % 4 == 0 and o != null:
 			for mi in (o.node as Node3D).find_children("*", "MeshInstance3D", true, false):
 				var m3 := mi as MeshInstance3D
@@ -17685,22 +17698,46 @@ func _heat_on(o) -> void:
 	mc.heatl = lst
 
 
+func _heat_rects(o) -> void:
+	# Bildbereich jedes gegnerischen Schiffs (Kugel von 1,4 m um die Mitte) an das Wärmebild geben
+	var vs = get_viewport().get_visible_rect().size
+	var own = int((mc.sh as Dictionary).get("own", 0)) if mc.has("sh") else 0
+	var rs = []
+	for s2 in ships:
+		if int(s2.idx) == own or s2.out or not is_instance_valid(s2.node):
+			continue
+		if mc.get("hoff", false) and o != null and s2 == o:
+			continue   # Blinken: Zielschiff kurz dunkel
+		var c: Vector3 = (s2.node as Node3D).global_position
+		if cam.is_position_behind(c):
+			continue
+		var sp = cam.unproject_position(c)
+		var d = maxf(0.5, c.distance_to(cam.global_position))
+		var foc = vs.y * 0.5 / tan(deg_to_rad(cam.fov) * 0.5)
+		var r = maxf(4.0, 1.4 / d * foc)
+		rs.append(Vector4((sp.x - r) / vs.x, (sp.y - r) / vs.y, (sp.x + r) / vs.x, (sp.y + r) / vs.y))
+	for i in range(3):
+		_sp(post, "hr%d" % i, rs[i] if i < rs.size() else Vector4.ZERO)
+
+
 func _heat_off() -> void:
 	for it in mc.get("heatl", []):
 		if is_instance_valid(it[0]):
 			(it[0] as MeshInstance3D).material_overlay = it[1]
 	mc.erase("heat")
 	mc.erase("heatl")
+	for i in range(3):
+		_sp(post, "hr%d" % i, Vector4.ZERO)
 
 
 func _mc_end() -> void:
 	if mc.is_empty():
 		return
+	if mc.has("frz"):
+		Engine.time_scale = float(mc.get("frz_ts", 1.0))
 	_mcl("ENDE state=%s kc=%s" % [str(state), str(not kc.is_empty())])
 	_mcl_save()
 	_heat_off()
-	if mc.has("mk") and is_instance_valid(mc.mk):
-		(mc.mk as Node).queue_free()   # ist ein 2D-Element (TextureRect) – „as Node3D“ ergab null und brachte das Spiel zum Absturz
 	if mc.has("mkl") and is_instance_valid(mc.mkl):
 		(mc.mkl as Node).queue_free()
 	if mc.has("ci") and state != "kill":
@@ -17737,36 +17774,31 @@ func _mc_ring_tex() -> ImageTexture:
 	return mc_ring_tex
 
 
+var mc_font: SystemFont
+
+
 func _mc_mark(tg) -> void:
-	# als 2D-Fleck über dem Bild (HUD): die Tempo-Unschärfe der Raketenkamera verwischt sonst alles in der Ferne.
-	# Ist das Ziel nicht im Bild (weit voraus hinter Kurven, oder die Rakete muss erst eine Runde drehen),
-	# sitzt der Wärmefleck am Bildrand in seiner Richtung, mit Name und Entfernung.
-	if OS.get_environment("KCDBG") != "" and (tg == null or tg.out or not (tg.node as Node3D).visible):
-		print("MCMK hidden t=", snappedf(race_t, 0.01), " tg=", tg.idx if tg != null else -1, " out=", tg.out if tg != null else false)
+	# Zielanzeige der Wärmesuche: grüne Radarschrift (Name, Entfernung), unter dem Ziel; ist es nicht im Bild,
+	# steht sie am Bildrand in seiner Richtung. Das Schiff selbst leuchtet im Wärmebild (_heat_on).
 	if tg == null or tg.out or not is_instance_valid(tg.node) or not (tg.node as Node3D).visible:
-		if mc.has("mk") and is_instance_valid(mc.mk):
-			(mc.mk as CanvasItem).visible = false
 		if mc.has("mkl") and is_instance_valid(mc.mkl):
 			(mc.mkl as CanvasItem).visible = false
 		return
-	if not mc.has("mk") or not is_instance_valid(mc.mk):
-		var tr = TextureRect.new()
-		tr.texture = _mc_ring_tex()
-		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		tr.stretch_mode = TextureRect.STRETCH_SCALE
-		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		hud.layer.add_child(tr)
-		mc.mk = tr
+	if not mc.has("mkl") or not is_instance_valid(mc.mkl):
+		if mc_font == null:
+			mc_font = SystemFont.new()
+			mc_font.font_names = PackedStringArray(["Droid Sans Mono", "Roboto Mono", "monospace", "DejaVu Sans Mono", "Courier New"])
 		var lb = Label.new()
 		lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		lb.add_theme_font_size_override("font_size", 26)
-		lb.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
-		lb.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+		lb.add_theme_font_override("font", mc_font)
+		lb.add_theme_font_size_override("font_size", 24)
+		lb.add_theme_color_override("font_color", Color(0.35, 1.0, 0.45))
+		lb.add_theme_color_override("font_outline_color", Color(0.0, 0.12, 0.03, 0.9))
 		lb.add_theme_constant_override("outline_size", 6)
+		lb.add_theme_constant_override("line_spacing", -2)
 		hud.layer.add_child(lb)
 		mc.mkl = lb
-	var mk: TextureRect = mc.mk
 	var lb: Label = mc.mkl
 	var tp: Vector3 = (tg.node as Node3D).global_position + (tg.node as Node3D).global_transform.basis.y.normalized() * 0.15
 	var d = tp.distance_to(cam.global_position)
@@ -17774,10 +17806,11 @@ func _mc_mark(tg) -> void:
 	var dt_m = fposmod(float(tg.z) - float(sh.z), T.LAP) if sh.get("mega", false) else absf(float(tg.z) - float(sh.z))   # Weg entlang der Strecke
 	var vp = get_viewport().get_visible_rect().size
 	var foc = vp.y * 0.5 / tan(deg_to_rad(cam.fov) * 0.5)
-	var sz = clampf(1.6 / maxf(d, 0.5) * foc * 2.6, 130.0 * vp.x / 540.0, vp.x * 0.7)
+	var sz = clampf(1.6 / maxf(d, 0.5) * foc, 20.0, vp.x * 0.7)   # so groß ist das Schiff auf dem Schirm
 	var sp: Vector2 = cam.unproject_position(tp)
 	var mg = vp.x * 0.09
 	var inside = not cam.is_position_behind(tp) and sp.x > mg and sp.x < vp.x - mg and sp.y > vp.y * 0.12 and sp.y < vp.y * 0.78
+	var arr = ""
 	if not inside:
 		# Richtung zum Ziel aus Sicht der Kamera, an den Bildrand geschoben
 		var lp: Vector3 = cam.global_transform.affine_inverse() * tp
@@ -17786,23 +17819,65 @@ func _mc_mark(tg) -> void:
 			dv = Vector2(0, 1)
 		dv = dv.normalized()
 		var c = Vector2(vp.x * 0.5, vp.y * 0.45)
-		var hx = vp.x * 0.5 - mg
-		var hy = vp.y * 0.33
+		var hx = vp.x * 0.5 - mg - 60.0
+		var hy = vp.y * 0.30
 		var k = minf(hx / maxf(absf(dv.x), 0.001), hy / maxf(absf(dv.y), 0.001))
 		sp = c + dv * k
-		sz = 80.0 * vp.x / 540.0
-	mk.visible = OS.get_environment("HEATNOMK") == ""   # weißer Schein ums Schiff: auf große Entfernung ist das Schiff selbst nur ein paar Pixel groß
-	mk.size = Vector2(sz, sz)
-	mk.position = sp - Vector2(sz, sz) * 0.5
-	mk.pivot_offset = Vector2(sz, sz) * 0.5
-	mk.rotation = 0.0
-	mk.modulate.a = 0.9 + 0.1 * sin(Time.get_ticks_msec() / 1000.0 * 14.0)   # flimmert leicht wie ein Wärmesensor
+		sz = 0.0
+		arr = ("<< " if dv.x < -0.5 else (">> " if dv.x > 0.5 else ("^^ " if dv.y < 0.0 else "vv ")))
+	var nm = String(NAMES[int(tg.idx)] if int(tg.idx) < NAMES.size() else "").to_upper()
+	var frz = mc.has("frz")
+	if frz:
+		lb.text = "TARGET LOCKED\n%s" % nm
+	else:
+		lb.text = "%sTRACKING %s\nDIST %05.1f m" % [arr, nm, dt_m]
 	lb.visible = true
-	lb.text = "%s · %d m" % [String(NAMES[int(tg.idx)] if int(tg.idx) < NAMES.size() else "").to_upper(), int(round(dt_m))]
-	lb.size = Vector2(320, 36)
-	lb.position = Vector2(clampf(sp.x - 160.0, 6.0, vp.x - 326.0), clampf(sp.y + sz * 0.5 + 4.0, 0.0, vp.y - 40.0))
+	lb.size = Vector2(340, 64)
+	lb.position = Vector2(clampf(sp.x - 170.0, 6.0, vp.x - 346.0), clampf(sp.y + sz * 0.6 + 6.0, 0.0, vp.y - 70.0))
+	# leichtes Flimmern wie ein Radarschirm; beim Erkennen im Takt des Aufblinkens
+	lb.modulate.a = (1.0 if mc.get("hoff", false) == false else 0.25) if frz else 0.82 + 0.18 * float(int(Time.get_ticks_msec() / 90) % 2)
 	if OS.get_environment("KCDBG") != "":
-		print("MCMK t=", snappedf(race_t, 0.01), " nv=", (tg.node as Node3D).is_visible_in_tree(), " d=", snappedf(d, 0.1), " along=", snappedf(dt_m, 0.1), " in=", inside, " scr=", sp, " sz=", snappedf(sz, 1), " txt=", lb.text)
+		print("MCMK t=", snappedf(race_t, 0.01), " nv=", (tg.node as Node3D).is_visible_in_tree(), " d=", snappedf(d, 0.1), " along=", snappedf(dt_m, 0.1), " in=", inside, " scr=", sp, " txt=", lb.text.replace("\n", " | "))
+
+
+# „Ziel erkannt“: kurz vor dem Einschlag friert das Bild ein, das Zielschiff blinkt zweimal auf,
+# die Radarschrift meldet TARGET LOCKED – dann läuft alles weiter, Einschlag, Kamerawechsel
+const MC_LOCK_T = 0.95   # echte Sekunden Standbild
+
+
+func _mc_lock(sh: Dictionary) -> void:
+	var tg = sh.get("tg")
+	if mc.has("frz_done") or tg == null or tg.out:
+		return
+	if not mc.has("frz"):
+		var dz = float(tg.z) - float(sh.z)
+		if sh.get("mega", false):
+			dz = fposmod(dz, T.LAP)
+			if dz > T.LAP * 0.5:
+				return
+		var clo = maxf(1.0, float(sh.get("vs", 20.0)) - float(tg.spd))   # Annäherungstempo
+		var step = clo * maxf(get_process_delta_time(), 1.0 / 120.0)
+		# im nächsten oder übernächsten Bild schlägt sie ein: jetzt anhalten
+		if dz > step * 2.2 + 1.0 or dz < -0.5:
+			return
+		mc.frz = Time.get_ticks_msec() / 1000.0
+		mc.frz_ts = Engine.time_scale
+		Engine.time_scale = 0.0001
+		_mcl("ERKANNT abstand=%.1fm" % dz)
+		_snd("lock", 2.0, 1.25)   # Erkennungs-Piep
+	var el = Time.get_ticks_msec() / 1000.0 - float(mc.frz)
+	# zweimal aufblinken: aus – an – aus – an, dann stehen lassen
+	mc.hoff = (el > 0.18 and el < 0.32) or (el > 0.46 and el < 0.6)
+	if OS.get_environment("FRZSHOT") != "":
+		for q in [[0.1, "a"], [0.3, "b"]]:
+			if el > q[0] and not mc.has("fs" + q[1]):
+				mc["fs" + q[1]] = true
+				get_viewport().get_texture().get_image().save_png(OS.get_environment("FRZSHOT") + q[1] + ".png")
+	if el >= MC_LOCK_T:
+		mc.erase("frz")
+		mc.erase("hoff")
+		mc.frz_done = true
+		Engine.time_scale = float(mc.get("frz_ts", 1.0))
 
 
 func _mc_cam(dt: float) -> bool:
@@ -17862,6 +17937,7 @@ func _mc_cam(dt: float) -> bool:
 				# Ausklinken: schräg hinten seitlich, etwas tiefer – man sieht sie absacken und zünden
 				want = P - fw * 2.0 + f.rr * 1.35 + f.uu * 0.6
 				look = P + fw * 0.9
+			_mc_lock(sh)
 			_mc_mark(sh.get("tg"))
 			_heat_on(sh.get("tg"))
 			mc.p = want if mc.new else (mc.p as Vector3).lerp(want, 1.0 - exp(-dt * 20.0))
@@ -17872,8 +17948,6 @@ func _mc_cam(dt: float) -> bool:
 		else:
 			_mcl("HALT rakete_da=%s t=%.2f" % [str(shots.has(sh)), float(mc.t)])
 			mc.hold = 1.6 if mc.has("ci") else 1.2   # Einschlag: noch kurz draufhalten
-			if mc.has("mk") and is_instance_valid(mc.mk):
-				(mc.mk as CanvasItem).visible = false
 			if mc.has("mkl") and is_instance_valid(mc.mkl):
 				(mc.mkl as CanvasItem).visible = false
 			_heat_off()
