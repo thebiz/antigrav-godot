@@ -775,17 +775,15 @@ void fragment(){
 		th*=.92+.08*sin(SCREEN_UV.y/px.y*1.6+TIME*30.);   // feine Abtastzeilen
 		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.05;
 	}else if(vm==3){
-		// Raketenkamera-Wärmebild wie bei „Predator“: Umgebung kalt in Schwarz-Weiß,
-		// rot ist nur, was wirklich Wärme abgibt – Antriebsflammen und das Zielschiff (glüht, siehe _heat_on/_mc_mark)
-		float L0=dot(c0,vec3(.3,.55,.15));
+		// Raketenkamera-Wärmebild: die ganze Umgebung dunkel und kalt (gedämpftes Grau), nichts leuchtet farbig.
+		// Grell weiß sind nur die gegnerischen Schiffe – die bleiben als reines Weiß stehen (_heat_on).
 		float L=clamp(dot(col,vec3(.3,.55,.15)),0.,1.);
-		float gy=pow(L,.8)*.62;
-		vec3 th=vec3(gy);
-		float ht=smoothstep(.9,.98,L0);
-		th=mix(th,vec3(.95,.06,.04),ht);
-		th=mix(th,vec3(1.,.42,.32),smoothstep(.985,1.,L0)*ht);
+		float gy=pow(L,.9)*.3;
+		vec3 th=vec3(gy*.9,gy*.95,gy*1.05);
+		float key=smoothstep(.75,.9,min(c0.r,c0.b))*(1.-smoothstep(.06,.16,c0.g));   // Kennfarbe der gegnerischen Schiffe
+		th=mix(th,vec3(1.,1.,.97),key);
 		th*=.93+.07*sin(SCREEN_UV.y/px.y*1.4+TIME*36.);   // Abtastzeilen
-		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.05;
+		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.04;
 	}else if(vm==2){
 		// Gitter: nur Kanten bleiben, als grüne Leuchtlinien; was hell glüht (Schiffe, Antriebe, Geschosse), wird rot
 		vec2 d=px*1.5;
@@ -838,7 +836,7 @@ func _post_update(dt: float) -> void:
 	if OS.get_environment("VMODE") != "":
 		cfg.vmode = int(OS.get_environment("VMODE"))   # nur zum Testen
 	# Raketenkamera im Flug: Wärmebild (Gegner glüht, siehe _mc_mark); sonst Cockpit-Sicht wie eingestellt
-	_sp(post, "vm", 3 if (not mc.is_empty() and mc.get("hold", 0.0) < 0.0 and state == "race") else (int(cfg.get("vmode", 0)) if _ck_on() else 0))
+	_sp(post, "vm", (5 if OS.get_environment("HEATRAW") != "" else 3) if (not mc.is_empty() and mc.get("hold", 0.0) < 0.0 and state == "race") else (int(cfg.get("vmode", 0)) if _ck_on() else 0))
 	# Blackout: flackert beim Ausgehen kurz, bleibt dunkel, kommt am Ende flackernd zurück (wie Neonröhren)
 	if OS.get_environment("BLKT") != "" and state == "race" and blk_t <= 0.0 and race_t > float(OS.get_environment("BLKT")) and race_t < float(OS.get_environment("BLKT")) + 0.1:
 		blk_t = 5.0
@@ -17495,6 +17493,17 @@ var tmega_t = 0.0
 
 
 func _test_mega(dt: float) -> void:
+	if OS.get_environment("HEATALLON") != "" and state == "race" and not has_meta("hao"):
+		set_meta("hao", true)
+		if heat_mat == null:
+			heat_mat = _shader_mat(HEAT_SH)
+			heat_mat.render_priority = 127
+		for s2 in ships:
+			if s2.idx == 0:
+				continue
+			for mi in (s2.node as Node3D).find_children("*", "MeshInstance3D", true, false):
+				if (mi as MeshInstance3D).material_override == null:
+					(mi as MeshInstance3D).material_overlay = heat_mat
 	if int(cfg.get("tmega", 0)) != 1 or state != "race" or ships.is_empty() or free_ride:
 		return
 	var g: Dictionary = ships[0]
@@ -17516,10 +17525,11 @@ func _test_mega(dt: float) -> void:
 # dazu der Wärmefleck als Ebene darüber – so ist er auch hinter Nebel und auf große Entfernung zu sehen
 const HEAT_SH = """
 shader_type spatial;
-render_mode unshaded, fog_disabled, cull_disabled, depth_draw_never, blend_mix;
+render_mode unshaded, fog_disabled, cull_disabled, depth_draw_never, depth_test_disabled, shadows_disabled, blend_mix;
+// leicht aufgebläht (wie der Ziel-Umriss), sonst verliert der Überzug den Tiefenvergleich gegen die Hülle
+void vertex(){ float s = length(MODEL_MATRIX[0].xyz); VERTEX += NORMAL * 0.03 / max(s, 1e-4); }
 void fragment(){
-	float fr = 1.0 - abs(dot(NORMAL, VIEW));
-	ALBEDO = vec3(1.0) * (1.0 - fr * 0.04);   // voll weiß = „heiß“: das Wärmebild färbt es rot
+	ALBEDO = vec3(1.0, 0.0, 1.0);   // Kennfarbe Magenta: das Wärmebild macht daraus grelles Weiß (ohne Tiefentest: auch hinter Wänden zu sehen)
 	ALPHA = 1.0;
 }
 """
@@ -17527,12 +17537,22 @@ var heat_mat: ShaderMaterial
 
 
 func _heat_on(o) -> void:
-	# Wärmebild: alle gegnerischen Schiffe sind warm und glühen rot – nicht nur das Ziel.
-	# (Die Mega trifft jedes Schiff, an dem sie vorbeikommt; wer nicht Ziel war, blieb sonst kalt und unsichtbar.)
+	# Wärmebild: alle gegnerischen Schiffe strahlen grell weiß – über allem, auch durch Wände und Kurven hindurch
+	# (Überzug ohne Tiefentest); das Wärmebild lässt reines Weiß stehen und dunkelt alles andere ab.
 	if mc.has("heat"):
+		# jedes Bild neu setzen: die Zielerfassung (_hull_update) nimmt ihren Überzug sonst wieder weg –
+		# und damit auch das Glühen (deshalb blieb das Zielschiff im Wärmebild dunkel)
+		for it in mc.heatl:
+			if is_instance_valid(it[0]) and (it[0] as MeshInstance3D).material_overlay != heat_mat:
+				(it[0] as MeshInstance3D).material_overlay = heat_mat
+		if OS.get_environment("KCDBG") != "" and Engine.get_process_frames() % 4 == 0 and o != null:
+			for mi in (o.node as Node3D).find_children("*", "MeshInstance3D", true, false):
+				var m3 := mi as MeshInstance3D
+				print("HT ", m3.name, " vis=", m3.is_visible_in_tree(), " ovr=", m3.material_override != null, " ovl=", m3.material_overlay == heat_mat, " aabb=", m3.get_aabb().size * m3.global_transform.basis.get_scale(), " gp=", m3.global_position)
 		return
 	if heat_mat == null:
 		heat_mat = _shader_mat(HEAT_SH)
+		heat_mat.render_priority = 127
 	var own = int((mc.sh as Dictionary).get("own", 0)) if mc.has("sh") else 0
 	var lst = []
 	for s2 in ships:
@@ -17591,13 +17611,8 @@ func _mc_ring_tex() -> ImageTexture:
 				var py = ((y + 0.5) / n * 2.0 - 1.0) * 1.6   # etwas breiter als hoch – wie ein Schiff von hinten
 				var r = sqrt(px * px + py * py)
 				var hot = clampf(1.15 - r * 1.1, 0.0, 1.0)
-				var c: Color
-				# Wärmefleck rot (wie das Wärmebild): heller Kern, nach außen dunkler und weich auslaufend
-				if hot > 0.7:
-					c = Color(1.0, 0.55, 0.45).lerp(Color(1.0, 0.12, 0.08), (1.0 - hot) / 0.3)
-				else:
-					c = Color(1.0, 0.12, 0.08).lerp(Color(0.55, 0.02, 0.02), (0.7 - hot) / 0.7)
-				c.a = smoothstep(0.0, 0.35, hot)
+				var c: Color = Color(1.0, 1.0, 0.97)   # weiß wie die glühenden Schiffe
+				c.a = clampf(hot * hot * 1.4, 0.0, 1.0)   # weicher Schein, Mitte grell
 				im.set_pixel(x, y, c)
 		mc_ring_tex = ImageTexture.create_from_image(im)
 	return mc_ring_tex
@@ -17627,7 +17642,7 @@ func _mc_mark(tg) -> void:
 		lb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lb.add_theme_font_size_override("font_size", 26)
-		lb.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2))
+		lb.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
 		lb.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 		lb.add_theme_constant_override("outline_size", 6)
 		hud.layer.add_child(lb)
@@ -17640,7 +17655,7 @@ func _mc_mark(tg) -> void:
 	var dt_m = fposmod(float(tg.z) - float(sh.z), T.LAP) if sh.get("mega", false) else absf(float(tg.z) - float(sh.z))   # Weg entlang der Strecke
 	var vp = get_viewport().get_visible_rect().size
 	var foc = vp.y * 0.5 / tan(deg_to_rad(cam.fov) * 0.5)
-	var sz = clampf(1.6 / maxf(d, 0.5) * foc * 1.8, 80.0 * vp.x / 540.0, vp.x * 0.6)
+	var sz = clampf(1.6 / maxf(d, 0.5) * foc * 2.6, 130.0 * vp.x / 540.0, vp.x * 0.7)
 	var sp: Vector2 = cam.unproject_position(tp)
 	var mg = vp.x * 0.09
 	var inside = not cam.is_position_behind(tp) and sp.x > mg and sp.x < vp.x - mg and sp.y > vp.y * 0.12 and sp.y < vp.y * 0.78
@@ -17657,7 +17672,7 @@ func _mc_mark(tg) -> void:
 		var k = minf(hx / maxf(absf(dv.x), 0.001), hy / maxf(absf(dv.y), 0.001))
 		sp = c + dv * k
 		sz = 80.0 * vp.x / 540.0
-	mk.visible = true
+	mk.visible = OS.get_environment("HEATNOMK") == ""   # weißer Schein ums Schiff: auf große Entfernung ist das Schiff selbst nur ein paar Pixel groß
 	mk.size = Vector2(sz, sz)
 	mk.position = sp - Vector2(sz, sz) * 0.5
 	mk.pivot_offset = Vector2(sz, sz) * 0.5
