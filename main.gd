@@ -10142,11 +10142,27 @@ func _impact(o: Dictionary, lx: float, lz: float, ly: float, fl: float, ff: floa
 		kp *= 0.3   # Schild fängt das meiste ab, keine Wunde
 		wound = false
 	# Seitenstoß (m/s): versetzt das Schiff, klingt in einer halben Sekunde ab
-	o.kl = clampf(float(o.get("kl", 0.0)) + (fn.x * 6.5 + signf(-lx + 0.001) * 2.0) * kp, -12.0, 12.0)
+	o.kl = clampf(float(o.get("kl", 0.0)) + (fn.x * 9.0 + signf(-lx + 0.001) * 3.0) * kp, -14.0, 14.0)
 	# kurz kaum steuerbar: das Schiff wird wirklich aus der Bahn geworfen
-	o.stun = maxf(float(o.get("stun", 0.0)), 0.55 * minf(kp, 2.0))
-	# Drehstoß: Kraft neben dem Schwerpunkt dreht das Schiff (Hebel × Kraft) – hinten links getroffen → Heck nach rechts, Nase nach links
-	o.kyw = clampf(float(o.get("kyw", 0.0)) + ((lz * fn.x - lx * fn.y) * 12.0 + signf(-lx + 0.001) * 1.2) * kp, -6.0, 6.0)
+	o.stun = maxf(float(o.get("stun", 0.0)), 0.35 * minf(kp, 2.0))
+	# Drehstoß nur fürs Aussehen: Kraft neben dem Schwerpunkt reißt die Nase herum (Hebel × Kraft) – die Fahrtrichtung
+	# bleibt aber gleich; die Druckwelle schiebt das Schiff seitlich weg, sie lenkt es nicht
+	var tq = (lz * fn.x - lx * fn.y) * 2.0 + signf(-lx + 0.001) * 0.5
+	o.ywv = float(o.get("ywv", 0.0)) + tq * 9.0 * kp
+	# harte Treffer: Rolle um die Längsachse (auch mal kopfüber) oder Schleudern um die Hochachse
+	if wound and kp >= 0.75 and float(o.get("evt", -1.0)) < 0.0:
+		var r = randf()
+		if r < 0.32:
+			o.evk = "roll"
+			o.evd = signf(fn.x + randf_range(-0.3, 0.3))
+			o.evt = 0.0
+			o.evl = randf_range(0.7, 0.95) / clampf(kp, 0.8, 1.6)
+			o.jv = float(o.get("jv", 0.0)) + 2.0
+		elif r < 0.56:
+			o.evk = "spin"
+			o.evd = signf(tq + randf_range(-0.2, 0.2))
+			o.evt = 0.0
+			o.evl = randf_range(0.8, 1.1) / clampf(kp, 0.8, 1.6)
 	# Rollen, Nicken und Hochspringen (die Federn der Lage schwingen danach von selbst aus)
 	o.rv = float(o.get("rv", 0.0)) + (fn.x * 22.0 + signf(lx) * absf(fn.y) * 14.0 + randf_range(-3.0, 3.0)) * kp
 	o.pv = float(o.get("pv", 0.0)) + (-fn.y * 6.0 * signf(-lz + 0.001) + randf_range(-2.0, 2.0)) * kp
@@ -10154,6 +10170,8 @@ func _impact(o: Dictionary, lx: float, lz: float, ly: float, fl: float, ff: floa
 	if wound and float(fx.rak.get("wound", 1.0)) > 0.01:
 		_wound(o, lx, lz, ly, k)
 		_hit_shards(o, lx, lz, ly, k)
+		if int(o.get("chips", 0)) < 3 and (kp >= 1.0 or randf() < 0.45):
+			_hull_chip(o, lx, lz, ly, k)
 
 
 # Brandflecken direkt auf der Hülle: ein Überzug-Shader (material_overlay) färbt die Hülle um jede Wunde
@@ -10188,6 +10206,228 @@ void fragment(){
 }
 """
 var scorch_ov: ShaderMaterial
+
+
+func _hit_pose(s: Dictionary, dt: float) -> void:
+	# Nasen-Feder (nur Optik)
+	var yw = float(s.get("yw", 0.0))
+	var ywv = float(s.get("ywv", 0.0))
+	if absf(yw) > 0.0005 or absf(ywv) > 0.0005:
+		ywv += (-55.0 * yw - 5.0 * ywv) * dt
+		yw = clampf(yw + ywv * dt, -1.2, 1.2)
+		s.yw = yw
+		s.ywv = ywv
+	var et = float(s.get("evt", -1.0))
+	if et < 0.0:
+		return
+	et += dt
+	var L = float(s.get("evl", 0.8))
+	var u = clampf(et / L, 0.0, 1.0)
+	var e = u * u * (3.0 - 2.0 * u)   # schnell rein, sanft aus
+	var a = TAU * float(s.get("evd", 1.0)) * e
+	if s.get("evk", "roll") == "roll":
+		s.xr = wrapf(a, -PI, PI)
+	else:
+		s.xs = wrapf(a, -PI, PI)
+	if u >= 1.0:
+		s.xr = 0.0
+		s.xs = 0.0
+		s.evt = -1.0
+	else:
+		s.evt = et
+
+
+# Ein echtes Stück Hülle bricht heraus: die Dreiecke des Modells rund um die Einschlagstelle werden kopiert
+# und fliegen als Trümmer davon; an der Stelle bleibt ein großes verkohltes Loch mit glühendem Rand
+var chip_cache = {}
+
+
+func _hull_chip(o: Dictionary, lx: float, lz: float, ly: float, k: float) -> void:
+	var nd: Node3D = o.node
+	if not is_instance_valid(nd):
+		return
+	var f = T.sframe(o.z, o.lat)
+	var wp: Vector3 = nd.global_position + f.rr * lx + f.fw * lz + f.uu * (ly + 0.08)
+	# nächstes Hüllenteil (bei mehrteiligen Modellen ggf. ein ganzer Flügel/Aufbau)
+	var best: MeshInstance3D = null
+	var bd = 1e9
+	for mi in nd.find_children("*", "MeshInstance3D", true, false):
+		var m3 := mi as MeshInstance3D
+		if m3.material_override != null or m3.mesh == null or not m3.is_visible_in_tree():
+			continue
+		var ab: AABB = m3.global_transform * m3.get_aabb()
+		var d = ab.get_center().distance_to(wp) - ab.size.length() * 0.25
+		if d < bd:
+			bd = d
+			best = m3
+	if best == null:
+		return
+	var inv: Transform3D = best.global_transform.affine_inverse()
+	var lp: Vector3 = inv * wp
+	var sc = inv.basis.get_scale().x
+	var r = randf_range(0.2, 0.3) * clampf(k, 0.8, 1.4) * sc
+	var mesh: Mesh = best.mesh
+	var key = mesh.get_rid().get_id()
+	if not chip_cache.has(key):
+		var surfs = []
+		for si in range(mesh.get_surface_count()):
+			var ar = mesh.surface_get_arrays(si)
+			surfs.append(ar)
+		chip_cache[key] = surfs
+	var surfs: Array = chip_cache[key]
+	var am = ArrayMesh.new()
+	var cen = Vector3.ZERO
+	var tot = 0
+	var outs = []
+	var keeps = []
+	var cut = false
+	for si in range(surfs.size()):
+		var ar: Array = surfs[si]
+		var vs: PackedVector3Array = ar[Mesh.ARRAY_VERTEX]
+		var ns = ar[Mesh.ARRAY_NORMAL]
+		var uvs = ar[Mesh.ARRAY_TEX_UV]
+		var ix = ar[Mesh.ARRAY_INDEX]
+		var nt = (ix.size() if ix != null and ix.size() > 0 else vs.size()) / 3
+		var ov = PackedVector3Array()
+		var on = PackedVector3Array()
+		var ou = PackedVector2Array()
+		var hasix = ix != null and ix.size() > 0
+		var kp_ = PackedInt32Array()
+		# Kandidaten: Dreiecke, deren Mitte oder eine Ecke nah an der Einschlagstelle liegt (Low-Poly-Modelle haben
+		# große Dreiecke); die nächsten davon brechen heraus, höchstens ein kleiner Teil des Modells
+		var cand = []
+		for t in range(nt):
+			var j0 = ix[t * 3] if hasix else t * 3
+			var j1 = ix[t * 3 + 1] if hasix else t * 3 + 1
+			var j2 = ix[t * 3 + 2] if hasix else t * 3 + 2
+			var dc = ((vs[j0] + vs[j1] + vs[j2]) / 3.0).distance_to(lp)
+			var dv = minf(vs[j0].distance_to(lp), minf(vs[j1].distance_to(lp), vs[j2].distance_to(lp)))
+			if dc < r * 1.5 or dv < r:
+				cand.append([dc, t])
+		cand.sort_custom(func(p1, p2): return p1[0] < p2[0])
+		var cap_n = maxi(6, int(nt * 0.07))
+		var take = {}
+		for ci in range(mini(cand.size(), cap_n)):
+			take[cand[ci][1]] = true
+		for t in range(nt):
+			var i0 = ix[t * 3] if hasix else t * 3
+			var i1 = ix[t * 3 + 1] if hasix else t * 3 + 1
+			var i2 = ix[t * 3 + 2] if hasix else t * 3 + 2
+			if not take.has(t):
+				if hasix:
+					kp_.append(i0)
+					kp_.append(i1)
+					kp_.append(i2)
+				continue
+			if hasix:
+				cut = true
+			for ii in [i0, i1, i2]:
+				ov.append(vs[ii])
+				if ns != null and ns.size() > ii:
+					on.append(ns[ii])
+				if uvs != null and uvs.size() > ii:
+					ou.append(uvs[ii])
+				cen += vs[ii]
+				tot += 1
+		keeps.append(kp_ if hasix else null)
+		if ov.size() >= 9:
+			outs.append([si, ov, on, ou])
+	if tot < 9:
+		return
+	# Loch in die Hülle: dieses Teilmodell bekommt eine eigene Kopie ohne die herausgebrochenen Dreiecke
+	if cut:
+		var hm = ArrayMesh.new()
+		var okk = true
+		for si in range(surfs.size()):
+			if keeps[si] == null or (keeps[si] as PackedInt32Array).size() < 3:
+				okk = false
+				break
+		if okk:
+			for si in range(surfs.size()):
+				var src: Array = surfs[si]
+				var a2 = []
+				a2.resize(Mesh.ARRAY_MAX)
+				for ai in [Mesh.ARRAY_VERTEX, Mesh.ARRAY_NORMAL, Mesh.ARRAY_TANGENT, Mesh.ARRAY_COLOR, Mesh.ARRAY_TEX_UV, Mesh.ARRAY_TEX_UV2]:
+					a2[ai] = src[ai]
+				a2[Mesh.ARRAY_INDEX] = keeps[si]
+				hm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a2)
+				var m0 = best.get_active_material(si)
+				if m0 is BaseMaterial3D:
+					var dm0 = (m0 as BaseMaterial3D).duplicate()
+					dm0.cull_mode = BaseMaterial3D.CULL_DISABLED   # Rand des Lochs: man sieht die Innenseite
+					m0 = dm0
+				hm.surface_set_material(si, m0)
+			if not best.has_meta("omesh"):
+				best.set_meta("omesh", best.mesh)
+				var ovr = []
+				for si in range(best.get_surface_override_material_count()):
+					ovr.append(best.get_surface_override_material(si))
+				best.set_meta("oovr", ovr)
+			for si in range(best.get_surface_override_material_count()):
+				best.set_surface_override_material(si, null)
+			best.mesh = hm
+	cen /= float(tot)
+	for oo in outs:
+		var ov: PackedVector3Array = oo[1]
+		for j in range(ov.size()):
+			ov[j] -= cen
+		var arr = []
+		arr.resize(Mesh.ARRAY_MAX)
+		arr[Mesh.ARRAY_VERTEX] = ov
+		if (oo[2] as PackedVector3Array).size() == ov.size():
+			arr[Mesh.ARRAY_NORMAL] = oo[2]
+		if (oo[3] as PackedVector2Array).size() == ov.size():
+			arr[Mesh.ARRAY_TEX_UV] = oo[3]
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		var mat = best.get_active_material(int(oo[0]))
+		if mat is BaseMaterial3D:
+			var dm = (mat as BaseMaterial3D).duplicate()
+			dm.cull_mode = BaseMaterial3D.CULL_DISABLED   # Bruchstück: auch von innen sichtbar
+			mat = dm
+		am.surface_set_material(am.get_surface_count() - 1, mat)
+	var piece = MeshInstance3D.new()
+	piece.mesh = am
+	var ch = Node3D.new()
+	ch.set_meta("rfx", true)
+	ch.set_meta("deb", true)
+	add_child(ch)
+	ch.add_child(piece)
+	var wc: Vector3 = best.global_transform * cen
+	var fr = T.frame(float(o.z))
+	var B = Basis(-fr.rr, fr.uu, fr.fw)
+	piece.transform = Transform3D(B.inverse() * best.global_transform.basis, Vector3.ZERO)
+	var rel: Vector3 = wc - (fr.c + fr.rr * float(o.lat))
+	var dlat = rel.dot(fr.rr)
+	var dh = rel.dot(fr.uu)
+	var out = Vector2(lx, lz)
+	out = out.normalized() if out.length() > 0.01 else Vector2(0.0, -1.0)
+	debris.append({"n": ch, "z": float(o.z) + rel.dot(fr.fw), "lat": float(o.lat) + dlat, "h": maxf(0.15, dh),
+		"vz": float(o.spd) * randf_range(0.6, 0.85) + out.y * randf_range(2.0, 5.0), "vl": float(o.get("kl", 0.0)) * 0.6 + out.x * randf_range(3.0, 7.0),
+		"vh": randf_range(3.0, 6.5), "rb": Basis(), "av": Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)).normalized() * randf_range(8.0, 16.0),
+		"r": 0.12, "t": 0.0, "m": null, "sp": 0.0, "hit": false, "kt": 0.0, "wreck": false, "small": true})
+	hshards.append(ch)
+	o.chips = int(o.get("chips", 0)) + 1
+	if OS.get_environment("WNDT") != "":
+		print("CHIP tris=", tot / 3, " cut=", cut, " mesh=", best.name, " r=", snappedf(r, 0.01), " ev=", o.get("evk", "-"), " evt=", o.get("evt", -1))
+	# an der Bruchstelle: größerer verkohlter Krater
+	_wound(o, lx, lz, ly, 1.6)
+
+
+func _hull_restore(o: Dictionary, nd: Node3D) -> void:
+	o.chips = 0
+	o.xr = 0.0
+	o.xs = 0.0
+	o.yw = 0.0
+	o.ywv = 0.0
+	o.evt = -1.0
+	for mi in nd.find_children("*", "MeshInstance3D", true, false):
+		if mi.has_meta("omesh"):
+			(mi as MeshInstance3D).mesh = mi.get_meta("omesh")
+			var ovr: Array = mi.get_meta("oovr", [])
+			for si in range(ovr.size()):
+				(mi as MeshInstance3D).set_surface_override_material(si, ovr[si])
+			mi.remove_meta("omesh")
+			mi.remove_meta("oovr")
 
 
 func _ship_layers(nd: Node3D) -> void:
@@ -10297,6 +10537,7 @@ func _wound_step(o: Dictionary, nd: Node3D, live: bool) -> void:
 				_qf(w[kk])
 		nd.remove_meta("wnd")
 		_wound_apply(nd)
+		_hull_restore(o, nd)
 		return
 	var ht = float(nd.get_meta("hot", 0.0))
 	if ht > 0.0:
@@ -13204,7 +13445,8 @@ func _record(dt: float) -> void:
 	rec_pl = hud.top.text
 	var sh = []
 	for o in ships:
-		sh.append([o.z, o.lat, o.h, o.psi, o.roll, o.boost, o.spd, 0 if o.out else 1, o.shield])
+		sh.append([o.z, o.lat, o.h, o.psi, o.roll, o.boost, o.spd, 0 if o.out else 1, o.shield,
+			float(o.get("xr", 0.0)), float(o.get("xs", 0.0)), float(o.get("yw", 0.0)), float(o.get("jy", 0.0))])
 	var w = []
 	for x in shots:
 		for k in range(int(x.get("br", 1))):
@@ -13397,6 +13639,12 @@ func _replay(dt: float) -> void:
 		o.spd = lerpf(a[6], b[6], u)
 		(o.node as Node3D).visible = a[7] == 1 and not (k == rp.get("follow", 0) and RP_CAMS[rp.ci][0] == "cock")
 		o.shield = a[8]
+		if a.size() >= 13:
+			o.xr = lerp_angle(float(a[9]), float(b[9]), u)
+			o.xs = lerp_angle(float(a[10]), float(b[10]), u)
+			o.yw = lerpf(float(a[11]), float(b[11]), u)
+			o.jy = lerpf(float(a[12]), float(b[12]), u)
+			o.jv = 0.0
 		_shield_vis(o)
 	var g: Dictionary = ships[0]
 	g.orbs = f0.ob
@@ -14805,7 +15053,7 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	var stn = float(s.get("stun", 0.0))
 	if stn > 0.0:
 		s.stun = stn - dt
-		inp *= 0.15   # nach einem Treffer: Lenkung greift kaum
+		inp *= 0.35   # nach einem Treffer: Lenkung greift kurz kaum
 	s.u += (inp - s.u) * (1.0 - exp(-dt / (0.03 if is_p else 0.08)))
 	var turn: float = T.kap(z) * s.spd
 	var yk = YAW_P * float(fx.steer.power) if is_p else YAW_AI
@@ -14859,11 +15107,6 @@ func _phys(s: Dictionary, inp: float, is_p: bool, dt: float, racing: bool) -> vo
 	if absf(kl) > 0.001:
 		s.lat += kl * dt
 		s.kl = kl * exp(-dt * 2.2)
-	var kyw = float(s.get("kyw", 0.0))
-	if absf(kyw) > 0.001:
-		s.psi = clampf(s.psi + kyw * dt, -0.9, 0.9)
-		s.vpsi = clampf(s.vpsi + kyw * dt * 0.55, -0.9, 0.9)
-		s.kyw = kyw * exp(-dt * 3.0)
 	# Sprung: über der Lücke fliegt er, Schwerkraft holt ihn zurück (Weite begrenzt)
 	if not s.air and T.gap(s.z):
 		s.air = true
@@ -16518,7 +16761,7 @@ func _shot() -> void:
 						var pts = [[-0.3, -0.6, 0.1], [0.3, -0.5, 0.15], [-0.25, 0.2, 0.2], [0.2, -0.65, 0.0]]
 						var pp = pts[wi]
 						_impact(ships[0], pp[0], pp[1], pp[2], -pp[0] * 0.6, 1.0, 1.0, true)
-						print("WNDT hit ", wi, " kl=", snappedf(float(ships[0].kl), 0.01), " kyw=", snappedf(float(ships[0].kyw), 0.01), " wnd=", ((ships[0].node as Node3D).get_meta("wnd", []) as Array).size())
+						print("WNDT hit ", wi, " kl=", snappedf(float(ships[0].kl), 0.01), " yw=", snappedf(float(ships[0].get("yw", 0.0)), 0.01), " wnd=", ((ships[0].node as Node3D).get_meta("wnd", []) as Array).size())
 					if shot_n > 24 and shot_n % 3 == 0:
 						print("WNDT n=", shot_n, " lat=", snappedf(float(ships[0].lat), 0.01), " psi=", snappedf(float(ships[0].psi), 0.02), " roll=", snappedf(float(ships[0].roll), 0.02), " jy=", snappedf(float(ships[0].get("jy", 0.0)), 0.01))
 				if OS.get_environment("WALLT") != "":   # Test: eigene Wand, durchfahren, dann Rakete von hinten
@@ -17027,7 +17270,17 @@ func _pose_all(dt: float) -> void:
 		var x = up.cross(dir).normalized()
 		up = dir.cross(x).normalized()
 		var nd: Node3D = s.node
-		nd.global_transform = Transform3D(Basis(x, up, dir), pos)
+		var BB = Basis(x, up, dir)
+		# Treffer-Optik: Nase reißt herum (Feder), Rolle oder Schleudern – Fahrtrichtung bleibt
+		if state != "replay" and state != "kill":
+			_hit_pose(s, dt)
+		var hy = float(s.get("yw", 0.0)) + float(s.get("xs", 0.0))
+		if absf(hy) > 0.0001:
+			BB = Basis(up, hy) * BB
+		var hr = float(s.get("xr", 0.0))
+		if absf(hr) > 0.0001:
+			BB = Basis(BB.z.normalized(), hr) * BB
+		nd.global_transform = Transform3D(BB, pos)
 		# Nase hoch beim Gasgeben; „Nose trim“ kippt die ganze Grundhaltung nach vorn (Nase Richtung Boden)
 		var pitch_t = -float(s.get("pit", 0.0)) + float(SX.trim) * 0.25
 		if absf(pitch_t) > 0.0001:
