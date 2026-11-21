@@ -10790,9 +10790,10 @@ func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
 	_blast_push(z, lat, 3.2, 0.7, hit, int(sh.get("own", -1)))
 	# Treffer: Explosion aus den Bildfolgen (Feuerball, Funken, Trümmer, Rauch) statt schwarzem Loch
 	if not sh.get("cl", false):
-		_explode(z, lat, sh.get("sup", false), 1.0)
+		# Super-Rakete: richtig wuchtig (John: mindestens dreimal so groß)
+		_explode(z, lat, sh.get("sup", false), 2.6 if sh.get("sup", false) else 1.0)
 		if hit >= 0:
-			_impact_smoke(z, lat, 1.0)
+			_impact_smoke(z, lat, 2.0 if sh.get("sup", false) else 1.0)
 		return
 	for i in range(5):
 		var la = lerpf(-T.TW * 0.8, T.TW * 0.8, i / 4.0)
@@ -13005,13 +13006,15 @@ func _weapons(dt: float, racing: bool) -> void:
 				var hz = float(hit.z)
 				var hl = float(hit.lat)
 				var hi = int(hit.idx)
+				# Mega: ein riesiger Feuerball am Schiff und zwei große daneben (John: vorher „Mückenschiss“, jetzt mindestens dreimal so wuchtig)
 				for j in range(3):
-					var oz = hz + [0.0, 1.3, 2.4][j]
-					var ol = clampf(hl + [0.0, -0.8, 0.8][j], -T.TW + 0.4, T.TW - 0.4)
+					var oz = hz + [0.0, 1.8, 3.2][j]
+					var ol = clampf(hl + [0.0, -1.1, 1.1][j], -T.TW + 0.4, T.TW - 0.4)
 					# sofort (nicht zeitversetzt): sonst fielen die Explosionen in die schon laufende Einschlag-Wiederholung
 					# und gingen dort auf, während die Raketen in der Zeitlupe noch 20 m entfernt waren
-					_explode(oz, ol, false, 0.65)   # Explosion statt schwarzem Loch (John)
-				_impact_smoke(hz, hl, 1.3)   # Rauchhülle ums getroffene Schiff
+					_explode(oz, ol, true, [2.4, 1.5, 1.5][j])
+				_impact_smoke(hz, hl, 2.6)   # Rauchhülle ums getroffene Schiff
+				shake = maxf(shake, 2.4)
 			else:
 				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
@@ -13032,7 +13035,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			dead = true
 		elif (sh.t > 6.0 and not sh.get("mega", false) and not sh.get("lap1", false)) or (sh.get("mega", false) and sh.t > 40.0) or (sh.get("lap1", false) and absf(float(sh.z) - float(sh.z0)) > T.LAP) or (sh.cl and sh.t > 0.42 + float(sh.get("drp", 0.0))) or (state == "lab" and absf(sh.z - LZ) > 18.0):
 			if sh.get("mega", false):
-				_explode(sh.z, sh.lat, false, 0.8)   # Mega-Salve: daneben = nur ein Knall, kein Loch
+				_explode(sh.z, sh.lat, true, 2.2)   # Mega-Salve daneben: trotzdem ein großer Knall
 			else:
 				_shot_boom(sh, sh.z, sh.lat, -1)
 			dead = true
@@ -19097,49 +19100,67 @@ func _ck_hud_draw(c: Control) -> void:
 	var jit = Vector2.ZERO
 	if float(ckh.gl) > 0.0:
 		jit = Vector2(sin(t * 91.0) * 7.0, sin(t * 67.0) * 2.0) * float(ckh.gl) * u
-	var C = Vector2(vp.x * 0.5, vp.y * 0.4) + (ckh.sw as Vector2) * u + jit
+	# Helm-HUD (John): fasst das Sichtfeld nur ein – Mitte bleibt frei. Mittelpunkt auf Höhe der Fahrbahn, nicht im Himmel.
+	var C = Vector2(vp.x * 0.5, vp.y * 0.5) + (ckh.sw as Vector2) * u + jit
 	var bo = clampf(float(g.boost), 0.0, 1.0)
 	var spc = CY.lerp(MG, bo)
-	var lw = maxf(2.0, 2.6 * u)
-	# --- Horizont-Striche links und rechts
+	var lw = maxf(2.0, 2.2 * u)
+	var BR = 232.0 * u   # Radius der seitlichen Klammern
+	var BA = 0.5         # halber Öffnungswinkel der Klammern
+	# --- seitliche Klammern: flache Bögen links und rechts, Enden knicken nach innen, feine Teilstriche
 	for sd in [-1.0, 1.0]:
-		_hl(c, C + Vector2(sd * 74.0, 0) * u, C + Vector2(sd * 150.0, 0) * u, Color(CY, 0.55 * fl), lw, true)
-		_hl(c, C + Vector2(sd * 150.0, 0) * u, C + Vector2(sd * 150.0, 8) * u, Color(CY, 0.55 * fl), lw, true)
-		for k in range(1, 3):
-			var yy = 34.0 * k
-			_hl(c, C + Vector2(sd * 96.0, -yy) * u, C + Vector2(sd * 130.0, -yy) * u, Color(CY, 0.22 * fl), lw * 0.8, true)
-			_hl(c, C + Vector2(sd * 96.0, yy) * u, C + Vector2(sd * 130.0, yy) * u, Color(CY, 0.22 * fl), lw * 0.8, true)
-	# --- Zielkreis: vier Bogenstücke, innen ein Punkt
-	var rr = 40.0 * u
-	for k in range(4):
-		var a0 = TAU * k / 4.0 + 0.25 + t * 0.4
-		_ha(c, C, rr, a0, a0 + 1.0, 12, Color(CY, 0.8 * fl), lw, true)
-	c.draw_circle(C, 2.5 * u, Color(CY, 0.9 * fl))
-	# --- Tempo-Bogen außen (270°), wird beim Boost magenta
+		var ac = 0.0 if sd > 0.0 else PI
+		_ha(c, C, BR, ac - BA, ac + BA, 28, Color(CY, 0.42 * fl), lw, true)
+		for e in [-1.0, 1.0]:
+			var p0 = C + Vector2(cos(ac + e * BA), sin(ac + e * BA)) * BR
+			_hl(c, p0, p0 - Vector2(sd * 16.0, 0) * u, Color(CY, 0.42 * fl), lw, true)
+		for k in range(-4, 5):
+			var aa = ac + k * BA / 5.0
+			var dv = Vector2(cos(aa), sin(aa))
+			_hl(c, C + dv * (BR - 7.0 * u), C + dv * BR, Color(CY, (0.3 if k == 0 else 0.14) * fl), lw * 0.7, true)
+	# links füllt sich die Klammer mit dem Tempo (von unten nach oben), rechts mit der Energie
 	var sv = clampf(float(g.spd) / maxf(1.0, base_spd * 1.6), 0.0, 1.0)
-	var a_s = PI * 0.75
-	_ha(c, C, 54.0 * u, a_s, a_s + PI * 1.5, 40, Color(CY, 0.18 * fl), lw * 2.0, true)
 	if sv > 0.01:
-		_ha(c, C, 54.0 * u, a_s, a_s + PI * 1.5 * sv, 40, Color(spc, 0.85 * fl), lw * 2.0, true)
-	# Tempo als Zahl unter dem Kreis
+		_ha(c, C, BR + 6.0 * u, PI + BA, PI + BA - 2.0 * BA * sv, 28, Color(spc, 0.8 * fl), lw * 1.6, true)
+	var en = clampf(float(g.en), 0.0, 1.0)
+	var ecol = Color(0.4, 1.0, 0.55).lerp(Color(1.0, 0.25, 0.15), clampf((0.45 - en) / 0.35, 0.0, 1.0))
+	if en > 0.01:
+		_ha(c, C, BR + 6.0 * u, BA, BA - 2.0 * BA * en, 28, Color(ecol, 0.7 * fl), lw * 1.6, true)
+	# Tempo klein innen an der linken Klammer
 	var vs = str(int(round(float(hud.get("gs", 0.0)) * 12.0)))
-	var fs = int(30.0 * u)
-	var vw = font.get_string_size(vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-	_ht(c, font, C + Vector2(-vw * 0.5, 92.0 * u), vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(spc, 0.95 * fl))
+	var fs = int(22.0 * u)
+	_ht(c, font, C + Vector2(-BR + 22.0 * u, 8.0 * u), vs, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(spc, 0.9 * fl))
 	var ks = "BOOST" if bo > 0.02 else "KM/H"
-	var kf = int(13.0 * u)
-	var kw = font.get_string_size(ks, HORIZONTAL_ALIGNMENT_LEFT, -1, kf).x
-	_ht(c, font, C + Vector2(-kw * 0.5, 108.0 * u), ks, HORIZONTAL_ALIGNMENT_LEFT, -1, kf, Color(spc, 0.7 * fl))
-	# Boost: Winkel-Pfeile wandern vom Kreis nach außen
+	_ht(c, font, C + Vector2(-BR + 22.0 * u, 24.0 * u), ks, HORIZONTAL_ALIGNMENT_LEFT, -1, int(10.0 * u), Color(spc, 0.65 * fl))
+	# Boost: Winkel-Pfeile laufen an den Klammern entlang nach außen
 	if bo > 0.02:
 		for k in range(3):
 			var ph = fmod(t * 2.2 + k / 3.0, 1.0)
-			var dx = (70.0 + 70.0 * ph) * u
 			var al = (1.0 - ph) * bo * fl
 			for sd in [-1.0, 1.0]:
-				var q = C + Vector2(sd * dx, 0)
-				_hp(c, PackedVector2Array([q + Vector2(-sd * 7, -9) * u, q, q + Vector2(-sd * 7, 9) * u]), Color(MG, al), lw * 1.3, true)
-	# --- Waffe: großes Symbol über dem Kreis, springt beim Einsammeln auf
+				var q = C + Vector2(sd * (BR - 30.0 * u + 30.0 * u * ph), -46.0 * u)
+				_hp(c, PackedVector2Array([q + Vector2(-sd * 6, -7) * u, q, q + Vector2(-sd * 6, 7) * u]), Color(MG, al), lw * 1.2, true)
+	# Energie klein innen an der rechten Klammer
+	var es = "%d %%" % int(round(en * 100.0))
+	var ew = font.get_string_size(es, HORIZONTAL_ALIGNMENT_LEFT, -1, int(16.0 * u)).x
+	_ht(c, font, C + Vector2(BR - 22.0 * u - ew, 8.0 * u), es, HORIZONTAL_ALIGNMENT_LEFT, -1, int(16.0 * u), Color(ecol, 0.85 * fl))
+	var ew2 = font.get_string_size("ENERGY", HORIZONTAL_ALIGNMENT_LEFT, -1, int(10.0 * u)).x
+	_ht(c, font, C + Vector2(BR - 22.0 * u - ew2, 24.0 * u), "ENERGY", HORIZONTAL_ALIGNMENT_LEFT, -1, int(10.0 * u), Color(ecol, 0.6 * fl))
+	# --- oben: dünner Bogen mit Richtungsmarke, die sich beim Lenken / in Kurven mitneigt
+	var TR = 205.0 * u
+	var TA = 0.62
+	_ha(c, C, TR, -PI * 0.5 - TA, -PI * 0.5 + TA, 40, Color(CY, 0.3 * fl), lw * 0.8, true)
+	for k in range(-6, 7):
+		var aa = -PI * 0.5 + k * TA / 6.0
+		var dv = Vector2(cos(aa), sin(aa))
+		var ln = (9.0 if k % 3 == 0 else 5.0) * u
+		_hl(c, C + dv * TR, C + dv * (TR - ln), Color(CY, (0.32 if k % 3 == 0 else 0.16) * fl * (1.0 - absf(k) / 8.0)), lw * 0.7, true)
+	var da = -PI * 0.5 + clampf(ck_rot * 0.55, -TA, TA)
+	var dvm = Vector2(cos(da), sin(da))
+	var nvm = Vector2(-dvm.y, dvm.x)
+	var mp = C + dvm * (TR + 4.0 * u)
+	_hp(c, PackedVector2Array([mp + dvm * 12.0 * u + nvm * 9.0 * u, mp, mp + dvm * 12.0 * u - nvm * 9.0 * u]), Color(spc, 0.95 * fl), lw * 1.3, true)
+	# --- Waffe: klein oben rechts an der Klammer, springt beim Einsammeln kurz auf
 	var w = str(ckh.w)
 	if w != "":
 		var wc: Color = WC.get(w, CY)
@@ -19148,63 +19169,36 @@ func _ck_hud_draw(c: Control) -> void:
 		elif g.get("sup", false):
 			wc = Color(1.0, 0.85, 0.3)
 		var wt = float(ckh.wt)
-		var pop = 1.0 + 1.2 * exp(-wt * 6.0) * cos(wt * 14.0)
-		var P = C + Vector2(0, -112.0) * u
-		var ws = 22.0 * u * pop
-		var bs = 34.0 * u * pop
-		var ba = clampf(0.55 + 0.45 * sin(t * 5.0), 0.0, 1.0) * fl
-		# Eck-Klammern um das Symbol
-		for cx in [-1.0, 1.0]:
-			for cy in [-1.0, 1.0]:
-				var q = P + Vector2(cx, cy) * bs
-				_hl(c, q, q - Vector2(cx * 12.0, 0) * u, Color(wc, 0.6 + 0.4 * ba), lw, true)
-				_hl(c, q, q - Vector2(0, cy * 12.0) * u, Color(wc, 0.6 + 0.4 * ba), lw, true)
-		_wicon(c, P, ws, w, Color(wc, 0.95 * fl))
+		var pop = 1.0 + 0.8 * exp(-wt * 6.0) * cos(wt * 14.0)
+		var P = C + Vector2(cos(-BA), sin(-BA)) * BR + Vector2(-26.0, -6.0) * u
+		_wicon(c, P, 13.0 * u * pop, w, Color(wc, 0.95 * fl))
 		var nm = str(WN.get(w, ""))
 		if g.get("mega", false):
 			nm = "MEGA " + nm
 		elif g.get("sup", false):
 			nm = "SUPER " + nm
-		var nf = int(14.0 * u)
+		var nf = int(11.0 * u)
 		var nw = font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, nf).x
-		_ht(c, font, P + Vector2(-nw * 0.5, bs + 20.0 * u), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, nf, Color(wc, 0.85 * fl))
-		if wt < 0.5:   # Ring, der beim Einsammeln aufgeht
-			_ha(c, P, bs * (1.0 + wt * 4.0), 0.0, TAU, 32, Color(wc, (1.0 - wt * 2.0) * 0.9), lw * 1.5, true)
-	# --- Gegner vor dir: Zielrahmen mit Name und Abstand
+		_ht(c, font, P + Vector2(-nw * 0.5, 30.0 * u), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, nf, Color(wc, 0.85 * fl))
+		if wt < 0.5:
+			_ha(c, P, 18.0 * u * (1.0 + wt * 3.0), 0.0, TAU, 24, Color(wc, (1.0 - wt * 2.0) * 0.8), lw * 1.2, true)
+	# --- Gegner dicht hinter dir: kleiner Pfeil unten zwischen den Klammern (Gegner vor dir bekommen keinen Rahmen mehr – nur die Zielerfassung der Lenkrakete)
 	if state in ["race", "count", "replay"]:
 		for i in range(ships.size()):
 			var o: Dictionary = ships[i]
 			if int(o.idx) == int(g.idx) or o.out:
 				continue
 			var dz = float(o.z) - float(g.z)
-			var pc: Color = CHARS[i][2] if i < CHARS.size() else CY
-			pc = pc.lerp(Color(1, 1, 1), 0.3)
-			if dz > 2.5 and dz < 80.0:
-				var wp = (o.node as Node3D).global_position
-				if cam.is_position_behind(wp):
-					continue
-				var sp: Vector2 = cam.unproject_position(wp) * (vp.x / maxf(1.0, get_viewport().get_visible_rect().size.x))
-				var bz = clampf(260.0 / dz, 9.0, 34.0) * u
-				var al = clampf(1.2 - dz / 80.0, 0.3, 1.0) * fl
-				for cx in [-1.0, 1.0]:
-					for cy in [-1.0, 1.0]:
-						var q = sp + Vector2(cx * bz * 1.4, cy * bz)
-						_hl(c, q, q - Vector2(cx * bz * 0.5, 0), Color(pc, al), lw, true)
-						_hl(c, q, q - Vector2(0, cy * bz * 0.5), Color(pc, al), lw, true)
-				var lab = "%s %dm" % [CHARS[i][0] if i < CHARS.size() else "?", int(dz * 4.0)]
-				var lf = int(12.0 * u)
-				_ht(c, font, sp + Vector2(bz * 1.4 + 4.0 * u, -bz + lf), lab, HORIZONTAL_ALIGNMENT_LEFT, -1, lf, Color(pc, al * 0.9))
-			elif dz < -0.5 and dz > -18.0:
-				# dicht hinter dir: Pfeil unten am Anzeigefeld, links/rechts nach Spur
-				var x = C.x + clampf((float(o.lat) - float(g.lat)) / T.TW, -1.0, 1.0) * 120.0 * u
-				var y = C.y + 132.0 * u
+			if dz < -0.5 and dz > -18.0:
+				var pc: Color = (CHARS[i][2] if i < CHARS.size() else CY).lerp(Color(1, 1, 1), 0.3)
+				var x = C.x + clampf((float(o.lat) - float(g.lat)) / T.TW, -1.0, 1.0) * 150.0 * u
+				var q2 = Vector2(x, C.y + BR * sin(BA) + 6.0 * u)
 				var al2 = clampf(1.0 + dz / 18.0, 0.2, 1.0) * (0.6 + 0.4 * sin(t * 9.0)) * fl
-				var q2 = Vector2(x, y)
-				c.draw_colored_polygon(PackedVector2Array([q2 + Vector2(-9, -5) * u, q2 + Vector2(9, -5) * u, q2 + Vector2(0, 6) * u]), Color(pc, al2))
+				c.draw_colored_polygon(PackedVector2Array([q2 + Vector2(-8, -4) * u, q2 + Vector2(8, -4) * u, q2 + Vector2(0, 5) * u]), Color(pc, al2))
 				var lab2 = "%dm" % int(-dz * 4.0)
-				var lf2 = int(11.0 * u)
+				var lf2 = int(10.0 * u)
 				var lw2 = font.get_string_size(lab2, HORIZONTAL_ALIGNMENT_LEFT, -1, lf2).x
-				_ht(c, font, q2 + Vector2(-lw2 * 0.5, 20.0 * u), lab2, HORIZONTAL_ALIGNMENT_LEFT, -1, lf2, Color(pc, al2 * 0.9))
+				_ht(c, font, q2 + Vector2(-lw2 * 0.5, 18.0 * u), lab2, HORIZONTAL_ALIGNMENT_LEFT, -1, lf2, Color(pc, al2 * 0.9))
 	# --- Warnung: Dreieck mit Ausrufezeichen, darunter was kommt; bei Raketen ein Pfeil am Zielkreis aus der Richtung
 	if bool(ckh.mis) or bool(ckh.mine):
 		var bl = 0.5 + 0.5 * sin(t * 10.0)
@@ -19221,7 +19215,7 @@ func _ck_hud_draw(c: Control) -> void:
 		_ht(c, font, W + Vector2(-ww * 0.5, 48.0 * u), wn, HORIZONTAL_ALIGNMENT_LEFT, -1, wf, Color(RD.lerp(Color(1, 1, 1), 0.2), 0.75 + 0.25 * bl))
 		if bool(ckh.mis):
 			var dv = Vector2(sin(float(ckh.mang)), -cos(float(ckh.mang)))
-			var ap = C + dv * 72.0 * u
+			var ap = C + dv * 190.0 * u
 			var nv = Vector2(-dv.y, dv.x)
 			var arr = PackedVector2Array([ap + dv * 14.0 * u, ap - dv * 6.0 * u + nv * 10.0 * u, ap - dv * 6.0 * u - nv * 10.0 * u])
 			c.draw_colored_polygon(arr, Color(RD, 0.6 + 0.4 * bl))
