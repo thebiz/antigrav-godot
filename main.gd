@@ -704,6 +704,7 @@ uniform float grn=.035;
 uniform int vm=0;   // Cockpit-Sicht: 0 normal, 1 Infrarot, 2 Gitter
 uniform float bo=0.;   // Blackout: alles schwarz, nur Neon leuchtet weiter
 uniform vec4 hr0=vec4(0.);uniform vec4 hr1=vec4(0.);uniform vec4 hr2=vec4(0.);   // Wärmebild: Bildbereiche der gegnerischen Schiffe
+uniform vec4 hr3=vec4(0.);   // Wärmebild: Bildbereich der eigenen Rakete (Düsen glühen weiß)
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 // Filmkorn-Zufall ohne sin(): bleibt auch bei großen Pixelzahlen gleichmäßig (sin großer Werte wird auf Handy-GPUs ungenau → Muster)
 float hg(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
@@ -790,6 +791,10 @@ void fragment(){
 		inr=max(inr,step(hr2.x,su.x)*step(su.x,hr2.z)*step(hr2.y,su.y)*step(su.y,hr2.w));
 		float mgn=(c0.r+c0.b)*.5-c0.g;
 		float key=inr*smoothstep(.12,.35,mgn)*(1.-smoothstep(.3,.5,abs(c0.r-c0.b)));
+		// Raketendüsen: im Bereich der eigenen Rakete glüht alles sehr Helle (Flamme) weiß
+		float inr3=step(hr3.x,su.x)*step(su.x,hr3.z)*step(hr3.y,su.y)*step(su.y,hr3.w);
+		float L0=dot(c0,vec3(.3,.55,.15));
+		key=max(key,inr3*smoothstep(.6,.9,L0));
 		th=mix(th,vec3(1.,1.,.97),key);
 		th*=.93+.07*sin(SCREEN_UV.y/px.y*1.4+TIME*36.);   // Abtastzeilen
 		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.04;
@@ -10269,7 +10274,8 @@ float h3(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.545
 float vn(vec3 p){ vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
 	return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
 		mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z); }
-void vertex(){ lv = VERTEX; }
+// leicht aufgebläht: sonst verliert der Überzug den Tiefenvergleich gegen die Hülle und bleibt unsichtbar
+void vertex(){ lv = VERTEX; float s = length(MODEL_MATRIX[0].xyz); VERTEX += NORMAL * 0.006 / max(s, 1e-4); }
 float spot(vec4 w, float n){ if (w.w <= 0.0) return 0.0; float d = length(lv - w.xyz) / w.w + (n - 0.5) * 0.55; return 1.0 - smoothstep(0.45, 1.0, d); }
 float core(vec4 w, float n){ if (w.w <= 0.0) return 0.0; float d = length(lv - w.xyz) / w.w + (n - 0.5) * 0.4; return 1.0 - smoothstep(0.0, 0.35, d); }
 void fragment(){
@@ -10277,10 +10283,10 @@ void fragment(){
 	float n = vn(lv * 9.0 / max(sc, 0.001)) * 0.65 + vn(lv * 23.0 / max(sc, 0.001)) * 0.35;
 	float a = max(max(max(spot(w0, n), spot(w1, n)), max(spot(w2, n), spot(w3, n))), max(spot(w4, n), spot(w5, n)));
 	float c = max(max(max(core(w0, n), core(w1, n)), max(core(w2, n), core(w3, n))), max(core(w4, n), core(w5, n)));
-	ALBEDO = mix(vec3(0.035, 0.03, 0.028), vec3(0.012, 0.01, 0.01), c);
-	ROUGHNESS = 0.95;
+	ALBEDO = mix(vec3(0.02, 0.018, 0.016), vec3(0.004, 0.004, 0.004), c);   // richtig verrußt, fast schwarz
+	ROUGHNESS = 0.98;
 	EMISSION = vec3(3.0, 0.9, 0.15) * c * hot * (0.6 + 0.4 * n);
-	ALPHA = a * 0.96;
+	ALPHA = min(1.0, a * 1.05);
 }
 """
 var scorch_ov: ShaderMaterial
@@ -10445,7 +10451,7 @@ func _wound_apply(nd: Node3D) -> void:
 			var v = Vector4(0, 0, 0, 0)
 			if j < wl.size():
 				var lp: Vector3 = inv * (wl[j].p as Vector3)
-				v = Vector4(lp.x, lp.y, lp.z, (0.13 + 0.07 * float(wl[j].sev)) * wk * sc)
+				v = Vector4(lp.x, lp.y, lp.z, (0.22 + 0.09 * float(wl[j].sev)) * wk * sc)   # größerer Rußfleck
 			m3.set_instance_shader_parameter("w%d" % j, v)
 		m3.set_instance_shader_parameter("hot", 1.0)
 	nd.set_meta("hot", 1.0)
@@ -12539,9 +12545,10 @@ func _hull_update(tg, locked: bool, dt: float) -> void:
 	if hull_mat == null:
 		hull_mat = _shader_mat(HULL_CODE)
 	if hull_on != null and (tg == null or hull_on != tg):
+		var keep = scorch_ov if (is_instance_valid(hull_on.node) and (hull_on.node as Node).has_meta("lay")) else null   # Ruß bleibt
 		for mi in _hull_meshes(hull_on.node):
 			if is_instance_valid(mi):
-				(mi as MeshInstance3D).material_overlay = null
+				(mi as MeshInstance3D).material_overlay = keep if (keep != null and (hull_on.node.get_meta("hull", []) as Array).has(mi)) else null
 		hull_on = null
 	if tg == null or tg.out:
 		hull_lk = false
@@ -14571,6 +14578,12 @@ func _kc_cam_imp() -> bool:
 			fov = 54.0
 	if not pf and not tight:
 		up = Vector3.UP
+	# Rußflecken: erst ab dem Einschlag in diesem Blickwinkel zeigen (vorher war das Schiff ja noch heil)
+	for ov in kc.get("ovl", []):
+		if is_instance_valid(ov[0]):
+			var want_ov = ov[1] if rel >= 0.0 else null
+			if (ov[0] as MeshInstance3D).material_overlay != want_ov:
+				(ov[0] as MeshInstance3D).material_overlay = want_ov
 	# Schiffe, die direkt vor der Kamera stehen würden (meist du selbst), ausblenden – das Ziel bleibt sichtbar
 	for o in ships:
 		if o.idx != kc.victim and (o.node as Node3D).visible:
@@ -17760,6 +17773,27 @@ func _heat_rects(o) -> void:
 		rs.append(Vector4((sp.x - r) / vs.x, (sp.y - r) / vs.y, (sp.x + r) / vs.x, (sp.y + r) / vs.y))
 	for i in range(3):
 		_sp(post, "hr%d" % i, rs[i] if i < rs.size() else Vector4.ZERO)
+	# eigene Rakete (mit Zopf): Bereich um die Düsen
+	var r3 = Vector4.ZERO
+	if mc.has("sh") and is_instance_valid((mc.sh as Dictionary).get("n")):
+		var ns = [(mc.sh as Dictionary).n]
+		for e in (mc.sh as Dictionary).get("ex", []):
+			if is_instance_valid(e):
+				ns.append(e)
+		var mn = Vector2(1e9, 1e9)
+		var mx = Vector2(-1e9, -1e9)
+		var foc = vs.y * 0.5 / tan(deg_to_rad(cam.fov) * 0.5)
+		for nn in ns:
+			var c3: Vector3 = (nn as Node3D).global_position
+			if cam.is_position_behind(c3):
+				continue
+			var p3 = cam.unproject_position(c3)
+			var r = 0.9 / maxf(0.3, c3.distance_to(cam.global_position)) * foc
+			mn = Vector2(minf(mn.x, p3.x - r), minf(mn.y, p3.y - r))
+			mx = Vector2(maxf(mx.x, p3.x + r), maxf(mx.y, p3.y + r * 1.6))
+		if mx.x > mn.x:
+			r3 = Vector4(mn.x / vs.x, mn.y / vs.y, mx.x / vs.x, mx.y / vs.y)
+	_sp(post, "hr3", r3)
 
 
 func _heat_off() -> void:
@@ -17768,15 +17802,13 @@ func _heat_off() -> void:
 			(it[0] as MeshInstance3D).material_overlay = it[1]
 	mc.erase("heat")
 	mc.erase("heatl")
-	for i in range(3):
+	for i in range(4):
 		_sp(post, "hr%d" % i, Vector4.ZERO)
 
 
 func _mc_end() -> void:
 	if mc.is_empty():
 		return
-	if mc.has("frz"):
-		Engine.time_scale = float(mc.get("frz_ts", 1.0))
 	if mc.has("ret") and is_instance_valid(mc.ret):
 		(mc.ret as Node).queue_free()
 	if mc.has("card") and is_instance_valid(mc.card):
@@ -18047,20 +18079,20 @@ func _mc_lock(sh: Dictionary) -> void:
 			dz = fposmod(dz, T.LAP)
 			if dz > T.LAP * 0.5:
 				return
-		var clo = maxf(1.0, float(sh.get("vs", 20.0)) - float(tg.spd))   # Annäherungstempo
+		# „Ziel erfasst“, sobald das Visier eingerastet ist (oder spätestens kurz vor dem Einschlag):
+		# Piep, Zielkarte, Ziel blinkt – das Bild läuft weiter (kein Einfrieren mehr, John)
+		var clo = maxf(1.0, float(sh.get("vs", 20.0)) - float(tg.spd))
 		var step = clo * maxf(get_process_delta_time(), 1.0 / 120.0)
-		# im nächsten oder übernächsten Bild schlägt sie ein: jetzt anhalten
-		if dz > step * 2.2 + 1.0 or dz < -0.5:
+		var locked = float(mc.get("rlk", 0.0)) >= 0.99
+		if not locked and (dz > step * 2.2 + 1.0 or dz < -0.5):
 			return
 		mc.frz = Time.get_ticks_msec() / 1000.0
-		mc.frz_ts = Engine.time_scale
-		Engine.time_scale = 0.0001
 		_mcl("ERKANNT abstand=%.1fm" % dz)
 		_mc_card(tg, dz)
 		_snd("lock", 2.0, 1.25)   # Erkennungs-Piep
 	var el = Time.get_ticks_msec() / 1000.0 - float(mc.frz)
 	# zweimal aufblinken: aus – an – aus – an, dann stehen lassen
-	mc.hoff = (el < 0.1) or (el > 0.2 and el < 0.3)   # blinkt sofort beim Einfrieren zweimal
+	mc.hoff = (el < 0.1) or (el > 0.2 and el < 0.3)   # blinkt beim Erfassen sofort zweimal
 	if mc.has("card") and is_instance_valid(mc.card):
 		var cd: Control = mc.card
 		cd.position.x = lerpf(-cd.size.x - 20.0, 16.0, clampf(el / 0.12, 0.0, 1.0))   # fährt von links herein
@@ -18076,7 +18108,6 @@ func _mc_lock(sh: Dictionary) -> void:
 		mc.erase("frz")
 		mc.erase("hoff")
 		mc.frz_done = true
-		Engine.time_scale = float(mc.get("frz_ts", 1.0))
 
 
 func _mc_cam(dt: float) -> bool:
