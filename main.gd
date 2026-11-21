@@ -17904,7 +17904,7 @@ func _mc_mark(tg) -> void:
 		lb.text = "TARGET LOCKED\n%s" % nm
 	else:
 		lb.text = "%sTRACKING %s\nDIST %05.1f m" % [arr, nm, dt_m]
-	lb.visible = true
+	lb.visible = false   # John: keine Schrift mehr, nur die Zielerfassung (Text bleibt fürs Protokoll/Debug)
 	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	lb.size = Vector2(300, 64)
 	# links neben der Zielerfassung
