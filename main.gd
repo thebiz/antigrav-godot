@@ -3006,7 +3006,7 @@ func _city_fill() -> void:
 			var pos = Vector3(f.c.x - lat, -42.0 + H / 2.0, zc + (rng.randf() - 0.5) * 6.0)
 			var c = _neo(rng.randf())
 			items.append([Transform3D(Basis.from_scale(Vector3(w / 2.0, H / 2.0, d / 2.0)), pos), c, pos.y + H / 2.0])
-			blds.append([pos, w, d, H, f.c.x])
+			blds.append([pos, w, d, H, f.c.x, zc])
 		zc += stepz
 	# Mega-Türme: riesige Hochhäuser weit draußen, im Dunst nur als Silhouette mit Fensterlichtern (wie in Blade Runner)
 	var mk = float(fx.city.mega) if float(E.city) > 0.5 else 0.0
@@ -3041,6 +3041,68 @@ func _city_fill() -> void:
 		var c: Color = items[i][1]
 		bld_mm.set_instance_custom_data(i, Color(c.r, c.g, c.b, items[i][2]))
 	_city_extras_fill(blds)
+	_bsigns_make(blds)
+
+
+# Senkrechte Neonröhren-Schilder direkt an den Hauswänden nah an der Strecke (wie in Tokio): ragen aus der Wand,
+# zeigen dem anrollenden Verkehr entgegen; ein Buchstabe flackert, manchmal ist einer ganz tot (John)
+const BSIGN_TXT = ["ANTIGRAV", "HOTEL", "RAMEN", "KARAOKE", "NEON", "BAR", "CLUB", "PIXEL", "TAXI", "ARCADE", "SUSHI", "CYBER", "NOODLE", "GAMES"]
+const BSIGN_COL = [Color(1.0, 0.18, 0.5), Color(0.25, 0.9, 1.0), Color(0.75, 0.35, 1.0), Color(1.0, 0.55, 0.12), Color(1.0, 0.15, 0.15), Color(0.35, 1.0, 0.55)]
+var bsign_root: Node3D = null
+
+
+func _bsigns_make(blds: Array) -> void:
+	if bsign_root != null and is_instance_valid(bsign_root):
+		bsign_root.free()
+	bsign_root = null
+	for i in range(tube_signs.size() - 1, -1, -1):
+		if not is_instance_valid(tube_signs[i].root):
+			tube_signs.remove_at(i)
+	if deco == null or not is_instance_valid(deco) or blds.is_empty() or _noir() or _jungle():
+		return
+	bsign_root = Node3D.new()
+	deco.add_child(bsign_root)
+	var rng = RandomNumberGenerator.new()
+	rng.seed = 41
+	var cand = []
+	for b in blds:
+		var pos: Vector3 = b[0]
+		var face = absf(pos.x - float(b[4])) - float(b[1]) * 0.5
+		if face < T.TW + 30.0 and float(b[5]) < T.LAP - 10.0 and not T.in_tun(float(b[5]), 12.0):
+			cand.append(b)
+	cand.sort_custom(func(a, c): return float(a[5]) < float(c[5]))
+	var last_z = -999.0
+	var cnt = 0
+	var ti = 0
+	for b in cand:
+		var zc: float = b[5]
+		if zc - last_z < 34.0 or cnt >= 18:
+			continue
+		var pos: Vector3 = b[0]
+		var w: float = b[1]
+		var top_b = -42.0 + float(b[3])
+		var f = T.frame(zc)
+		var txt: String = BSIGN_TXT[ti % BSIGN_TXT.size()]
+		var lh = 2.1 if txt.length() <= 5 else 1.75
+		var step = lh * 1.38
+		var hgt = step * txt.length()
+		var bot = f.c.y - 0.5 + rng.randf() * 2.5
+		if bot + hgt + 1.0 > top_b:
+			bot = top_b - hgt - 1.0   # niedrigeres Haus: Schild weiter unten, ragt dann von unten ins Bild
+			if bot < f.c.y - hgt * 0.6:
+				continue
+		ti += 1
+		var sgn = signf(float(b[4]) - pos.x)
+		var x = pos.x + sgn * (w * 0.5 + lh * 0.55 + 0.35)
+		var zz = pos.z + (rng.randf() - 0.5) * float(b[2]) * 0.5
+		var zt: Vector3 = -f.fw
+		zt = Vector3(zt.x, 0.0, zt.z).normalized()
+		var c: Color = BSIGN_COL[rng.randi() % BSIGN_COL.size()]
+		_tube_sign(Vector3(x, bot + hgt - lh * 0.5, zz), Basis(Vector3.UP.cross(zt).normalized(), Vector3.UP, zt), txt, c, lh, bsign_root, rng.randf() < 0.45)
+		last_z = zc
+		cnt += 1
+		if OS.get_environment("BSDBG") != "":
+			print("BSIGN z=", snappedf(zz, 0.1), " lat=", snappedf(x - float(b[4]), 0.1), " txt=", txt, " bot=", snappedf(bot, 0.1), " trk_y=", snappedf(f.c.y, 0.1))
 
 
 # ---------------------------------------------------------------- Blade-Runner-Stadt: Hologramme, Leuchtschilder, Suchscheinwerfer, fliegende Autos
@@ -5292,8 +5354,7 @@ func _tribunes() -> void:
 			var fzm = T.frame((seg[0] + seg[1]) * 0.5)
 			var zax: Vector3 = (-fzm.rr * sd).normalized()
 			var up: Vector3 = fzm.uu
-			var sc = OR if _noir() else (Color(1.0, 0.25, 0.7) if sd > 0.0 else Color(0.25, 0.9, 1.0))
-			_neon_sign(fzm.c + fzm.rr * (sd * (L0 + depth * 0.5)) + up * (roof_h + 0.62), Basis(up.cross(zax).normalized(), up, zax), "ANTIGRAV", sc, 0.9)
+			# (flacher Schriftzug auf dem Tribünendach entfernt – sah billig aus, John; dafür Röhrenschilder an den Häusern)
 	# zwei große Schriftzüge an Häusern neben der Strecke, schräg zum Verkehr
 	for sp in [[150.0, 1.0, "ANTIGRAV"], [430.0, -1.0, "ANTIGRAV"], [610.0, 1.0, "ANTIGRAV"], [290.0, 1.0, "PIXEL-INSTITUT"]]:
 		if T.in_tun(sp[0], 8.0):
@@ -5304,9 +5365,9 @@ func _tribunes() -> void:
 		zax2 = (zax2 - f.uu * zax2.dot(f.uu)).normalized()
 		var c2 = OR if _noir() else [Color(1.0, 0.2, 0.55), Color(0.3, 0.95, 1.0), Color(0.75, 0.35, 1.0)][neon_signs.size() % 3]
 		var bsg = Basis(f.uu.cross(zax2).normalized(), f.uu, zax2)
-		if _noir() or _jungle():
-			_neon_sign(f.c + f.rr * (sd2 * (T.TW + 7.5)) + f.uu * 7.0, bsg, sp[2], c2, 2.4 if sp[2] == "ANTIGRAV" else 1.8)
-		else:
+		if not (_noir() or _jungle()) and float(fx.env.city) > 0.5 and float(fx.env.dens) > 0.02:
+			continue   # Stadt: Schilder hängen an den Häusern (_bsigns_make)
+		if true:
 			# senkrechte Neonröhren-Buchstaben übereinander (wie in Tokio), Blick entgegen der Fahrtrichtung
 			var lh = 1.25 if sp[2].length() <= 8 else 0.95
 			var zt: Vector3 = -f.fw
@@ -5638,22 +5699,32 @@ func _tube_mat(col: Color, core: bool) -> StandardMaterial3D:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	if core:
 		var c = col.lerp(Color(1, 1, 1), 0.45)
-		m.albedo_color = Color(c.r * 1.7, c.g * 1.7, c.b * 1.7)
+		m.albedo_color = Color(c.r * 2.2, c.g * 2.2, c.b * 2.2)
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	else:
 		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 		m.cull_mode = BaseMaterial3D.CULL_FRONT
-		m.albedo_color = Color(col.r, col.g, col.b, 0.12)
+		m.albedo_color = Color(col.r, col.g, col.b, 0.16)
 	return m
 
 
-func _tube_sign(top: Vector3, b: Basis, txt: String, col: Color, lh: float) -> void:
+var tube_cache = {}
+
+
+func _tube_letter_c(ch: String, sz: float, r: float) -> ArrayMesh:
+	var k = "%s|%.3f|%.4f" % [ch, sz, r]
+	if not tube_cache.has(k):
+		tube_cache[k] = _tube_letter(ch, sz, r)
+	return tube_cache[k]
+
+
+func _tube_sign(top: Vector3, b: Basis, txt: String, col: Color, lh: float, parent: Node3D = null, dead := false) -> void:
 	var root = Node3D.new()
-	deco.add_child(root)
+	(parent if parent != null else deco).add_child(root)
 	root.transform = Transform3D(b, top)
-	var r = lh * 0.042
+	var r = lh * 0.055
 	var step = lh * 1.38
 	var n = txt.length()
 	# dunkle Schiene hinter den Buchstaben, oben und unten ein Ausleger zur Hauswand
@@ -5671,14 +5742,22 @@ func _tube_sign(top: Vector3, b: Basis, txt: String, col: Color, lh: float) -> v
 	var bad = randi() % maxi(1, n)
 	while n > 1 and txt[bad] == "-":
 		bad = (bad + 1) % n
+	# manchmal ist ein Buchstabe ganz tot: nur graues Glas, kein Leuchten
+	var dl = -1
+	if dead and n > 2:
+		dl = (bad + 1 + randi() % (n - 1)) % n
+	var glass = StandardMaterial3D.new()
+	glass.albedo_color = Color(0.09, 0.09, 0.11)
+	glass.metallic = 0.3
+	glass.roughness = 0.2
 	var core_m = _tube_mat(col, true)
 	var halo_m = _tube_mat(col, false)
 	var sg = {"root": root, "bad": null, "badh": null, "col": col, "on": true, "nx": randf_range(1.0, 3.0)}
 	for i in range(n):
 		var ch = txt[i]
 		var y = -step * i
-		var lm = _tube_letter(ch, lh, r)
-		var hm = _tube_letter(ch, lh, r * 2.3)
+		var lm = _tube_letter_c(ch, lh, r)
+		var hm = _tube_letter_c(ch, lh, r * 2.6)
 		var mi = MeshInstance3D.new()
 		mi.mesh = lm
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -5687,7 +5766,10 @@ func _tube_sign(top: Vector3, b: Basis, txt: String, col: Color, lh: float) -> v
 		hi.mesh = hm
 		hi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		hi.position = Vector3(0, y, 0)
-		if i == bad:
+		if i == dl:
+			mi.material_override = glass
+			hi.visible = false
+		elif i == bad:
 			mi.material_override = _tube_mat(col, true)
 			hi.material_override = _tube_mat(col, false)
 			sg.bad = mi.material_override
@@ -5745,8 +5827,8 @@ func _tube_live(dt: float) -> void:
 		var col: Color = sg.col
 		var k = 1.0 if sg.on else 0.08
 		var c = col.lerp(Color(1, 1, 1), 0.45)
-		(sg.bad as StandardMaterial3D).albedo_color = Color(c.r * 1.7 * k + 0.02, c.g * 1.7 * k + 0.02, c.b * 1.7 * k + 0.02)
-		(sg.badh as StandardMaterial3D).albedo_color = Color(col.r, col.g, col.b, 0.12 * k)
+		(sg.bad as StandardMaterial3D).albedo_color = Color(c.r * 2.2 * k + 0.02, c.g * 2.2 * k + 0.02, c.b * 2.2 * k + 0.02)
+		(sg.badh as StandardMaterial3D).albedo_color = Color(col.r, col.g, col.b, 0.16 * k)
 		if hum.playing:
 			hum.volume_db = -6.0 if sg.on else -22.0
 
