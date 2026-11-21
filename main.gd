@@ -72,14 +72,14 @@ const WP = [["rak", 0.18], ["lenk", 0.18], ["mine", 0.13], ["schild", 0.10], ["t
 const WP_AI = [["lenk", 0.33], ["rak", 0.23], ["mine", 0.19], ["schild", 0.1], ["turbo", 0.1], ["blk", 0.05]]
 # eigene Farbe je Waffe, damit man sie im Augenwinkel unterscheiden kann
 const WC = {"rak": Color(1.0, 0.55, 0.12), "lenk": Color(1.0, 0.18, 0.22), "mine": Color(1.0, 0.86, 0.1), "orbs": Color(0.3, 0.6, 1.0),
-	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95), "blk": Color(0.72, 1.0, 0.12)}
+	"wand": Color(0.1, 0.95, 0.85), "beben": Color(0.72, 0.32, 1.0), "schild": Color(0.35, 1.0, 0.45), "turbo": Color(1.0, 0.3, 0.75), "auto": Color(0.92, 0.92, 0.95), "blk": Color(0.45, 0.8, 1.0)}
 # kurze Erklärung je Waffe (Hinweise beim ersten Mal und „How to play“)
 const WD = {"rak": "Flies straight ahead – aim by steering.", "lenk": "Locks onto the rival ahead and hits for sure.",
 	"mine": "Drops mines behind you.", "schild": "Protects you from two hits.", "turbo": "A big burst of speed.",
 	"beben": "A shock wave rolls ahead and throws rivals off course.", "auto": "Autopilot for 5 seconds – steers for you.",
 	"wand": "An energy wall ahead – rivals flying through it get zapped, and it stops rockets coming from behind.", "orbs": "Glowing orbs circle you and hit anyone close.",
-	"blk": "Lights out! For 5 seconds rivals only see the neon lines – they wobble, brake and bump into walls."}
-const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS", "blk": "BLACKOUT"}
+	"blk": "EMP! An electromagnetic pulse jams all rivals for 5 seconds – their instruments go haywire and they can't fire."}
+const WN = {"rak": "ROCKET", "lenk": "HOMING", "mine": "MINES", "schild": "SHIELD", "turbo": "TURBO", "beben": "QUAKE", "auto": "AUTO", "wand": "FORCE FIELD", "orbs": "ORBS", "blk": "EMP"}
 var shots = []
 var mines = []
 var fxs = []
@@ -702,7 +702,7 @@ uniform float asp=.46;
 uniform float shp=.6;
 uniform float grn=.035;
 uniform int vm=0;   // Cockpit-Sicht: 0 normal, 1 Infrarot, 2 Gitter
-uniform float bo=0.;   // Blackout: alles schwarz, nur Neon leuchtet weiter
+uniform float bo=0.;   // EMP gegen dich: etwas dunkler, Bildstörungen
 uniform float bst=0.;  // Boost: zusätzliche Bewegungsunschärfe
 uniform vec4 hr0=vec4(0.);uniform vec4 hr1=vec4(0.);uniform vec4 hr2=vec4(0.);   // Wärmebild: Bildbereiche der gegnerischen Schiffe
 uniform vec4 hr3=vec4(0.);   // Wärmebild: Bildbereich der eigenen Rakete (Düsen glühen weiß)
@@ -728,11 +728,18 @@ void fragment(){
 		float band=floor(uv.y*46.+floor(TIME*24.)*3.1);
 		uv.x+=(h21(vec2(band,floor(TIME*30.)))-.5)*.05*gl*step(.55,h21(vec2(band,1.7)));
 	}
+	// EMP: in Schüben verrutschen Zeilen, Farben laufen auseinander
+	float eb=0.;
+	if(bo>0.){
+		eb=bo*step(.42,h21(vec2(floor(TIME*9.),5.3)));
+		float band=floor(uv.y*34.+floor(TIME*20.)*2.3);
+		uv.x+=(h21(vec2(band,floor(TIME*25.)))-.5)*.045*eb*step(.6,h21(vec2(band,2.9)));
+	}
 	// Geschwindigkeit: Bewegungsunschärfe entlang der Fluchtlinien – Bildmitte (Schiff, Strecke voraus) bleibt scharf,
 	// zum Rand hin wird immer stärker verwischt. e = 0 in der Mitte … 1 am Bildrand (Hoch- und Querformat gleich).
 	vec2 cd=uv-vec2(.5,.47);float e=smoothstep(.4,.98,length(cd*vec2(2.,1.6)));
 	float mb=spd*e*.11+bst*smoothstep(.25,.95,length(cd*vec2(2.,1.6)))*.13;
-	float ca=.006*gl+.01*abs(gs);
+	float ca=.006*gl+.01*abs(gs)+.005*eb;
 	vec3 col=vec3(0.);
 	vec3 c0=texture(scr,uv).rgb;
 	// nur wo wirklich verwischt wird, mehrfach lesen (spart auf dem Handy viel)
@@ -813,13 +820,14 @@ void fragment(){
 		gcol+=vec3(0.,.12,.07)*(step(gq.x,.03)+step(gq.y,.03));
 		col=gcol;
 	}
-	// Blackout: nur kräftig farbig leuchtende Stellen (Neon) und sehr Helles (Antriebe) überleben
+	// EMP: etwas dunkler, Abtastzeilen, ein heller Störbalken rollt durchs Bild, Rauschen in Schüben
 	if(bo>0.){
-		float mx=max(col.r,max(col.g,col.b)),mn=min(col.r,min(col.g,col.b));
-		float sat=(mx-mn)/max(mx,.001);
-		float neon=max(smoothstep(.6,.9,mx)*smoothstep(.5,.75,sat),smoothstep(.86,1.,mx));
-		vec3 dk=col*clamp(neon,0.,1.)*1.2+col*.012;
-		col=mix(col,dk,bo);
+		col*=1.-.3*bo;
+		col*=1.-.14*bo*(.5+.5*sin(SCREEN_UV.y/px.y*1.3+TIME*40.));
+		float roll=fract(SCREEN_UV.y*.8-TIME*.55);
+		col+=vec3(.55,.75,1.)*bo*.07*smoothstep(0.,.05,roll)*smoothstep(.12,.05,roll);
+		col+=(hg(floor(SCREEN_UV/px*.5)+floor(TIME*30.)*13.)-.5)*(.04*bo+.1*eb);
+		col=mix(col,vec3(dot(col,vec3(.33))),.2*bo);
 	}
 	// Vignette bei Tempo
 	col*=1.-spd*.25*smoothstep(.3,.9,length(cd*vec2(asp,1.))*1.4);
@@ -870,13 +878,15 @@ func _post_update(dt: float) -> void:
 	elif state not in ["race", "count"]:
 		blk_t = 0.0
 	blk_v = bt
-	if city_root != null and is_instance_valid(city_root):
-		city_root.visible = blk_v < 0.7
-	if sky_m != null:
-		sky_m.set_shader_parameter("bk", blk_v)
+	# EMP: kein Licht-aus mehr – Stadt und Himmel bleiben; dafür zittern die Anzeigen in Schüben
+	if hud.has("layer") and is_instance_valid(hud.layer):
+		var jit = blk_v > 0.0 and fposmod(sin(floor(Time.get_ticks_msec() / 111.0) * 12.9898) * 43758.5, 1.0) > 0.5
+		(hud.layer as CanvasLayer).offset = Vector2(randf_range(-9.0, 9.0), randf_range(-5.0, 5.0)) * blk_v if jit else Vector2.ZERO
+		if jit:
+			hud.gs = float(hud.gs) + randf_range(-30.0, 30.0) * blk_v   # Tachonadel spinnt
 	_sp(post, "bo", blk_v if OS.get_environment("DEMNOBO") == "" else 0.0)
 	if ck.has("body") and is_instance_valid(ck.body):
-		var dm = 1.0 - 0.85 * blk_v   # Cockpit wird dunkel, nur seine Leuchten bleiben
+		var dm = 1.0 - 0.3 * blk_v   # Cockpit etwas dunkler
 		(ck.body as CanvasItem).self_modulate = Color(dm, dm, dm)
 		if ck.has("hands") and is_instance_valid(ck.hands):
 			(ck.hands as CanvasItem).self_modulate = Color(dm, dm, dm)
@@ -6550,14 +6560,16 @@ func _party_live(dt: float) -> bool:
 	var cut = 0.0 if t < 2.1 else (2.1 if t < 4.7 else 4.7)
 	var st = t - cut
 	var dur = 2.1 if t < 2.1 else (2.6 if t < 4.7 else PARTY_T - 4.7)
-	var zf = (1.0 + 0.06 * exp(-st * 2.2) * cos(st * 3.6)) * (1.0 - 0.05 * smoothstep(0.0, dur, st))
-	var fh = 1.0 + 0.5 * exp(-st * 2.8) * cos(st * 7.0)
+	# stärker (John): Zoom setzt weiter an und schnellt heran, die Schärfe pumpt deutlicher
+	var zf = (1.0 + 0.13 * exp(-st * 2.6) * cos(st * 3.6)) * (1.0 - 0.07 * smoothstep(0.0, dur, st))
+	var fh = 1.0 + 0.85 * exp(-st * 2.4) * cos(st * 7.0)
 	if t >= 4.7:
-		var rz = clampf((st - 3.0) / 0.8, 0.0, 1.0)
+		# Crash-Zoom auf dich: schneller, kräftiger Ruck mit Überschwingen
+		var rz = clampf((st - 3.0) / 0.5, 0.0, 1.0)
 		var xb = rz - 1.0
-		zf *= 1.0 - 0.07 * (1.0 + 2.70158 * xb * xb * xb + 1.70158 * xb * xb)
+		zf *= 1.0 - 0.16 * (1.0 + 2.70158 * xb * xb * xb + 1.70158 * xb * xb)
 		if st > 3.0:
-			fh += 0.28 * exp(-(st - 3.0) * 3.0) * sin((st - 3.0) * 8.0)
+			fh += 0.5 * exp(-(st - 3.0) * 2.6) * sin((st - 3.0) * 8.0)
 	cam.fov *= zf
 	party.fh = fh
 	if OS.get_environment("PARTYTOP") != "":
@@ -11067,6 +11079,8 @@ func _ai_weapons(o: Dictionary, dt: float, racing: bool) -> void:
 			o.wT = randf_range(0.6, 2.5)
 	if o.wpn == "":
 		return
+	if float(o.get("blk", 0.0)) > 0.0:
+		return   # EMP: Waffen gestört, nichts lässt sich abfeuern
 	o.wT -= dt
 	if o.wT > 0.0:
 		return
@@ -11224,6 +11238,12 @@ func _orbs_update(dt: float, live: bool) -> void:
 
 
 func _fire() -> void:
+	if blk_t > 0.0 and state == "race" and not ships.is_empty() and str(ships[0].wpn) != "":
+		# EMP gegen dich: Waffen offline, die Waffe bleibt aber erhalten
+		_msg("WEAPONS OFFLINE", Color(0.55, 0.85, 1.0))
+		_snd("click", 2.0, 0.6)
+		_vib(20, 0.3)
+		return
 	if not ships.is_empty():
 		var fw0 = str(ships[0].wpn)
 		if fw0 == "mine":
@@ -11307,31 +11327,23 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			_blackout(g, 10.0 if sup else 5.5)
 
 
-# Blackout: überall geht das Licht aus – nur Neon bleibt. Die Gegner des Schützen fahren unsicher,
-# und leuchtende Dämonen jagen sie durch die Dunkelheit (beim MEGA-Blackout beißen sie auch zu).
+# EMP (früher Blackout, John): ein elektromagnetischer Puls stört alle Gegner des Schützen – ihre Anzeigen spinnen,
+# das Bild wird etwas dunkler und flackert, und solange er wirkt, lässt sich keine Waffe abfeuern.
+# Der Schütze selbst bleibt verschont (sein Bild bleibt normal). Keine Dämonen mehr.
 func _blackout(src: Dictionary, dur: float, mega := false) -> void:
 	_snd("blackout", 2.0)
-	var nv = 0
 	for x in ships:
 		if x.idx == src.idx or x.out:
 			continue
-		nv += 1
+		x.blk = maxf(float(x.get("blk", 0.0)), dur)
 		if x.idx == 0:
-			_msg("BLACKOUT", Color(0.72, 1.0, 0.12))
+			_msg("EMP", Color(0.55, 0.85, 1.0))
 			_vib(80, 0.7)
-			_after(0.35, func(): _snd("vo_blk", 3.0))   # geflüstert, während das Licht ausgeht
-		else:
-			x.blk = maxf(float(x.get("blk", 0.0)), dur)
-		# Dämonen: einer je Gegner, beim Super- und Mega-Blackout zwei
-		var nd = 2 if (mega or dur > 7.0) else 1
-		for k in range(nd):
-			_demon_spawn(src, x, dur, mega, k, nd)
-	# dunkel wird es für alle, auch für dich als Schützen (fahren kannst du aber normal)
-	blk_t = maxf(blk_t, dur)
-	blk_d = maxf(blk_t, 0.1)
+			blk_t = maxf(blk_t, dur)
+			blk_d = maxf(blk_t, 0.1)
 	if src.idx == 0:
-		_msg("LIGHTS OUT", Color(0.72, 1.0, 0.12))
-		_flash(Color(0.0, 0.0, 0.0), 0.25)
+		_msg("EMP – RIVALS JAMMED", Color(0.55, 0.85, 1.0))
+		_flash(Color(0.6, 0.85, 1.0), 0.12)
 
 
 # ---------------------------------------------------------------- Blackout-Dämonen
@@ -11559,7 +11571,7 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 			g.mshield = 8.0
 			_snd("shield")
 		"blk":
-			# 10 s Blackout, die Dämonen greifen an (je Gegner zusammen 25 % Schaden)
+			# MEGA-EMP: 10 s gestört
 			_blackout(g, 10.0, true)
 		"wand":
 			# zwei Barrieren hintereinander: bremsen deutlich, je 20 % Schaden (zusammen 40 %)
@@ -11884,11 +11896,12 @@ func _wicon(c: CanvasItem, p: Vector2, s: float, w: String, col: Color) -> void:
 				c.draw_line(p + Vector2(x, -s * 0.8), p + Vector2(x, s * 0.8), col, lw, true)
 			c.draw_line(p + Vector2(-s * 0.9, -s * 0.8), p + Vector2(s * 0.9, -s * 0.8), col, lw, true)
 		"blk":
-			# Auge mit Strich: Licht aus
-			c.draw_arc(p + Vector2(0, s * 0.55), s * 0.95, -PI * 0.8, -PI * 0.2, 20, col, lw, true)
-			c.draw_arc(p - Vector2(0, s * 0.55), s * 0.95, PI * 0.2, PI * 0.8, 20, col, lw, true)
-			c.draw_circle(p, s * 0.22, col)
-			c.draw_line(p + Vector2(-s * 0.8, s * 0.8), p + Vector2(s * 0.8, -s * 0.8), col, lw, true)
+			# EMP: Blitz mit zwei Pulsbögen links und rechts
+			var bolt = PackedVector2Array([p + Vector2(s * 0.12, -s * 0.85), p + Vector2(-s * 0.3, s * 0.08), p + Vector2(s * 0.05, s * 0.08), p + Vector2(-s * 0.12, s * 0.85), p + Vector2(s * 0.3, -s * 0.12), p + Vector2(-s * 0.05, -s * 0.12), p + Vector2(s * 0.12, -s * 0.85)])
+			c.draw_polyline(bolt, col, lw, true)
+			for sd in [-1.0, 1.0]:
+				c.draw_arc(p, s * 0.62, (0.0 if sd > 0.0 else PI) - 0.6, (0.0 if sd > 0.0 else PI) + 0.6, 12, col, lw * 0.8, true)
+				c.draw_arc(p, s * 0.92, (0.0 if sd > 0.0 else PI) - 0.5, (0.0 if sd > 0.0 else PI) + 0.5, 12, Color(col.r, col.g, col.b, col.a * 0.6), lw * 0.7, true)
 		"orbs":
 			c.draw_arc(p, s * 0.7, 0.0, TAU, 32, Color(col.r, col.g, col.b, col.a * 0.5), lw * 0.7, true)
 			for i in range(3):
@@ -18353,7 +18366,8 @@ func _mc_cam(dt: float) -> bool:
 		var dzi = fposmod(float(tg0.z) - float(sh.z), T.LAP)
 		var clo = maxf(1.5, float(sh.get("vs", 20.0)) - float(tg0.spd))   # Annäherungstempo
 		# ~50 m vor dem Ziel: Schnitt auf die Zeitlupe von vorn (live), die letzten Meter im Wärmebild entfallen (John)
-		near = dzi <= 50.0 and dzi < T.LAP * 0.5
+		# Schnitt so viel später, dass die Zeitlupe (Tempo 0,3) 0,5 s kürzer läuft – schneller zur Explosion (John)
+		near = dzi <= maxf(15.0, 50.0 - 0.5 * 0.3 * clo) and dzi < T.LAP * 0.5
 	if near and not mc.has("ci"):
 		mc.ci = 0.0
 		mc.side = 1.0 if randf() < 0.5 else -1.0
