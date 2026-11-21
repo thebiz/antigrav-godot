@@ -781,9 +781,9 @@ void fragment(){
 		// Raketenkamera-Wärmebild: die ganze Umgebung dunkel und kalt (gedämpftes Grau), nichts leuchtet farbig.
 		// Grell weiß sind nur die gegnerischen Schiffe – die bleiben als reines Weiß stehen (_heat_on).
 		float L=clamp(dot(col,vec3(.3,.55,.15)),0.,1.);
-		// Nachtsicht-Grün (John): wie ein Restlichtverstärker, etwas heller und kontrastreicher als vorher
-		float gy=pow(L,.8)*.5;
-		vec3 th=vec3(.06,.22,.1)*smoothstep(0.,.08,gy)+vec3(gy*.35,gy*1.05,gy*.45);
+		// wieder Schwarz-Weiß (John): Umgebung kühl und gedämpft, Hitze (Gegner, Düsen) grell weiß
+		float gy=pow(L,.85)*.36;
+		vec3 th=vec3(gy*.92,gy*.96,gy*1.04);
 		// Kennfarbe Magenta der gegnerischen Schiffe – nur innerhalb ihrer Bildbereiche gezählt (sonst würde rosa Neon mitglühen)
 		vec2 su=SCREEN_UV;
 		// weiche Ellipsen statt harter Rechtecke (sonst zeichnete der Schein um das Schiff ein helles Quadrat)
@@ -851,7 +851,7 @@ func _post_update(dt: float) -> void:
 	if OS.get_environment("VMODE") != "":
 		cfg.vmode = int(OS.get_environment("VMODE"))   # nur zum Testen
 	# Raketenkamera im Flug: Wärmebild (Gegner glüht, siehe _mc_mark); sonst Cockpit-Sicht wie eingestellt
-	_sp(post, "vm", (5 if OS.get_environment("HEATRAW") != "" else 3) if (not mc.is_empty() and mc.get("hold", 0.0) < 0.0 and state == "race") else (int(cfg.get("vmode", 0)) if _ck_on() else 0))
+	_sp(post, "vm", (5 if OS.get_environment("HEATRAW") != "" else 3) if (not mc.is_empty() and mc.get("hold", 0.0) < 0.0 and not mc.has("ci") and state == "race") else (int(cfg.get("vmode", 0)) if _ck_on() else 0))
 	# Blackout: flackert beim Ausgehen kurz, bleibt dunkel, kommt am Ende flackernd zurück (wie Neonröhren)
 	if OS.get_environment("BLKT") != "" and state == "race" and blk_t <= 0.0 and race_t > float(OS.get_environment("BLKT")) and race_t < float(OS.get_environment("BLKT")) + 0.1:
 		blk_t = 5.0
@@ -9904,8 +9904,13 @@ func _rp_smoke(F: Array, W: Array) -> void:
 			((mi.material_override) as StandardMaterial3D).albedo_color = Color(gr + 0.6 * warm, gr + 0.25 * warm, gr * 1.04, 0.5 * (1.0 - age * 0.85) * cdf * minf(1.0, float(fx.rak.get("smoke", 1.2))))
 
 
+# Nahaufnahme einer Explosion (Einschlag-Wiederholung oder Zeitlupe von vorn): Kamera steht dicht dran
+func _cine() -> bool:
+	return (state == "kill" and kc.get("ir", false)) or (not mc.is_empty() and mc.has("ci"))
+
+
 func _kc_cap(pos: Vector3, r: float, fr := 0.3) -> float:
-	if state != "kill" or not kc.get("ir", false) or r <= 0.001:
+	if not _cine() or r <= 0.001:
 		return 1.0
 	var lim = fr * pos.distance_to(cam.global_position)
 	return minf(1.0, lim / r)
@@ -10097,17 +10102,17 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	var rg0 = (16.0 if int(cfg.gfx) >= 2 else 10.0) * k
 	lt.omni_range = rg0
 	lt.omni_attenuation = 0.7
-	lt.light_energy = 38.0 * float(X.light) * (0.3 if state == "kill" else 1.0)   # Wiederholung: Kamera dicht dran, sonst alles weiß
+	lt.light_energy = 38.0 * float(X.light) * (0.3 if _cine() else 1.0)   # Wiederholung: Kamera dicht dran, sonst alles weiß
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
-	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light) * (0.3 if state == "kill" else 1.0), "hu": hu, "sf": sf0})
+	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light) * (0.3 if _cine() else 1.0), "hu": hu, "sf": sf0})
 	_snd("boom", 4.0 if big else 2.0, randf_range(0.85, 1.0), pos)
 	_snd("boom", 2.0, 0.55, pos)   # tiefer Wumms darunter
 	# Kamera rüttelt, je näher, desto stärker
 	var d = (pos - cam.global_position).length()
 	var near = clampf(1.0 - d / 35.0, 0.0, 1.0)
 	shake = maxf(shake, (2.0 if big else 1.3) * near * float(X.shake))
-	_flash(_hs(Color(1.0, 0.7, 0.4), hu), (0.55 if big else 0.35) * near * float(X.flash) * (0.35 if state == "kill" else 1.0))
+	_flash(_hs(Color(1.0, 0.7, 0.4), hu), (0.55 if big else 0.35) * near * float(X.flash) * (0.35 if _cine() else 1.0))
 
 
 # Schaden: Schild schützt; leer = ausgeschieden; Meldung oben
@@ -13015,6 +13020,10 @@ func _weapons(dt: float, racing: bool) -> void:
 					_explode(oz, ol, true, [2.4, 1.5, 1.5][j])
 				_impact_smoke(hz, hl, 2.6)   # Rauchhülle ums getroffene Schiff
 				shake = maxf(shake, 2.4)
+				# starke Salve: das Schiff brennt danach an der Einschlagstelle (wie dein eigenes bei schweren Treffern)
+				if is_instance_valid(hit.node):
+					for w in (hit.node as Node).get_meta("wnd", []):
+						w.sev = maxf(float(w.sev), 2.8)
 			else:
 				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
@@ -13024,7 +13033,7 @@ func _weapons(dt: float, racing: bool) -> void:
 			if not mc.is_empty() and mc.get("sh") == sh:
 				_mcl("TREFFER %s (ziel war %s) z=%.1f lat=%.2f" % [NAMES[int(hit.idx)] if int(hit.idx) < NAMES.size() else str(hit.idx), (NAMES[int(sh.tg.idx)] if sh.tg != null else "keins"), float(hit.z), float(hit.lat)])
 			# Raketenkamera dabei: den Einschlag gleich noch einmal zeigen – Zeitlupe aus drei Blickwinkeln
-			if int(sh.own) == 0 and not mc.is_empty() and mc.sh == sh and kc.is_empty() and state == "race" and not free_ride:
+			if int(sh.own) == 0 and not mc.is_empty() and mc.sh == sh and not mc.has("ci") and kc.is_empty() and state == "race" and not free_ride:
 				if kc_pending.is_empty():
 					kc_pending = {"idx": hit.idx, "t0": rec_clk, "kind": "rocket", "sid": int(sh.get("id", 0))}
 				kc_pending.force = true
@@ -17974,7 +17983,7 @@ func _mc_mark(tg) -> void:
 		sz = 0.0
 		arr = ("<< " if dv.x < -0.5 else (">> " if dv.x > 0.5 else ("^^ " if dv.y < 0.0 else "vv ")))
 	# Zielerfassung erst ab etwa 100 m vor dem Ziel (John): taucht in der Mitte auf, fährt aufs Schiff, rastet ein
-	if dt_m <= 100.0 or mc.has("frz"):
+	if dt_m <= 150.0 or mc.has("frz"):
 		_mc_reticle(sp if inside else Vector2(vp.x * 0.5, vp.y * 0.45), maxf(sz * 1.3, 61.0), inside)   # 13 % kleiner (John)
 	elif mc.has("ret") and is_instance_valid(mc.ret):
 		(mc.ret as CanvasItem).visible = false
@@ -17984,15 +17993,19 @@ func _mc_mark(tg) -> void:
 		lb.text = "TARGET LOCKED\n%s" % nm
 	else:
 		lb.text = "%sTRACKING %s\nDIST %05.1f m" % [arr, nm, dt_m]
-	lb.visible = false   # John: keine Schrift mehr, nur die Zielerfassung (Text bleibt fürs Protokoll/Debug)
+	# nur „LOCK-ON“, blinkend links neben dem eingerasteten Visier (John)
+	var locked = float(mc.get("rlk", 0.0)) >= 0.99 and mc.has("ret") and (mc.ret as CanvasItem).visible
+	lb.visible = locked
+	lb.text = "LOCK-ON"
+	lb.add_theme_color_override("font_color", Color(0.85, 1.0, 0.88))
 	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	lb.size = Vector2(300, 64)
 	# links neben der Zielerfassung
 	var rp: Vector2 = mc.get("rp", Vector2(vp.x * 0.5, vp.y * 0.45))
 	var rs = float(mc.get("rs", 70.0))
-	lb.position = Vector2(clampf(rp.x - rs * 0.5 - 16.0 - 300.0, 6.0, vp.x - 306.0), clampf(rp.y - 32.0, 0.0, vp.y - 70.0))
+	lb.position = Vector2(clampf(rp.x - rs * 0.5 - 16.0 - 300.0, 6.0, vp.x - 306.0), clampf(rp.y - 16.0, 0.0, vp.y - 70.0))
 	# leichtes Flimmern wie ein Radarschirm; beim Erkennen im Takt des Aufblinkens
-	lb.modulate.a = (1.0 if mc.get("hoff", false) == false else 0.25) if frz else 0.82 + 0.18 * float(int(Time.get_ticks_msec() / 90) % 2)
+	lb.modulate.a = 1.0 if (int(Time.get_ticks_msec() / 220) % 2) == 0 else 0.15   # blinkt
 	if OS.get_environment("KCDBG") != "":
 		print("MCMK t=", snappedf(race_t, 0.01), " nv=", (tg.node as Node3D).is_visible_in_tree(), " d=", snappedf(d, 0.1), " along=", snappedf(dt_m, 0.1), " in=", inside, " scr=", sp, " txt=", lb.text.replace("\n", " | "))
 
@@ -18125,7 +18138,7 @@ func _mc_cam(dt: float) -> bool:
 		_mc_end()
 		return false
 	mc.t += dt
-	if hud.has("mcl") and is_instance_valid(hud.mcl):
+	if hud.has("mcl") and is_instance_valid(hud.mcl) and not mc.has("ci"):
 		(hud.mcl as Label).modulate.a = 0.55 + 0.45 * (1.0 if fmod(mc.t, 0.8) < 0.5 else 0.0)
 	var sh: Dictionary = mc.sh
 	# Einschlag in Zeitlupe: kurz vor dem Ziel schwenkt die Kamera seitlich heran (Nahaufnahme), danach langsam wieder Normaltempo
@@ -18134,29 +18147,66 @@ func _mc_cam(dt: float) -> bool:
 	if mc.hold < 0.0 and shots.has(sh) and tg0 != null and not tg0.out:
 		var dzi = fposmod(float(tg0.z) - float(sh.z), T.LAP)
 		var clo = maxf(1.5, float(sh.get("vs", 20.0)) - float(tg0.spd))   # Annäherungstempo
-		near = false and dzi < 7.0 and dzi / clo < 0.32   # ersetzt durch die Einschlag-Wiederholung (_kc_cam_imp)
+		# ~50 m vor dem Ziel: Schnitt auf die Zeitlupe von vorn (live), die letzten Meter im Wärmebild entfallen (John)
+		near = dzi <= 50.0 and dzi < T.LAP * 0.5
 	if near and not mc.has("ci"):
 		mc.ci = 0.0
 		mc.side = 1.0 if randf() < 0.5 else -1.0
+		mc.ctg = tg0
+		_mcl("SCHNITT Zeitlupe von vorn (50 m)")
+		# Wärmebild-Anzeigen weg
+		if mc.has("mkl") and is_instance_valid(mc.mkl):
+			(mc.mkl as CanvasItem).visible = false
+		if mc.has("ret") and is_instance_valid(mc.ret):
+			(mc.ret as CanvasItem).visible = false
+		if mc.has("card") and is_instance_valid(mc.card):
+			(mc.card as CanvasItem).visible = false
+		_heat_off()
+		if hud.has("mcl") and is_instance_valid(hud.mcl):
+			(hud.mcl as CanvasItem).visible = false   # „MISSILE CAM“ gehört zur Raketenkamera
+		_flash(Color(1, 1, 1), 0.08)
 	if mc.has("ci"):
-		mc.ci = float(mc.ci) + dt / maxf(0.05, Engine.time_scale)   # echte Sekunden seit Beginn der Nahaufnahme
-		var slo = 0.22 if mc.hold < 0.0 else lerpf(0.2, 1.0, clampf((1.4 - float(mc.hold)) / 1.0, 0.0, 1.0))
+		var rdt0 = dt / maxf(0.05, Engine.time_scale)
+		mc.ci = float(mc.ci) + rdt0   # echte Sekunden seit dem Schnitt
+		# vor dem Einschlag Zeitlupe, nach dem Einschlag gegen Ende sanft zurück auf Normaltempo
+		var slo = 0.3 if mc.hold < 0.0 else lerpf(0.3, 1.0, clampf((0.8 - float(mc.hold)) / 0.8, 0.0, 1.0))
 		Engine.time_scale = slo
 		AudioServer.playback_speed_scale = clampf(slo * 1.5, 0.5, 1.0)
-	if mc.has("ci") and mc.hold < 0.0 and shots.has(sh) and is_instance_valid(sh.n):
-		var P2: Vector3 = (sh.n as Node3D).global_position
-		var f3 = T.sframe(float(sh.z), float(sh.lat))
-		var TP: Vector3 = (tg0.node as Node3D).global_position if tg0 != null and is_instance_valid(tg0.node) else P2 + f3.fw * 3.0
-		var mid = P2.lerp(TP, 0.5)
-		var want2 = mid + f3.rr * (1.25 * float(mc.side)) + f3.uu * 1.05 - f3.fw * 0.9
-		mc.p = (mc.p as Vector3).lerp(want2, 1.0 - exp(-dt / maxf(0.05, Engine.time_scale) * 7.0))
-		mc.l = (mc.l as Vector3).lerp(mid, 1.0 - exp(-dt / maxf(0.05, Engine.time_scale) * 9.0))
-		mc.pm = P2
-		mc.tp = TP
+		var ct = mc.get("ctg")
+		if ct == null or not is_instance_valid(ct.node):
+			_mc_end()
+			return false
+		var TP: Vector3 = (ct.node as Node3D).global_position
+		var f3 = T.sframe(float(ct.z), float(ct.lat))
+		if mc.hold < 0.0:
+			# Rakete noch unterwegs: vor dem Schiff, leicht seitlich, Blick zurück – die Raketen kommen von hinten an
+			if not (shots.has(sh) and is_instance_valid(sh.n)) or float(mc.t) > 12.0:
+				_mcl("HALT (Zeitlupe) t=%.2f" % float(mc.t))
+				mc.hold = 2.8   # Kamerafahrt ums Schiff nach dem Einschlag (eine Sekunde länger als früher)
+				mc.oa = 0.0
+			var want2 = TP + f3.fw * 4.6 + f3.rr * (1.5 * float(mc.side)) + f3.uu * 0.95
+			var look2 = TP - f3.fw * 2.5 + f3.uu * 0.2
+			if float(mc.ci) <= rdt0 + 0.0001:
+				mc.p = want2
+				mc.l = look2
+			mc.p = (mc.p as Vector3).lerp(want2, 1.0 - exp(-rdt0 * 10.0))
+			mc.l = (mc.l as Vector3).lerp(look2, 1.0 - exp(-rdt0 * 10.0))
+		else:
+			# nach dem Einschlag: langsame Fahrt um das Schiff (von vorn-seitlich nach seitlich-hinten), Blick aufs Schiff
+			mc.hold -= rdt0
+			mc.oa = float(mc.get("oa", 0.0)) + rdt0
+			var a = lerpf(0.35, 1.9, clampf(float(mc.oa) / 2.8, 0.0, 1.0)) * float(mc.side)
+			var off = f3.fw * (cos(a) * 5.0) + f3.rr * (sin(a) * 5.0) + f3.uu * (1.1 + 0.4 * float(mc.oa) / 2.8)
+			mc.p = (mc.p as Vector3).lerp(TP + off, 1.0 - exp(-rdt0 * 6.0))
+			mc.l = (mc.l as Vector3).lerp(TP, 1.0 - exp(-rdt0 * 8.0))
+			if mc.hold <= 0.0:
+				_mc_end()
+				return false
 		mc.up = f3.uu
 		cam.global_position = mc.p
 		cam.look_at(mc.l, mc.up)
-		cam.fov = 62.0
+		cam.fov = 60.0
+		_mcl_tick()
 		return true
 	if mc.hold < 0.0:
 		if shots.has(sh) and is_instance_valid(sh.n) and mc.t < (41.0 if sh.get("mega", false) else 6.0):
