@@ -17861,8 +17861,9 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 			)
 		hud.layer.add_child(c)
 		mc.ret = c
-		mc.rp = want
-		mc.rs = wsz * 1.6
+		var vp0 = get_viewport().get_visible_rect().size
+		mc.rp = Vector2(vp0.x * 0.5, vp0.y * 0.45)   # erscheint in der Bildmitte und fährt dann zum Ziel
+		mc.rs = 104.0 * 1.4
 		mc.rt = Time.get_ticks_msec() / 1000.0
 	# in echter Zeit glätten (beim Standbild läuft die Spielzeit nicht)
 	var now = Time.get_ticks_msec() / 1000.0
@@ -17928,7 +17929,11 @@ func _mc_mark(tg) -> void:
 		sp = c + dv * k
 		sz = 0.0
 		arr = ("<< " if dv.x < -0.5 else (">> " if dv.x > 0.5 else ("^^ " if dv.y < 0.0 else "vv ")))
-	_mc_reticle(sp if inside else Vector2(vp.x * 0.5, vp.y * 0.45), maxf(sz * 1.3, 61.0), inside)   # 13 % kleiner (John)
+	# Zielerfassung erst ab etwa 100 m vor dem Ziel (John): taucht in der Mitte auf, fährt aufs Schiff, rastet ein
+	if dt_m <= 100.0 or mc.has("frz"):
+		_mc_reticle(sp if inside else Vector2(vp.x * 0.5, vp.y * 0.45), maxf(sz * 1.3, 61.0), inside)   # 13 % kleiner (John)
+	elif mc.has("ret") and is_instance_valid(mc.ret):
+		(mc.ret as CanvasItem).visible = false
 	var nm = String(NAMES[int(tg.idx)] if int(tg.idx) < NAMES.size() else "").to_upper()
 	var frz = mc.has("frz")
 	if frz:
