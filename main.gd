@@ -57,7 +57,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1, "tmega": 0, "fblur": 1}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1, "tmega": 0, "fblur": 1, "osong": "", "osongn": ""}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -460,7 +460,8 @@ func _duck(delta: float) -> void:
 		AudioServer.set_bus_volume_db(gi, duck_db)
 	var mi = AudioServer.get_bus_index("Music")
 	if mi >= 0:
-		AudioServer.set_bus_volume_db(mi, duck_db * 0.3 + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 2.0)   # lauter, bei Ansagen nur leicht gedämpft
+		# eigener Song (mit Gesang): bei Ansagen deutlich leiser, damit man die Stimme versteht
+		AudioServer.set_bus_volume_db(mi, duck_db * (0.65 if music_cur == "own" else 0.3) + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 2.0)   # lauter, bei Ansagen nur leicht gedämpft
 
 
 func _sounds() -> void:
@@ -898,6 +899,8 @@ func _post_update(dt: float) -> void:
 		print("POSTSPD state=", state, " cam=", (RP_CAMS[rp.ci][0] if not rp.is_empty() else "-"), " post=", snappedf(post_spd, 0.01), " fov=", snappedf(cam.fov, 0.1))
 	# Einschlag-Kamera (Zeitlupe vor dem Opfer): ein Tick weniger Unschärfe (John: 5–10 %)
 	var ick = 0.9 if (not mc.is_empty() and mc.has("ci")) else 1.0
+	if not mc.is_empty() and mc.has("ci") and float(mc.get("hold", -1.0)) >= 0.0:
+		ick = 0.0   # nach dem Einschlag: keine Zoom-Striche durch Explosion und Qualm
 	_sp(post, "spd", post_spd * ick * (1.0 if q >= 1 else 0.0) if post_spd > 0.002 else 0.0)
 	# Bewegungsunschärfe beim Boost / auf Beschleunigungsstreifen deutlich stärker (zum Rand hin)
 	var bst_t = 0.0
@@ -8623,6 +8626,27 @@ func _menu() -> void:
 		_save_cfg()
 		bfb.text = "Distance blur: " + ("On" if int(cfg.fblur) == 1 else "Off"))
 	sp.add_child(bfb)
+	var bos = _btn(_own_song_lbl())
+	bos.add_theme_font_size_override("font_size", 30)
+	bos.pressed.connect(func():
+		if str(cfg.get("osong", "")) != "":
+			# entfernen: wieder die normalen Renn-Songs
+			for e in ["mp3", "ogg", "wav"]:
+				if FileAccess.file_exists("user://own_song." + e):
+					DirAccess.remove_absolute("user://own_song." + e)
+			cfg.osong = ""
+			cfg.osongn = ""
+			_save_cfg()
+			own_song = null
+			own_song_k = ""
+			music_cur = ""
+			if music_k == "music_race":
+				music_k = "_reload"
+			bos.text = _own_song_lbl()
+			_toast("Own song removed")
+		else:
+			_own_song_pick(bos))
+	sp.add_child(bos)
 	var bml = _btn("Copy missile-cam log")
 	bml.add_theme_font_size_override("font_size", 30)
 	bml.pressed.connect(func():
@@ -9654,9 +9678,13 @@ func _impact_smoke(z: float, lat: float, sc := 1.0) -> void:
 		return
 	_rev(["ismk", z, lat, sc])
 	for i in range(4):
-		var zz = z + i * 1.6
+		# Qualm bleibt hinter dem Treffer zurück (das Schiff fliegt weiter). Früher lag er vor dem Treffer – genau dort, wo die
+		# Einschlag-Kamera vor dem Opfer steht: das Bild wurde schwarz und die Zoom-Unschärfe zog Striche nach außen (John)
+		var zz = z - i * 1.6
 		var sf = T.sframe(zz, lat)
 		var pos: Vector3 = sf.c + sf.uu * 0.45
+		if is_instance_valid(cam) and pos.distance_to(cam.global_position) < 3.5 * maxf(1.0, sc * 0.6):
+			continue   # nie direkt auf die Kamera
 		_smoke_cloud(sf, pos, 0.75 * sc, 1.5, 0.8)
 
 
@@ -21218,6 +21246,87 @@ var music_p: AudioStreamPlayer
 var music_k = ""
 var music_f = 0.0
 var music_cur = ""   # gerade laufender Renn-Song
+var own_song: AudioStream = null
+var own_song_k = ""
+
+
+# Eigener Renn-Song (nur auf diesem Handy, nicht in der APK): Kopie liegt in user://own_song.<ext>
+func _own_song() -> AudioStream:
+	var ext = str(cfg.get("osong", ""))
+	if ext == "":
+		return null
+	if own_song != null and own_song_k == ext:
+		return own_song
+	own_song_k = ext
+	own_song = _song_from_bytes(FileAccess.get_file_as_bytes("user://own_song." + ext), ext)
+	return own_song
+
+
+func _song_from_bytes(b: PackedByteArray, ext: String) -> AudioStream:
+	if b.size() < 64:
+		return null
+	if ext == "ogg":
+		return AudioStreamOggVorbis.load_from_buffer(b)
+	if ext == "wav":
+		return AudioStreamWAV.load_from_buffer(b)
+	var m = AudioStreamMP3.new()
+	m.data = b
+	return m if m.get_length() > 1.0 else null
+
+
+func _song_ext(b: PackedByteArray, path: String) -> String:
+	if b.size() >= 4 and b[0] == 0x4F and b[1] == 0x67 and b[2] == 0x67 and b[3] == 0x53:
+		return "ogg"
+	if b.size() >= 12 and b[0] == 0x52 and b[1] == 0x49 and b[2] == 0x46 and b[3] == 0x46:
+		return "wav"
+	if (b.size() >= 3 and b[0] == 0x49 and b[1] == 0x44 and b[2] == 0x33) or (b.size() >= 2 and b[0] == 0xFF and (b[1] & 0xE0) == 0xE0):
+		return "mp3"
+	var e = path.get_extension().to_lower()
+	return e if e in ["mp3", "ogg", "wav"] else ""
+
+
+func _own_song_pick(btn: Button) -> void:
+	if not DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+		_toast("File picker not available on this device")
+		return
+	DisplayServer.file_dialog_show("Choose your race song", "", "", false, DisplayServer.FILE_DIALOG_MODE_OPEN_FILE,
+		PackedStringArray(["audio/*"]), func(ok: bool, paths: PackedStringArray, _fi: int):
+			if not ok or paths.is_empty():
+				return
+			var b = FileAccess.get_file_as_bytes(paths[0])
+			var ext = _song_ext(b, paths[0])
+			var st = _song_from_bytes(b, ext) if ext != "" else null
+			if st == null:
+				_toast("Couldn't read that file – please use MP3, OGG or WAV")
+				return
+			for e in ["mp3", "ogg", "wav"]:
+				if FileAccess.file_exists("user://own_song." + e):
+					DirAccess.remove_absolute("user://own_song." + e)
+			var f = FileAccess.open("user://own_song." + ext, FileAccess.WRITE)
+			if f == null:
+				_toast("Couldn't save the song")
+				return
+			f.store_buffer(b)
+			f.close()
+			var nm = paths[0].uri_decode().get_file().get_basename()
+			if nm == "" or nm.is_valid_int():
+				nm = "your song"
+			cfg.osong = ext
+			cfg.osongn = nm
+			_save_cfg()
+			own_song = st
+			own_song_k = ext
+			if music_k == "music_race":
+				music_k = "_reload"   # sofort wechseln
+			btn.text = _own_song_lbl()
+			_toast("Race song set: " + nm))
+
+
+func _own_song_lbl() -> String:
+	var n = str(cfg.get("osongn", ""))
+	if str(cfg.get("osong", "")) == "":
+		return "Own race song: choose …"
+	return "Own race song: " + (n.substr(0, 22) + "…" if n.length() > 23 else n) + "  (tap to remove)"
 var music_st = ""
 var music_nx = false
 const MUSIC_RACE = ["music_race", "music_race2", "music_race3", "music_race4"]
@@ -21241,6 +21350,8 @@ func _music_update(dt: float) -> void:
 	if state == "count" and music_st != "count":
 		music_nx = true
 	music_st = state
+	if music_cur == "own" and _own_song() != null:
+		music_nx = false   # eigener Song läuft einfach weiter
 	if want == "music_race" and music_k == "music_race" and (music_nx or not music_p.playing):
 		if not music_p.playing:
 			music_f = 0.0
@@ -21253,6 +21364,12 @@ func _music_update(dt: float) -> void:
 			music_nx = false
 			if music_k == "":
 				music_p.stop()
+			elif music_k == "music_race" and _own_song() != null:
+				music_cur = "own"
+				music_p.stream = _looped(_own_song())   # eigener Song: läuft als Hauptsong in Schleife
+				if OS.get_environment("MUSDBG") != "":
+					print("MUSIC own len=", music_p.stream.get_length())
+				music_p.play()
 			elif music_k == "music_race":
 				var pool = []
 				for k in MUSIC_RACE:
