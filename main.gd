@@ -886,13 +886,15 @@ func _post_update(dt: float) -> void:
 		post_spd = 0.0   # sofort aus, sonst sähe man beim Schnitt auf eine andere Perspektive noch kurz die Linien
 	if OS.get_environment("SPDDBG") != "" and Engine.get_process_frames() % 20 == 0:
 		print("POSTSPD state=", state, " cam=", (RP_CAMS[rp.ci][0] if not rp.is_empty() else "-"), " post=", snappedf(post_spd, 0.01), " fov=", snappedf(cam.fov, 0.1))
-	_sp(post, "spd", post_spd * (1.0 if q >= 1 else 0.0) if post_spd > 0.002 else 0.0)
+	# Einschlag-Kamera (Zeitlupe vor dem Opfer): ein Tick weniger Unschärfe (John: 5–10 %)
+	var ick = 0.9 if (not mc.is_empty() and mc.has("ci")) else 1.0
+	_sp(post, "spd", post_spd * ick * (1.0 if q >= 1 else 0.0) if post_spd > 0.002 else 0.0)
 	# Bewegungsunschärfe beim Boost / auf Beschleunigungsstreifen deutlich stärker (zum Rand hin)
 	var bst_t = 0.0
 	if fwd_cam and not ships.is_empty() and state in ["race", "count"]:
 		bst_t = clampf(float(ships[0].boost), 0.0, 1.0)
 	post_bst += (bst_t - post_bst) * (1.0 - exp(-dt / 0.2))
-	_sp(post, "bst", post_bst * (1.0 if q >= 1 else 0.0) if post_bst > 0.01 else 0.0)
+	_sp(post, "bst", post_bst * ick * (1.0 if q >= 1 else 0.0) if post_bst > 0.01 else 0.0)
 	_dof_race()
 	gl_v = maxf(0.0, gl_v - dt * 1.4)
 	_sp(post, "gl", gl_v)
@@ -6186,6 +6188,11 @@ func _dof_race() -> void:
 		race_ca.dof_blur_far_transition = 60.0
 		race_ca.dof_blur_amount = 0.05
 		race_ca.dof_blur_near_enabled = false
+	var ici = state == "kill" or (not mc.is_empty() and mc.has("ci"))
+	var fdd = 50.0 if ici else 45.0   # Einschlag-Kamera: etwas weniger Unschärfe
+	if race_ca.dof_blur_far_distance != fdd:
+		race_ca.dof_blur_far_distance = fdd
+		race_ca.dof_blur_amount = 0.045 if ici else 0.05
 	var cur = cam.attributes
 	if want and cur != race_ca:
 		cam.attributes = race_ca
@@ -6198,7 +6205,7 @@ func _dof_focus() -> void:
 		return
 	var rp: Vector3 = (party.ren as Node3D).global_position + Vector3.UP * 0.35
 	var fwd: Vector3 = -cam.global_transform.basis.z
-	var fd = maxf(0.5, (rp - cam.global_position).dot(fwd))
+	var fd = maxf(0.5, (rp - cam.global_position).dot(fwd)) * float(party.get("fh", 1.0))
 	(dof_q.material_override as ShaderMaterial).set_shader_parameter("fd", fd)
 
 
@@ -6537,6 +6544,22 @@ func _party_live(dt: float) -> bool:
 		cam.global_position = c + (-f.rr * cos(a) + f.fw * sin(a)) * R + f.uu * (0.8 + 0.12 * sin(t2 * 0.4))
 		cam.look_at(c + f.rr * 0.7 + f.uu * 0.25, Vector3.UP)
 		cam.fov = 55.0
+	# wie ein echter Kameramann (John): nach jedem Schnitt sucht die Schärfe kurz (pumpt um Ren herum und sitzt dann),
+	# der Zoom setzt leicht weit an und zieht weich nach, innerhalb der Einstellung schleicht er langsam heran;
+	# im langen Kreis wird einmal mit kleinem Zoom-Ruck nachgeführt (mit leichtem Überschwingen) und neu scharfgestellt
+	var cut = 0.0 if t < 2.1 else (2.1 if t < 4.7 else 4.7)
+	var st = t - cut
+	var dur = 2.1 if t < 2.1 else (2.6 if t < 4.7 else PARTY_T - 4.7)
+	var zf = (1.0 + 0.06 * exp(-st * 2.2) * cos(st * 3.6)) * (1.0 - 0.05 * smoothstep(0.0, dur, st))
+	var fh = 1.0 + 0.5 * exp(-st * 2.8) * cos(st * 7.0)
+	if t >= 4.7:
+		var rz = clampf((st - 3.0) / 0.8, 0.0, 1.0)
+		var xb = rz - 1.0
+		zf *= 1.0 - 0.07 * (1.0 + 2.70158 * xb * xb * xb + 1.70158 * xb * xb)
+		if st > 3.0:
+			fh += 0.28 * exp(-(st - 3.0) * 3.0) * sin((st - 3.0) * 8.0)
+	cam.fov *= zf
+	party.fh = fh
 	if OS.get_environment("PARTYTOP") != "":
 		cam.global_position = c + f.uu * 7.0 + f.rr * 0.5
 		cam.look_at(c + f.rr * 0.5, f.fw)
@@ -10612,6 +10635,7 @@ func _wound(o: Dictionary, lx: float, lz: float, ly: float, k: float) -> void:
 	var c: Vector3 = bb.get_center()
 	var hs: Vector3 = bb.size * 0.5
 	var q = Vector3((lp.x - c.x) / maxf(hs.x, 0.01), (lp.y - c.y) / maxf(hs.y, 0.01), (lp.z - c.z) / maxf(hs.z, 0.01))
+	q.y = absf(q.y)   # Wunden nie auf der Unterseite (dort sah man nur Flammen, die neben dem Rumpf hochstiegen)
 	var m = maxf(absf(q.x), maxf(absf(q.y), absf(q.z)))
 	if m < 0.01:
 		q = Vector3(0, 1, 0)
@@ -10619,6 +10643,12 @@ func _wound(o: Dictionary, lx: float, lz: float, ly: float, k: float) -> void:
 	q /= m
 	var sp: Vector3 = c + Vector3(q.x * hs.x, q.y * hs.y, q.z * hs.z) * 0.8   # Punkt auf der Hülle
 	var nrm: Vector3 = Vector3(q.x / maxf(hs.x, 0.01), q.y / maxf(hs.y, 0.01), q.z / maxf(hs.z, 0.01)).normalized()
+	# auf die echte Hülle setzen: der Punkt auf der Hüllbox kann bei schlanken Schiffen frei in der Luft liegen
+	# (Flammen schwebten über dem Rumpf, John) – Strahl von außen zur Mitte, erster Treffer auf einem Hüll-Mesh
+	var hit = _hull_snap(nd, c + Vector3(q.x * hs.x, q.y * hs.y, q.z * hs.z) * 1.3, c)
+	if not hit.is_empty():
+		sp = hit.p
+		nrm = hit.n
 	var wl: Array = nd.get_meta("wnd", [])
 	# schon eine Wunde in der Nähe: die wird größer
 	for w in wl:
@@ -10645,12 +10675,13 @@ func _wound(o: Dictionary, lx: float, lz: float, ly: float, k: float) -> void:
 	var smo = _dmg_emitter(fxr.smoke, 18, 1.4, 0.2, 0.8, 25.0, Vector3(0, 0.7, 0), 0.25, 0.6,
 		_ramp([[0.0, Color(0.16, 0.15, 0.15, 0)], [0.1, Color(0.12, 0.11, 0.11, 0.7)], [1.0, Color(0.06, 0.06, 0.07, 0)]], false),
 		_curve([[0.0, 0.4], [1.0, 1.8]]), false, Vector3(0.04, 0.02, 0.04), 0.0)
-	var fir = _dmg_emitter(fxr.fire, 14, 0.35, 0.3, 1.0, 25.0, Vector3(0, 1.5, 0), 0.07, 0.16,
+	var fir = _dmg_emitter(fxr.fire, 16, 0.3, 0.05, 0.35, 20.0, Vector3(0, 1.1, 0), 0.07, 0.16,
 		_ramp([[0.0, Color(1.8, 1.2, 0.5, 1)], [0.3, Color(1.4, 0.5, 0.1, 0.8)], [1.0, Color(0.3, 0.06, 0.02, 0)]]),
 		_curve([[0.0, 0.6], [0.3, 1.0], [1.0, 0.3]]), false, Vector3(0.03, 0.02, 0.03), 0.0)
 	for e in [spk, smo, fir]:
 		nd.add_child(e)
-		e.transform = Transform3D(B, sp + nrm * 0.03)
+		# Funken sprühen aus der Wunde heraus, Feuer und Qualm steigen nach oben – direkt an der Hülle
+		e.transform = Transform3D(B if e == spk else Basis(), sp + nrm * (0.03 if e == spk else 0.005))
 	spk.emitting = true
 	var w = {"sp": spk, "sm": smo, "fi": fir, "sev": k, "p": sp}
 	wl.append(w)
@@ -10658,6 +10689,38 @@ func _wound(o: Dictionary, lx: float, lz: float, ly: float, k: float) -> void:
 	_wound_apply(nd)
 
 
+
+
+var hull_tri = {}   # Mesh → TriangleMesh (für _hull_snap)
+
+
+func _hull_snap(nd: Node3D, a: Vector3, b: Vector3) -> Dictionary:
+	var best = {}
+	var bd = INF
+	var ndi: Transform3D = nd.global_transform.affine_inverse()
+	for mi in nd.get_meta("hull", []):
+		if not is_instance_valid(mi) or (mi as MeshInstance3D).mesh == null:
+			continue
+		var m3 := mi as MeshInstance3D
+		if not hull_tri.has(m3.mesh):
+			hull_tri[m3.mesh] = m3.mesh.generate_triangle_mesh()
+		var tm: TriangleMesh = hull_tri[m3.mesh]
+		if tm == null:
+			continue
+		var X: Transform3D = ndi * m3.global_transform   # Mesh → Schiff
+		var Xi = X.affine_inverse()
+		var r: Dictionary = tm.intersect_segment(Xi * a, Xi * b)
+		if r.is_empty():
+			continue
+		var hp: Vector3 = X * (r.position as Vector3)
+		var d = hp.distance_to(a)
+		if d < bd:
+			bd = d
+			var hn: Vector3 = (X.basis.inverse().transposed() * (r.normal as Vector3)).normalized()
+			if hn.dot(a - b) < 0.0:
+				hn = -hn
+			best = {"p": hp + hn * 0.01, "n": hn}
+	return best
 
 
 # Wunden je Bild: Funken sprühen stoßweise, ab mehr Schaden Qualm, bei schwerem Schaden Feuer
