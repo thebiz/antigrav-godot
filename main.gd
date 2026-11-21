@@ -14551,8 +14551,11 @@ func _kc_cam_imp() -> bool:
 		if o.idx != kc.victim and (o.node as Node3D).visible:
 			var op: Vector3 = (o.node as Node3D).global_position
 			var seg: Vector3 = ta - ro
-			var tq = clampf((op - ro).dot(seg) / maxf(0.001, seg.length_squared()), 0.0, 1.0)
-			if op.distance_to(ro) < 7.0 or op.distance_to(ro + seg * tq) < 1.1:
+			var tq = (op - ro).dot(seg) / maxf(0.001, seg.length_squared())
+			# nur wenn es die Kamera fast berührt oder wirklich zwischen Kamera und Ziel steht – wer dahinter fährt
+			# (z. B. du, der gerade geschossen hat), bleibt im Bild
+			var blocks = tq > 0.0 and tq < 0.85 and op.distance_to(ro + seg * tq) < 1.1
+			if op.distance_to(ro) < 2.5 or blocks:
 				(o.node as Node3D).visible = false
 	cam.global_position = ro
 	if (ta - ro).length() > 0.01:
@@ -14620,6 +14623,8 @@ func _kc_cam_imp() -> bool:
 				print("  RKSCR scr=", cam.unproject_position(fw3.c + fw3.uu * 0.25), " own=", w[2])
 
 		print("KCVIS pass=", kc.pass, " rel=", snappedf(rel, 0.01), " fb=", nfb, "/", nfk, " smk=", nsm, " rk=", nsr, " near=", vis)
+		var p0n: Node3D = ships[0].node
+		print("KCME pass=", kc.pass, " rel=", snappedf(rel, 0.01), " vis=", p0n.is_visible_in_tree(), " pos=", p0n.global_position, " infr=", cam.is_position_in_frustum(p0n.global_position), " camd=", snappedf(cam.global_position.distance_to(p0n.global_position), 0.1), " vic=", (ships[kc.victim].node as Node3D).global_position, " sc=", p0n.scale)
 		print("KCIMP pass=", kc.pass, " rel=", snappedf(rel, 0.01), " camfw·toImpact=", snappedf((-cam.global_transform.basis.z).dot((I - ro).normalized()), 0.02), " dist=", snappedf(ro.distance_to(I), 0.1), " tight=", tight, " pipe=", pf)
 	return true
 
@@ -14679,7 +14684,7 @@ func _kc_cam() -> bool:
 			_rset("qs2", (float(f0q.q2[1]) if f0q.get("q2") != null else 0.0) * (1.0 - qf))
 		# andere Schiffe, die dicht an der Kamera vorbeirasen (meist du selbst), ausblenden – sonst füllt ein greller Rumpf das Bild
 		for o in ships:
-			if o.idx != kc.victim and (o.node as Node3D).visible and (o.node as Node3D).global_position.distance_to(cam.global_position) < 7.0:
+			if o.idx != kc.victim and (o.node as Node3D).visible and (o.node as Node3D).global_position.distance_to(cam.global_position) < 2.5:
 				(o.node as Node3D).visible = false
 		_kc_shot(rel)
 		return true
@@ -17749,6 +17754,8 @@ func _mc_end() -> void:
 		Engine.time_scale = float(mc.get("frz_ts", 1.0))
 	if mc.has("ret") and is_instance_valid(mc.ret):
 		(mc.ret as Node).queue_free()
+	if mc.has("card") and is_instance_valid(mc.card):
+		(mc.card as Node).queue_free()
 	_mcl("ENDE state=%s kc=%s" % [str(state), str(not kc.is_empty())])
 	_mcl_save()
 	_heat_off()
@@ -17922,6 +17929,76 @@ func _mc_mark(tg) -> void:
 const MC_LOCK_T = 0.95   # echte Sekunden Standbild
 
 
+# Zielkarte beim Erfassen: links außen Funkbild des Gegners mit Name und Daten, grün wie die Zielerfassung
+func _mc_card(tg, dz: float) -> void:
+	if tg == null or int(tg.idx) <= 0 or int(tg.idx) >= CHARS.size():
+		return
+	var ch: Array = CHARS[int(tg.idx)]
+	var vs = get_viewport().get_visible_rect().size
+	var grn = Color(0.35, 1.0, 0.45)
+	var box = Control.new()
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.size = Vector2(250, 372)
+	box.position = Vector2(-270, vs.y * 0.27)
+	var bg = Panel.new()
+	var st = StyleBoxFlat.new()
+	st.bg_color = Color(0.0, 0.05, 0.02, 0.78)
+	st.border_color = Color(grn, 0.85)
+	st.set_border_width_all(2)
+	st.set_corner_radius_all(6)
+	bg.add_theme_stylebox_override("panel", st)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.size = box.size
+	box.add_child(bg)
+	var face = TextureRect.new()
+	face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	face.clip_contents = true
+	face.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	face.texture = _cm_img("%s_0" % ch[3])
+	face.position = Vector2(10, 10)
+	face.size = Vector2(230, 200)
+	# grünes Überwachungsbild: Graustufen, grün eingefärbt, Zeilen, Rauschen
+	face.material = _shader_mat("""
+shader_type canvas_item;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+void fragment(){
+	vec3 c=texture(TEXTURE,UV).rgb;
+	float l=dot(c,vec3(.3,.55,.15));
+	vec3 g=vec3(.35,1.,.45)*(.15+l*1.1);
+	g*=.8+.2*sin(UV.y*300.+TIME*12.);
+	g+=(h(UV*vec2(150.,170.)+floor(TIME*24.))-.5)*.12;
+	COLOR=vec4(g,1.);
+}""")
+	box.add_child(face)
+	if mc_font == null:
+		mc_font = SystemFont.new()
+		mc_font.font_names = PackedStringArray(["Droid Sans Mono", "Roboto Mono", "monospace", "DejaVu Sans Mono", "Courier New"])
+	var info = Label.new()
+	info.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	info.add_theme_font_override("font", mc_font)
+	info.add_theme_font_size_override("font_size", 21)
+	info.add_theme_color_override("font_color", grn)
+	info.add_theme_constant_override("line_spacing", -3)
+	info.position = Vector2(12, 216)
+	info.size = Vector2(226, 110)
+	info.text = "%s\n%s\nENERGY %3d %%\nDIST   %4.1f m" % [str(ch[0]), str(ch[1]), int(round(float(tg.en) * 100.0)), dz]
+	box.add_child(info)
+	var lk = Label.new()
+	lk.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lk.add_theme_font_override("font", mc_font)
+	lk.add_theme_font_size_override("font_size", 22)
+	lk.add_theme_color_override("font_color", Color(0.75, 1.0, 0.8))
+	lk.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lk.position = Vector2(0, 330)
+	lk.size = Vector2(250, 30)
+	lk.text = "[ TARGET LOCKED ]"
+	box.add_child(lk)
+	box.set_meta("lk", lk)
+	hud.layer.add_child(box)
+	mc.card = box
+
+
 func _mc_lock(sh: Dictionary) -> void:
 	var tg = sh.get("tg")
 	if mc.has("frz_done") or tg == null or tg.out:
@@ -17941,10 +18018,16 @@ func _mc_lock(sh: Dictionary) -> void:
 		mc.frz_ts = Engine.time_scale
 		Engine.time_scale = 0.0001
 		_mcl("ERKANNT abstand=%.1fm" % dz)
+		_mc_card(tg, dz)
 		_snd("lock", 2.0, 1.25)   # Erkennungs-Piep
 	var el = Time.get_ticks_msec() / 1000.0 - float(mc.frz)
 	# zweimal aufblinken: aus – an – aus – an, dann stehen lassen
 	mc.hoff = (el > 0.18 and el < 0.32) or (el > 0.46 and el < 0.6)
+	if mc.has("card") and is_instance_valid(mc.card):
+		var cd: Control = mc.card
+		cd.position.x = lerpf(-cd.size.x - 20.0, 16.0, clampf(el / 0.18, 0.0, 1.0))   # fährt von links herein
+		var lk: Label = cd.get_meta("lk")
+		lk.modulate.a = 0.25 if mc.hoff else 1.0
 	if OS.get_environment("FRZSHOT") != "":
 		for q in [[0.1, "a"], [0.3, "b"]]:
 			if el > q[0] and not mc.has("fs" + q[1]):
