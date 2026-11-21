@@ -5164,6 +5164,7 @@ func _debris_sparks(d: Dictionary, n: int) -> void:
 # ---------------------------------------------------------------- Gegner dicht hinter dir: Punkte unten am Rand
 # Seitliche Lage = wo der Gegner auf der Fahrbahn ist (relativ zu dir); je näher, desto kräftiger.
 func _rear_draw(c: Control) -> void:
+	return   # abgeschaltet (John): keine Punkte mehr für Gegner hinter dir
 	if ships.is_empty() or not (state == "race" or state == "count"):
 		return
 	var rng = float(fx.ship.get("rdots", 15.0))
@@ -5210,11 +5211,11 @@ var neon_font: Font = null
 func _tribunes() -> void:
 	if not mats.has("tconc"):
 		var m = StandardMaterial3D.new()
-		m.albedo_color = Color(0.42, 0.43, 0.48)
+		m.albedo_color = Color(0.13, 0.13, 0.15)   # dunkel wie die leere Tribüne (John: das Grau gefiel nicht)
 		m.roughness = 0.75
 		m.metallic = 0.1
 		m.emission_enabled = true
-		m.emission = Color(0.12, 0.14, 0.2) if not _noir() else Color(0.14, 0.14, 0.15)   # nachts angestrahlt (bläulich)
+		m.emission = Color(0.035, 0.04, 0.06) if not _noir() else Color(0.04, 0.04, 0.045)   # nachts nur schwach angestrahlt
 		mats["tconc"] = m
 		var m2 = StandardMaterial3D.new()
 		m2.albedo_color = Color(0.1, 0.1, 0.12)
@@ -5362,7 +5363,7 @@ func _crowd(z0: float, z1: float, sd: float, L0: float) -> void:
 	if crowd_mat == null:
 		crowd_mat = _shader_mat(CROWD_CODE)
 		crowd_mat.set_shader_parameter("tx", load("res://art/crowd.png"))
-		crowd_mat.set_shader_parameter("k", 0.8 if _noir() else 1.15)
+		crowd_mat.set_shader_parameter("k", 0.7 if _noir() else 0.9)   # Publikum etwas dunkler – die volle Tribüne wirkte sonst grau
 	var q = QuadMesh.new()
 	q.size = Vector2(0.3, 0.45)   # Mensch ≈ 1,8 m
 	q.center_offset = Vector3(0, 0.225, 0)
@@ -7086,7 +7087,9 @@ void fragment(){
 	float dia=1.+jd*1.1*pow(.5+.5*cos(ph),10.)*(1.-v);
 	float fl=.86+.14*sin(TIME*83.+v*11.);
 	vec3 c=mix(jc,jc2,core*core);
-	ALBEDO=c*(core*1.7+.12)*fade*dia*fl*jk;
+	// weich auslaufende Seiten (John: wirkte wie mit der Schere geschnitten): zum Rand hin sanft ausblenden
+	float edge=smoothstep(0.,.6,fr);
+	ALBEDO=c*(core*1.7+.12*edge)*edge*fade*dia*fl*jk;
 }"""
 # Düsenglühen: weicher Lichtfleck direkt an der Düse (sieht man von hinten immer)
 const JETGLOW_CODE = """
