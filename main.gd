@@ -779,8 +779,9 @@ void fragment(){
 		// Raketenkamera-Wärmebild: die ganze Umgebung dunkel und kalt (gedämpftes Grau), nichts leuchtet farbig.
 		// Grell weiß sind nur die gegnerischen Schiffe – die bleiben als reines Weiß stehen (_heat_on).
 		float L=clamp(dot(col,vec3(.3,.55,.15)),0.,1.);
-		float gy=pow(L,.9)*.3;
-		vec3 th=vec3(gy*.9,gy*.95,gy*1.05);
+		// Nachtsicht-Grün (John): wie ein Restlichtverstärker, etwas heller und kontrastreicher als vorher
+		float gy=pow(L,.8)*.5;
+		vec3 th=vec3(.06,.22,.1)*smoothstep(0.,.08,gy)+vec3(gy*.35,gy*1.05,gy*.45);
 		// Kennfarbe Magenta der gegnerischen Schiffe – nur innerhalb ihrer Bildbereiche gezählt (sonst würde rosa Neon mitglühen)
 		vec2 su=SCREEN_UV;
 		float inr=0.;
@@ -17836,9 +17837,11 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 			var h = float(mc.rs) * 0.5
 			var lk = float(mc.get("rlk", 0.0))
 			var blink_off = mc.get("hoff", false)
-			var col = Color(0.35, 1.0, 0.45, 0.55 + 0.45 * lk)
+			# hell (fast weiß-grün) mit dunklem Rand – auf dem grünen Nachtsichtbild sonst unsichtbar
+			var col = Color(0.8, 1.0, 0.82, 0.7 + 0.3 * lk)
 			if blink_off:
 				col.a = 0.2
+			var shd = Color(0.0, 0.08, 0.02, col.a * 0.85)
 			var w = 2.0 + 1.5 * lk
 			var ang = float(mc.get("rang", 0.0)) * (1.0 - lk)
 			var e = h * 0.38
@@ -17847,7 +17850,9 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 				var cx = Vector2(cos(a + PI * 0.25), sin(a + PI * 0.25)) * h * 1.414
 				var d1 = Vector2(cos(a + PI), sin(a + PI)) * e
 				var d2 = Vector2(cos(a - PI * 0.5), sin(a - PI * 0.5)) * e
-				c.draw_line(p + cx, p + cx + d1.rotated(PI * 0.5 * 0.0), col, w)
+				c.draw_line(p + cx, p + cx + d1, shd, w + 3.0)
+				c.draw_line(p + cx, p + cx + d2, shd, w + 3.0)
+				c.draw_line(p + cx, p + cx + d1, col, w)
 				c.draw_line(p + cx, p + cx + d2, col, w)
 			# Fadenkreuz in der Mitte: beim Suchen offen, eingerastet ein kleiner Punkt
 			var g = 8.0
@@ -17857,6 +17862,7 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 				c.draw_line(p + Vector2(0, -g * 2.2), p + Vector2(0, -g), col, 2.0)
 				c.draw_line(p + Vector2(0, g), p + Vector2(0, g * 2.2), col, 2.0)
 			else:
+				c.draw_circle(p, 4.5, shd)
 				c.draw_circle(p, 3.0, col)
 			)
 		hud.layer.add_child(c)
@@ -17879,6 +17885,8 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 		mc.rang = fmod(float(mc.get("rang", 0.0)) + rdt * 1.2, TAU)
 	(mc.ret as Control).visible = true
 	(mc.ret as Control).queue_redraw()
+	if OS.get_environment("KCDBG") != "":
+		print("RET rp=", mc.rp, " rs=", snappedf(float(mc.rs), 0.1), " lk=", snappedf(float(mc.rlk), 0.01), " vis=", (mc.ret as Control).is_visible_in_tree(), " rect=", (mc.ret as Control).get_global_rect())
 
 
 func _mc_mark(tg) -> void:
@@ -17955,7 +17963,7 @@ func _mc_mark(tg) -> void:
 
 # „Ziel erkannt“: kurz vor dem Einschlag friert das Bild ein, das Zielschiff blinkt zweimal auf,
 # die Radarschrift meldet TARGET LOCKED – dann läuft alles weiter, Einschlag, Kamerawechsel
-const MC_LOCK_T = 0.95   # echte Sekunden Standbild
+const MC_LOCK_T = 0.6   # echte Sekunden Standbild (kurz, John)
 
 
 # Zielkarte beim Erfassen: links außen Funkbild des Gegners mit Name und Daten, grün wie die Zielerfassung
@@ -18024,7 +18032,7 @@ void fragment(){
 	lk.text = "[ TARGET LOCKED ]"
 	box.add_child(lk)
 	box.set_meta("lk", lk)
-	box.scale = Vector2(0.9, 0.9)   # John: 10 % kleiner
+	box.scale = Vector2(0.78, 0.78)   # John: kleiner
 	hud.layer.add_child(box)
 	mc.card = box
 
@@ -18052,18 +18060,19 @@ func _mc_lock(sh: Dictionary) -> void:
 		_snd("lock", 2.0, 1.25)   # Erkennungs-Piep
 	var el = Time.get_ticks_msec() / 1000.0 - float(mc.frz)
 	# zweimal aufblinken: aus – an – aus – an, dann stehen lassen
-	mc.hoff = (el > 0.18 and el < 0.32) or (el > 0.46 and el < 0.6)
+	mc.hoff = (el < 0.1) or (el > 0.2 and el < 0.3)   # blinkt sofort beim Einfrieren zweimal
 	if mc.has("card") and is_instance_valid(mc.card):
 		var cd: Control = mc.card
-		cd.position.x = lerpf(-cd.size.x - 20.0, 16.0, clampf(el / 0.18, 0.0, 1.0))   # fährt von links herein
+		cd.position.x = lerpf(-cd.size.x - 20.0, 16.0, clampf(el / 0.12, 0.0, 1.0))   # fährt von links herein
 		var lk: Label = cd.get_meta("lk")
 		lk.modulate.a = 0.25 if mc.hoff else 1.0
 	if OS.get_environment("FRZSHOT") != "":
-		for q in [[0.1, "a"], [0.3, "b"]]:
+		for q in [[0.15, "a"], [0.45, "b"]]:
 			if el > q[0] and not mc.has("fs" + q[1]):
 				mc["fs" + q[1]] = true
-				get_viewport().get_texture().get_image().save_png(OS.get_environment("FRZSHOT") + q[1] + ".png")
-	if el >= MC_LOCK_T:
+				var fpath = OS.get_environment("FRZSHOT") + q[1] + ".png"
+				RenderingServer.frame_post_draw.connect(func(): get_viewport().get_texture().get_image().save_png(fpath), CONNECT_ONE_SHOT)
+	if el >= (float(OS.get_environment("MCLOCKT")) if OS.get_environment("MCLOCKT") != "" else MC_LOCK_T):
 		mc.erase("frz")
 		mc.erase("hoff")
 		mc.frz_done = true
