@@ -57,7 +57,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1, "tmega": 0}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1, "tmega": 0, "fblur": 1}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -703,6 +703,7 @@ uniform float shp=.6;
 uniform float grn=.035;
 uniform int vm=0;   // Cockpit-Sicht: 0 normal, 1 Infrarot, 2 Gitter
 uniform float bo=0.;   // Blackout: alles schwarz, nur Neon leuchtet weiter
+uniform float bst=0.;  // Boost: zusätzliche Bewegungsunschärfe
 uniform vec4 hr0=vec4(0.);uniform vec4 hr1=vec4(0.);uniform vec4 hr2=vec4(0.);   // Wärmebild: Bildbereiche der gegnerischen Schiffe
 uniform vec4 hr3=vec4(0.);   // Wärmebild: Bildbereich der eigenen Rakete (Düsen glühen weiß)
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
@@ -730,7 +731,7 @@ void fragment(){
 	// Geschwindigkeit: Bewegungsunschärfe entlang der Fluchtlinien – Bildmitte (Schiff, Strecke voraus) bleibt scharf,
 	// zum Rand hin wird immer stärker verwischt. e = 0 in der Mitte … 1 am Bildrand (Hoch- und Querformat gleich).
 	vec2 cd=uv-vec2(.5,.47);float e=smoothstep(.4,.98,length(cd*vec2(2.,1.6)));
-	float mb=spd*e*.11;
+	float mb=spd*e*.11+bst*smoothstep(.25,.95,length(cd*vec2(2.,1.6)))*.13;
 	float ca=.006*gl+.01*abs(gs);
 	vec3 col=vec3(0.);
 	vec3 c0=texture(scr,uv).rgb;
@@ -886,6 +887,13 @@ func _post_update(dt: float) -> void:
 	if OS.get_environment("SPDDBG") != "" and Engine.get_process_frames() % 20 == 0:
 		print("POSTSPD state=", state, " cam=", (RP_CAMS[rp.ci][0] if not rp.is_empty() else "-"), " post=", snappedf(post_spd, 0.01), " fov=", snappedf(cam.fov, 0.1))
 	_sp(post, "spd", post_spd * (1.0 if q >= 1 else 0.0) if post_spd > 0.002 else 0.0)
+	# Bewegungsunschärfe beim Boost / auf Beschleunigungsstreifen deutlich stärker (zum Rand hin)
+	var bst_t = 0.0
+	if fwd_cam and not ships.is_empty() and state in ["race", "count"]:
+		bst_t = clampf(float(ships[0].boost), 0.0, 1.0)
+	post_bst += (bst_t - post_bst) * (1.0 - exp(-dt / 0.2))
+	_sp(post, "bst", post_bst * (1.0 if q >= 1 else 0.0) if post_bst > 0.01 else 0.0)
+	_dof_race()
 	gl_v = maxf(0.0, gl_v - dt * 1.4)
 	_sp(post, "gl", gl_v)
 	# stärkste aktive Gravitationsbombe
@@ -927,6 +935,7 @@ func _post_update(dt: float) -> void:
 
 
 var post_spd = 0.0
+var post_bst = 0.0
 
 
 var gl_v = 0.0
@@ -6154,6 +6163,36 @@ func _dof_on(on: bool) -> void:
 	dof_q.position = Vector3(0, 0, -1.0)
 
 
+func _dof_set(fd: float, fr: float, sp: float, mx: float) -> void:
+	var m := dof_q.material_override as ShaderMaterial
+	m.set_shader_parameter("fd", fd)
+	m.set_shader_parameter("fr", fr)
+	m.set_shader_parameter("sp", sp)
+	m.set_shader_parameter("mx", mx)
+
+
+# leichte Unschärfe in der Ferne im Rennen (John): Fahrbahn und Gegner vor dir bleiben scharf, erst Tribünen,
+# Häuser und Skyline verschwimmen sanft. Godots eigene Schärfentiefe der Kamera (läuft auf dem Handy im Mobile-Renderer),
+# in den Einstellungen abschaltbar.
+var race_ca: CameraAttributesPractical
+
+
+func _dof_race() -> void:
+	var want = state in ["race", "count", "replay", "kill"] and int(cfg.get("fblur", 1)) == 1 and party.is_empty() and OS.get_environment("NODOF") == ""
+	if race_ca == null:
+		race_ca = CameraAttributesPractical.new()
+		race_ca.dof_blur_far_enabled = true
+		race_ca.dof_blur_far_distance = 45.0
+		race_ca.dof_blur_far_transition = 60.0
+		race_ca.dof_blur_amount = 0.05
+		race_ca.dof_blur_near_enabled = false
+	var cur = cam.attributes
+	if want and cur != race_ca:
+		cam.attributes = race_ca
+	elif not want and cur == race_ca:
+		cam.attributes = null
+
+
 func _dof_focus() -> void:
 	if dof_q == null or not is_instance_valid(dof_q) or party.is_empty() or not is_instance_valid(party.get("ren")):
 		return
@@ -6395,7 +6434,9 @@ func _party_live(dt: float) -> bool:
 		return false
 	var t: float = fin.get("pt", 0.0)
 	if OS.get_environment("NODOF") == "":
-		_dof_on(true)
+		if dof_q == null or not is_instance_valid(dof_q):
+			_dof_on(true)
+			_dof_set(4.0, 0.45, 1.0, 0.016)
 		_dof_focus()
 	# Hostessen nach dem ersten Bild mit Bewegung auf den Boden stellen (tiefster Fußknochen + Sohle)
 	if t > 0.25 and not party.has("grounded"):
@@ -8540,6 +8581,13 @@ func _menu() -> void:
 		_save_cfg()
 		btm.text = "Test: Mega homing always: " + ("On" if int(cfg.tmega) == 1 else "Off"))
 	sp.add_child(btm)
+	var bfb = _btn("Distance blur: " + ("On" if int(cfg.get("fblur", 1)) == 1 else "Off"))
+	bfb.add_theme_font_size_override("font_size", 30)
+	bfb.pressed.connect(func():
+		cfg.fblur = 1 - int(cfg.get("fblur", 1))
+		_save_cfg()
+		bfb.text = "Distance blur: " + ("On" if int(cfg.fblur) == 1 else "Off"))
+	sp.add_child(bfb)
 	var bml = _btn("Copy missile-cam log")
 	bml.add_theme_font_size_override("font_size", 30)
 	bml.pressed.connect(func():
