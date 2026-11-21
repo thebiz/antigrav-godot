@@ -18196,7 +18196,7 @@ func _mc_cam(dt: float) -> bool:
 			mc.hold -= rdt0
 			mc.oa = float(mc.get("oa", 0.0)) + rdt0
 			var a = lerpf(0.35, 1.9, clampf(float(mc.oa) / 2.8, 0.0, 1.0)) * float(mc.side)
-			var off = f3.fw * (cos(a) * 5.0) + f3.rr * (sin(a) * 5.0) + f3.uu * (1.1 + 0.4 * float(mc.oa) / 2.8)
+			var off = f3.fw * (cos(a) * 9.0) + f3.rr * (sin(a) * 9.0) + f3.uu * (1.8 + 0.6 * float(mc.oa) / 2.8)   # weiter weg: die (jetzt riesige) Explosion passt ins Bild
 			mc.p = (mc.p as Vector3).lerp(TP + off, 1.0 - exp(-rdt0 * 6.0))
 			mc.l = (mc.l as Vector3).lerp(TP, 1.0 - exp(-rdt0 * 8.0))
 			if mc.hold <= 0.0:
