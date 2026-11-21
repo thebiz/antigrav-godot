@@ -6151,7 +6151,7 @@ func _party_start() -> void:
 			var hp: Vector3 = at.call(0.25 + float(hs[1]), -0.52)
 			var hn = _party_fig(hs[0], "idle", hp, hp - f.rr * 2.0 + f.fw * (0.3 - float(hs[1])), Color(1, 1, 1), 0.96, randf() * 2.0)
 			party.get_or_add("hosts", []).append(hn)
-	if ResourceLoader.exists("res://win/wreath.glb"):
+	if false and ResourceLoader.exists("res://win/wreath.glb"):   # Siegerkranz entfernt (John)
 		var wr: Node3D = load("res://win/wreath.glb").instantiate()
 		root.add_child(wr)
 		for mi in wr.find_children("*", "MeshInstance3D", true, false):
