@@ -9821,7 +9821,7 @@ func _kc_passes(t0: float, vi: int, sid: int) -> Array:
 
 # Rauchfahne der Raketen in der Einschlag-Wiederholung: graue Wölkchen an den Stellen, an denen dieselbe
 # Rakete in den Aufnahmebildern davor war – folgt also der echten Flugbahn, wird nach hinten breiter und blasser
-const SMOKE_N = 22
+const SMOKE_N = 30
 func _rp_smoke(F: Array, W: Array) -> void:
 	var on = state == "kill" and kc.get("ir", false)
 	var n = W.size() * SMOKE_N if on else 0
@@ -9843,36 +9843,43 @@ func _rp_smoke(F: Array, W: Array) -> void:
 		return mi)
 	if n == 0:
 		return
-	var ref = float(ships[kc.victim].z)
 	var i0: int = rp.i
 	for j in range(W.size()):
 		var wv: Array = W[j]
 		var key = int(wv[7]) * 16 + int(wv[5]) if wv.size() >= 8 else -1
+		# Tempo der Rakete aus dem Aufnahmebild davor (1/30 s)
+		var vs = 40.0
+		if key >= 0 and i0 >= 1 and i0 < F.size():
+			for w in F[i0 - 1].w:
+				if (w as Array).size() >= 8 and int(w[7]) * 16 + int(w[5]) == key:
+					var dzv = absf(float(wv[0]) - float(w[0]))
+					if dzv > 0.01 and dzv < 30.0:
+						vs = dzv * 30.0
+					break
+		var dir = -1.0 if (wv.size() >= 4 and float(wv[3]) < 0.0) else 1.0
+		var st = float(wv[6]) if wv.size() >= 7 else 9.0
 		for k in range(SMOKE_N):
 			var mi: MeshInstance3D = pz[j * SMOKE_N + k]
-			var fi = i0 - (k + 1)   # jedes Aufnahmebild (1/30 s) ein Wölkchen
-			var hp = null
-			if key >= 0 and fi >= 0 and fi < F.size():
-				for w in F[fi].w:
-					if (w as Array).size() >= 8 and int(w[7]) * 16 + int(w[5]) == key:
-						hp = w
-						break
-			if hp == null or float(hp[6]) < RK_DROP + 0.05:
+			# dichte Fahne: Wölkchen in festen Abständen hinter der Rakete, nach hinten immer weiter auseinander
+			var d = 0.32 * (k + 1) + 0.016 * (k + 1) * (k + 1)
+			var tb = st - d / maxf(5.0, vs)   # so lange ist es her, dass die Rakete dort war
+			if tb < RK_DROP + 0.05:
 				mi.visible = false
 				continue
-			var hz = float(hp[0])
-			hz -= T.LAP * round((hz - ref) / T.LAP)
-			var hf = T.sframe(hz, float(hp[1]))
+			mi.visible = true
 			var age = float(k + 1) / SMOKE_N
-			# an der Stelle, an der die Rakete damals war – mit ihrem Zopf-Versatz: bei der Mega dreht sich die Fahne als Spirale
-			var hwo: Vector3 = _braid_off(hf, int(hp[4]), int(hp[5]), float(hp[6])) if (hp as Array).size() >= 7 else Vector3.ZERO
-			mi.global_position = hf.c + hf.uu * (0.25 + 0.2 * age) + hwo
-			var sz = (0.3 + 1.2 * age) * sqrt(maxf(0.05, float(fx.rak.get("smoke", 1.2))))
+			var hf = T.sframe(float(wv[0]) - dir * d, float(wv[1]))
+			# mit dem Zopf-Versatz von damals: bei der Mega dreht sich die Fahne als Spirale
+			var hwo: Vector3 = _braid_off(hf, int(wv[4]), int(wv[5]), tb) if wv.size() >= 7 else Vector3.ZERO
+			mi.global_position = hf.c + hf.uu * (0.25 + 0.15 * age) + hwo
+			var sz = (0.12 + 0.7 * age) * sqrt(maxf(0.05, float(fx.rak.get("smoke", 1.2))))
 			mi.scale = Vector3(sz, sz, sz)
-			# frisch hinter der Düse noch vom Feuer angeleuchtet, dann hellgrau und durchsichtiger
-			var warm = clampf(1.0 - age * 4.0, 0.0, 1.0)
-			var gr = 0.85 - 0.25 * age
-			((mi.material_override) as StandardMaterial3D).albedo_color = Color(gr + 0.6 * warm, gr + 0.2 * warm, gr * 1.03, 0.75 * (1.0 - age) * minf(1.0, float(fx.rak.get("smoke", 1.2))))
+			# frisch hinter der Düse noch vom Feuer angeleuchtet, dann grau und durchsichtiger
+			var warm = clampf(1.0 - age * 5.0, 0.0, 1.0)
+			var gr = 0.62 - 0.12 * age
+			# direkt vor der Kamera ausblenden (Blick von hinten auf die Rakete): sonst steht man mitten im Qualm
+			var cdf = smoothstep(1.2, 4.5, mi.global_position.distance_to(cam.global_position))
+			((mi.material_override) as StandardMaterial3D).albedo_color = Color(gr + 0.6 * warm, gr + 0.25 * warm, gr * 1.04, 0.5 * (1.0 - age * 0.85) * cdf * minf(1.0, float(fx.rak.get("smoke", 1.2))))
 
 
 func _kc_cap(pos: Vector3, r: float, fr := 0.3) -> float:
@@ -10634,16 +10641,25 @@ func _rocket_model(sc: float) -> Node3D:
 
 
 # Raketenflamme – überall gleich (Rennen, Raketenkamera, Zeitlupe): Kern-Radius, Kern-Länge, Mantel ×Radius, ×Länge, Glutball
-const RK_FL = [0.04, 0.42, 2.2, 1.7, 0.5]
+const RK_FL = [0.022, 0.55, 1.9, 1.35, 0.26]   # schlank wie ein echter Raketenstrahl (Kegel, zur Spitze dünn)
+
+
+# Flammenkegel: an der Düse am breitesten, nach hinten spitz zulaufend (oben = Düse)
+func _rk_cone(r: float, h: float) -> CylinderMesh:
+	var c = CylinderMesh.new()
+	c.top_radius = r
+	c.bottom_radius = r * 0.12
+	c.height = h
+	c.radial_segments = 10
+	c.rings = 1
+	return c
 
 
 func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0, cl := false, sp := false) -> void:
 	var X: Dictionary = fx.rak
-	var cap = CapsuleMesh.new()   # Plasma-Flamme am Heck (glüht, flackert)
-	cap.radius = RK_FL[0] * float(X.size)
-	cap.height = RK_FL[1] * float(X.size)
+	var cap = _rk_cone(RK_FL[0] * float(X.size), RK_FL[1] * float(X.size))   # Plasma-Flamme am Heck (glüht, flackert)
 	# Flamme immer in Feuerfarben (unabhängig vom Farbregler der Rakete – sonst wird sie blau und unsichtbar)
-	var mi = _glow_node(cap, Color(1.0, 0.72, 0.3), 9.0)
+	var mi = _glow_node(cap, Color(1.0, 0.85, 0.55), 4.5)
 	var rl = 0.72 * float(X.size) * (1.35 if (cl or sp) else 1.0)   # Länge des Modells
 	mi.mesh = null
 	var fl = MeshInstance3D.new()
@@ -10655,20 +10671,18 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	mi.add_child(fl)
 	mi.set_meta("fl", fl)
 	# äußerer Flammenschein: breiter, länger, orange, additiv – macht den Antrieb auch von hinten sichtbar
-	var cap2 = CapsuleMesh.new()
-	cap2.radius = cap.radius * RK_FL[2]
-	cap2.height = cap.height * RK_FL[3]
+	var cap2 = _rk_cone(cap.top_radius * RK_FL[2], cap.height * RK_FL[3])
 	var om = StandardMaterial3D.new()
 	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	om.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	om.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	om.albedo_color = Color(1.9, 0.62, 0.12, 0.3)
+	om.albedo_color = Color(1.6, 0.75, 0.22, 0.16)
 	var fo = MeshInstance3D.new()
 	fo.mesh = cap2
 	fo.material_override = om
 	fo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	fo.position = Vector3(0, -cap.height * 0.4, 0)
+	fo.position = Vector3(0, -cap.height * 0.15, 0)
 	fl.add_child(fo)
 	# Glutball als Billboard: von hinten (Raketenkamera) sieht man die Kapseln nur von vorne – der Ball leuchtet aus jeder Richtung
 	var gq = QuadMesh.new()
@@ -10680,12 +10694,12 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	gm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	gm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	gm.albedo_texture = _puff_tex()
-	gm.albedo_color = Color(2.2, 1.1, 0.35, 0.8)
+	gm.albedo_color = Color(2.0, 1.2, 0.5, 0.6)
 	var gb = MeshInstance3D.new()
 	gb.mesh = gq
 	gb.material_override = gm
 	gb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	gb.position = Vector3(0, cap.height * 0.25, 0)
+	gb.position = Vector3(0, cap.height * 0.45, 0)
 	fl.add_child(gb)
 	mi.add_child(_rocket_model(rl))
 	var lt = OmniLight3D.new()
@@ -10713,7 +10727,8 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 		(mi.material_override as StandardMaterial3D).albedo_color = Color(1.0, 0.78, 0.2)
 		(mi.material_override as StandardMaterial3D).emission = Color(1.0, 0.78, 0.2)
 		(mi.material_override as StandardMaterial3D).emission_energy_multiplier = 16.0
-		cap.radius *= 1.4
+		cap.top_radius *= 1.4
+		cap.bottom_radius *= 1.4
 		cap.height *= 1.4
 		lt.light_color = Color(1.0, 0.75, 0.25)
 		lt.light_energy *= 2.5
@@ -13042,7 +13057,7 @@ func _weapons(dt: float, racing: bool) -> void:
 					(fln as Node3D).scale = Vector3(fk * 0.9 * (1.0 + (bst - 1.0) * 0.6), fk * bst, fk * 0.9 * (1.0 + (bst - 1.0) * 0.6))
 					(fln as Node3D).position.y = -(fln as Node3D).get_meta("y0", (fln as Node3D).position.y) * 0.0 + float((fln as Node3D).get_meta("y0", (fln as Node3D).position.y)) * (1.0 + (bst - 1.0) * 0.5)
 				else:
-					(fln as Node3D).scale = Vector3(fk * 0.9, fk, fk * 0.9)
+					(fln as Node3D).scale = Vector3(0.8 + 0.15 * fk, fk, 0.8 + 0.15 * fk)   # flackert vor allem in der Länge
 					(fln as Node3D).position.y = float((fln as Node3D).get_meta("y0", (fln as Node3D).position.y))
 				if ig >= 0.0:
 					_rk_trail(sh, f, dt)
@@ -13642,10 +13657,8 @@ func _replay(dt: float) -> void:
 	rp.w = W
 	var ps = _pool("shots", W.size(), func():
 		# dieselbe kräftige Flamme wie im Rennen: heißer Kern, orangener Mantel, Glutball (von hinten sichtbar)
-		var cap = CapsuleMesh.new()
-		cap.radius = RK_FL[0]
-		cap.height = RK_FL[1]
-		var mi = _glow_node(cap, Color(1.0, 0.72, 0.3), 9.0)
+		var cap = _rk_cone(RK_FL[0], RK_FL[1])
+		var mi = _glow_node(cap, Color(1.0, 0.85, 0.55), 4.5)
 		mi.mesh = null
 		var fl = MeshInstance3D.new()
 		fl.name = "flame"
@@ -13653,20 +13666,18 @@ func _replay(dt: float) -> void:
 		fl.material_override = mi.material_override
 		fl.position = Vector3(0, -0.36 - RK_FL[1] * 0.35, 0)
 		mi.add_child(fl)
-		var cap2 = CapsuleMesh.new()
-		cap2.radius = RK_FL[0] * RK_FL[2]
-		cap2.height = RK_FL[1] * RK_FL[3]
+		var cap2 = _rk_cone(RK_FL[0] * RK_FL[2], RK_FL[1] * RK_FL[3])
 		var om = StandardMaterial3D.new()
 		om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		om.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		om.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-		om.albedo_color = Color(1.9, 0.62, 0.12, 0.3)
+		om.albedo_color = Color(1.6, 0.75, 0.22, 0.16)
 		var fo = MeshInstance3D.new()
 		fo.mesh = cap2
 		fo.material_override = om
 		fo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		fo.position = Vector3(0, -RK_FL[1] * 0.4, 0)
+		fo.position = Vector3(0, -RK_FL[1] * 0.15, 0)
 		fl.add_child(fo)
 		var gq = QuadMesh.new()
 		gq.size = Vector2(RK_FL[4], RK_FL[4])
@@ -13677,12 +13688,12 @@ func _replay(dt: float) -> void:
 		gm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 		gm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 		gm.albedo_texture = _puff_tex()
-		gm.albedo_color = Color(2.2, 1.1, 0.35, 0.8)
+		gm.albedo_color = Color(2.0, 1.2, 0.5, 0.6)
 		var gb = MeshInstance3D.new()
 		gb.mesh = gq
 		gb.material_override = gm
 		gb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		gb.position = Vector3(0, RK_FL[1] * 0.25, 0)
+		gb.position = Vector3(0, RK_FL[1] * 0.45, 0)
 		fl.add_child(gb)
 		mi.add_child(_rocket_model(0.72))
 		# Plasmaschweif (nur in der Einschlag-Wiederholung): langer, heller Streifen hinter der Rakete,
@@ -13760,7 +13771,7 @@ func _replay(dt: float) -> void:
 		var fln2 = ps[i].get_node_or_null("flame")
 		if fln2 != null:
 			var fk2 = (0.75 + 0.5 * randf()) * maxf(0.01, float(fx.rak.get("flame", 1.0)))   # wie im Rennen
-			(fln2 as Node3D).scale = Vector3(fk2 * 0.9, fk2, fk2 * 0.9) if st >= RK_DROP else Vector3.ONE * 0.001
+			(fln2 as Node3D).scale = Vector3(0.8 + 0.15 * fk2, fk2, 0.8 + 0.15 * fk2) if st >= RK_DROP else Vector3.ONE * 0.001
 	_rp_smoke(F, W)
 	var pm = _pool("mines", f0.m.size(), func():
 		return _glow_node(_lowsphere(0.12, 12, 6), Color(1, 0.15, 0.1), 6.0))
@@ -17518,6 +17529,7 @@ var dc_last = -999.0
 
 
 func _drop_roll() -> bool:
+	return false   # abgeschaltet (John: der seitliche Kameraschwenk beim Abfeuern irritiert)
 	if state != "race" or free_ride or not kc.is_empty():
 		return false
 	var k = float(fx.view.get("dropcam", 1.0))
@@ -17735,6 +17747,8 @@ func _mc_end() -> void:
 		return
 	if mc.has("frz"):
 		Engine.time_scale = float(mc.get("frz_ts", 1.0))
+	if mc.has("ret") and is_instance_valid(mc.ret):
+		(mc.ret as Node).queue_free()
 	_mcl("ENDE state=%s kc=%s" % [str(state), str(not kc.is_empty())])
 	_mcl_save()
 	_heat_off()
@@ -17775,6 +17789,64 @@ func _mc_ring_tex() -> ImageTexture:
 
 
 var mc_font: SystemFont
+
+
+# Zielerfassung: grünes Fadenkreuz mit Ecken. Sucht in der Bildmitte (dreht sich langsam, pulsiert); sobald das Ziel
+# im Bild ist, fährt es auf das Schiff und rastet ein (Ecken ziehen sich zusammen, heller).
+func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
+	if not mc.has("ret") or not is_instance_valid(mc.ret):
+		var c = Control.new()
+		c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		c.set_anchors_preset(Control.PRESET_FULL_RECT)
+		c.draw.connect(func():
+			if mc.is_empty() or not mc.has("rp"):
+				return
+			var p: Vector2 = mc.rp
+			var h = float(mc.rs) * 0.5
+			var lk = float(mc.get("rlk", 0.0))
+			var blink_off = mc.get("hoff", false)
+			var col = Color(0.35, 1.0, 0.45, 0.55 + 0.45 * lk)
+			if blink_off:
+				col.a = 0.2
+			var w = 2.0 + 1.5 * lk
+			var ang = float(mc.get("rang", 0.0)) * (1.0 - lk)
+			var e = h * 0.38
+			for k in range(4):
+				var a = ang + k * PI * 0.5
+				var cx = Vector2(cos(a + PI * 0.25), sin(a + PI * 0.25)) * h * 1.414
+				var d1 = Vector2(cos(a + PI), sin(a + PI)) * e
+				var d2 = Vector2(cos(a - PI * 0.5), sin(a - PI * 0.5)) * e
+				c.draw_line(p + cx, p + cx + d1.rotated(PI * 0.5 * 0.0), col, w)
+				c.draw_line(p + cx, p + cx + d2, col, w)
+			# Fadenkreuz in der Mitte: beim Suchen offen, eingerastet ein kleiner Punkt
+			var g = 8.0
+			if lk < 0.5:
+				c.draw_line(p + Vector2(-g * 2.2, 0), p + Vector2(-g, 0), col, 2.0)
+				c.draw_line(p + Vector2(g, 0), p + Vector2(g * 2.2, 0), col, 2.0)
+				c.draw_line(p + Vector2(0, -g * 2.2), p + Vector2(0, -g), col, 2.0)
+				c.draw_line(p + Vector2(0, g), p + Vector2(0, g * 2.2), col, 2.0)
+			else:
+				c.draw_circle(p, 3.0, col)
+			)
+		hud.layer.add_child(c)
+		mc.ret = c
+		mc.rp = want
+		mc.rs = wsz * 1.6
+		mc.rt = Time.get_ticks_msec() / 1000.0
+	# in echter Zeit glätten (beim Standbild läuft die Spielzeit nicht)
+	var now = Time.get_ticks_msec() / 1000.0
+	var rdt = clampf(now - float(mc.get("rt", now)), 0.0, 0.1)
+	mc.rt = now
+	var k = 1.0 - exp(-rdt * (9.0 if on_target else 5.0))
+	mc.rp = (mc.rp as Vector2).lerp(want, k)
+	var tsz = wsz if on_target else 120.0 + 10.0 * sin(now * 5.0)
+	mc.rs = lerpf(float(mc.rs), tsz, k)
+	var near = on_target and (mc.rp as Vector2).distance_to(want) < maxf(10.0, wsz * 0.15)
+	mc.rlk = move_toward(float(mc.get("rlk", 0.0)), 1.0 if near else 0.0, rdt * 5.0)
+	if float(mc.rlk) <= 0.0:
+		mc.rang = fmod(float(mc.get("rang", 0.0)) + rdt * 1.2, TAU)
+	(mc.ret as Control).visible = true
+	(mc.ret as Control).queue_redraw()
 
 
 func _mc_mark(tg) -> void:
@@ -17825,6 +17897,7 @@ func _mc_mark(tg) -> void:
 		sp = c + dv * k
 		sz = 0.0
 		arr = ("<< " if dv.x < -0.5 else (">> " if dv.x > 0.5 else ("^^ " if dv.y < 0.0 else "vv ")))
+	_mc_reticle(sp if inside else Vector2(vp.x * 0.5, vp.y * 0.45), maxf(sz * 1.5, 70.0), inside)
 	var nm = String(NAMES[int(tg.idx)] if int(tg.idx) < NAMES.size() else "").to_upper()
 	var frz = mc.has("frz")
 	if frz:
@@ -17832,8 +17905,12 @@ func _mc_mark(tg) -> void:
 	else:
 		lb.text = "%sTRACKING %s\nDIST %05.1f m" % [arr, nm, dt_m]
 	lb.visible = true
-	lb.size = Vector2(340, 64)
-	lb.position = Vector2(clampf(sp.x - 170.0, 6.0, vp.x - 346.0), clampf(sp.y + sz * 0.6 + 6.0, 0.0, vp.y - 70.0))
+	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lb.size = Vector2(300, 64)
+	# links neben der Zielerfassung
+	var rp: Vector2 = mc.get("rp", Vector2(vp.x * 0.5, vp.y * 0.45))
+	var rs = float(mc.get("rs", 70.0))
+	lb.position = Vector2(clampf(rp.x - rs * 0.5 - 16.0 - 300.0, 6.0, vp.x - 306.0), clampf(rp.y - 32.0, 0.0, vp.y - 70.0))
 	# leichtes Flimmern wie ein Radarschirm; beim Erkennen im Takt des Aufblinkens
 	lb.modulate.a = (1.0 if mc.get("hoff", false) == false else 0.25) if frz else 0.82 + 0.18 * float(int(Time.get_ticks_msec() / 90) % 2)
 	if OS.get_environment("KCDBG") != "":
@@ -17950,6 +18027,8 @@ func _mc_cam(dt: float) -> bool:
 			mc.hold = 1.6 if mc.has("ci") else 1.2   # Einschlag: noch kurz draufhalten
 			if mc.has("mkl") and is_instance_valid(mc.mkl):
 				(mc.mkl as CanvasItem).visible = false
+			if mc.has("ret") and is_instance_valid(mc.ret):
+				(mc.ret as CanvasItem).visible = false
 			_heat_off()
 			mc.l = mc.get("tp", mc.pm) if mc.has("ci") else mc.pm
 	else:
