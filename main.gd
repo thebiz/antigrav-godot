@@ -8766,6 +8766,8 @@ func _rp_rebuild_fx() -> void:
 					_explode(ev[1], ev[2], ev[3], ev[4] if ev.size() > 4 else 1.0)
 				"gb":
 					_gbomb(ev[1], ev[2], -2, -1, ev[3] if ev.size() > 3 else 1.0)
+				"ismk":
+					_impact_smoke(ev[1], ev[2], ev[3])
 				"zap":
 					_zap_ship(ships[ev[1]])
 		j -= 1
@@ -9466,6 +9468,19 @@ func _smoke_cloud(sf: Dictionary, pos: Vector3, k: float, amt: float, life: floa
 		out = out - sf.uu * out.dot(sf.uu)
 		smk.append({"n": mi, "p": p, "v": out.normalized() * randf_range(1.5, 4.0) * k + sf.uu * randf_range(0.3, 1.0), "t": -randf_range(0.15, 0.5),
 			"life": randf_range(5.0, 8.0) * life, "sz": sz, "fr": randf() * 63.0, "fs": randf_range(3.0, 6.0), "up": sf.uu, "spin": randf_range(-0.4, 0.4), "rot": randf() * TAU})
+
+
+# Rauchhülle beim Raketentreffer: dichte, dunkle Wolke um das getroffene Schiff und ein Stück vor ihm auf seiner Bahn –
+# es fliegt durch den Qualm und kommt sichtbar aus der Explosionswolke heraus
+func _impact_smoke(z: float, lat: float, sc := 1.0) -> void:
+	if state == "kill" and not rp_ev:
+		return
+	_rev(["ismk", z, lat, sc])
+	for i in range(4):
+		var zz = z + i * 1.6
+		var sf = T.sframe(zz, lat)
+		var pos: Vector3 = sf.c + sf.uu * 0.45
+		_smoke_cloud(sf, pos, 0.75 * sc, 1.5, 0.8)
 
 
 func _scorch(sf: Dictionary, k: float) -> void:
@@ -10768,6 +10783,8 @@ func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
 	# Treffer: Explosion aus den Bildfolgen (Feuerball, Funken, Trümmer, Rauch) statt schwarzem Loch
 	if not sh.get("cl", false):
 		_explode(z, lat, sh.get("sup", false), 1.0)
+		if hit >= 0:
+			_impact_smoke(z, lat, 1.0)
 		return
 	for i in range(5):
 		var la = lerpf(-T.TW * 0.8, T.TW * 0.8, i / 4.0)
@@ -12985,6 +13002,7 @@ func _weapons(dt: float, racing: bool) -> void:
 					# sofort (nicht zeitversetzt): sonst fielen die Explosionen in die schon laufende Einschlag-Wiederholung
 					# und gingen dort auf, während die Raketen in der Zeitlupe noch 20 m entfernt waren
 					_explode(oz, ol, false, 0.65)   # Explosion statt schwarzem Loch (John)
+				_impact_smoke(hz, hl, 1.3)   # Rauchhülle ums getroffene Schiff
 			else:
 				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
@@ -13600,7 +13618,7 @@ func _replay(dt: float) -> void:
 		for ev in F[rp.ei].ev:
 			# Einschlag-Wiederholung, erster Blickwinkel (hinter der Rakete, endet kurz VOR dem Treffer):
 			# am Ziel darf hier noch nichts explodieren – was in diesem Abschnitt dort knallt, gehört nicht dazu
-			if state == "kill" and kc.get("ir", false) and int(kc.get("pass", -1)) == 0 and ev[0] in ["boom", "gb", "big", "shat"]:
+			if state == "kill" and kc.get("ir", false) and int(kc.get("pass", -1)) == 0 and ev[0] in ["boom", "gb", "big", "shat", "ismk"]:
 				var ezz = float(ships[ev[1]].z) if ev[0] == "shat" else float(ev[1])
 				var dzz = ezz - float((kc.imp as Vector2).x)
 				dzz -= T.LAP * round(dzz / T.LAP)
@@ -13613,6 +13631,8 @@ func _replay(dt: float) -> void:
 					_explode(ev[1], ev[2], ev[3], ev[4] if ev.size() > 4 else 1.0)
 				"gb":
 					_gbomb(ev[1], ev[2], -2, -1, ev[3] if ev.size() > 3 else 1.0)
+				"ismk":
+					_impact_smoke(ev[1], ev[2], ev[3])
 				"zap":
 					_zap_ship(ships[ev[1]])
 					_snd("zap", 0.0, 1.0, (ships[ev[1]].node as Node3D).global_position)
@@ -17850,7 +17870,7 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 	mc.rt = now
 	var k = 1.0 - exp(-rdt * (9.0 if on_target else 5.0))
 	mc.rp = (mc.rp as Vector2).lerp(want, k)
-	var tsz = wsz if on_target else 120.0 + 10.0 * sin(now * 5.0)
+	var tsz = wsz if on_target else 104.0 + 9.0 * sin(now * 5.0)
 	mc.rs = lerpf(float(mc.rs), tsz, k)
 	var near = on_target and (mc.rp as Vector2).distance_to(want) < maxf(10.0, wsz * 0.15)
 	mc.rlk = move_toward(float(mc.get("rlk", 0.0)), 1.0 if near else 0.0, rdt * 5.0)
@@ -17908,7 +17928,7 @@ func _mc_mark(tg) -> void:
 		sp = c + dv * k
 		sz = 0.0
 		arr = ("<< " if dv.x < -0.5 else (">> " if dv.x > 0.5 else ("^^ " if dv.y < 0.0 else "vv ")))
-	_mc_reticle(sp if inside else Vector2(vp.x * 0.5, vp.y * 0.45), maxf(sz * 1.5, 70.0), inside)
+	_mc_reticle(sp if inside else Vector2(vp.x * 0.5, vp.y * 0.45), maxf(sz * 1.3, 61.0), inside)   # 13 % kleiner (John)
 	var nm = String(NAMES[int(tg.idx)] if int(tg.idx) < NAMES.size() else "").to_upper()
 	var frz = mc.has("frz")
 	if frz:
@@ -17999,6 +18019,7 @@ void fragment(){
 	lk.text = "[ TARGET LOCKED ]"
 	box.add_child(lk)
 	box.set_meta("lk", lk)
+	box.scale = Vector2(0.9, 0.9)   # John: 10 % kleiner
 	hud.layer.add_child(box)
 	mc.card = box
 
