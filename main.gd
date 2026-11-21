@@ -6300,10 +6300,14 @@ func _dof_race() -> void:
 		race_ca.dof_blur_amount = 0.05
 		race_ca.dof_blur_near_enabled = false
 	var ici = state == "kill" or (not mc.is_empty() and mc.has("ci"))
-	var fdd = 50.0 if ici else 45.0   # Einschlag-Kamera: etwas weniger Unschärfe
+	# Außensicht (Schiff im Bild): Unschärfe setzt früher ein und ist kräftiger, damit sie zur Helmsicht passt –
+	# sonst war der Wechsel zwischen den Ansichten zu krass (John)
+	var outside = int(cfg.get("view", 0)) == 0 and state in ["race", "count"] and mc.is_empty()
+	var fdd = 50.0 if ici else (32.0 if outside else 45.0)
 	if race_ca.dof_blur_far_distance != fdd:
 		race_ca.dof_blur_far_distance = fdd
-		race_ca.dof_blur_amount = 0.045 if ici else 0.05
+		race_ca.dof_blur_far_transition = 45.0 if outside else 60.0
+		race_ca.dof_blur_amount = 0.045 if ici else (0.068 if outside else 0.05)
 	var cur = cam.attributes
 	if want and cur != race_ca:
 		cam.attributes = race_ca
