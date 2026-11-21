@@ -17983,10 +17983,17 @@ func _mc_mark(tg) -> void:
 		sz = 0.0
 		arr = ("<< " if dv.x < -0.5 else (">> " if dv.x > 0.5 else ("^^ " if dv.y < 0.0 else "vv ")))
 	# Zielerfassung erst ab etwa 100 m vor dem Ziel (John): taucht in der Mitte auf, fährt aufs Schiff, rastet ein
-	if dt_m <= 150.0 or mc.has("frz"):
+	if dt_m <= 200.0 or mc.has("frz"):
 		_mc_reticle(sp if inside else Vector2(vp.x * 0.5, vp.y * 0.45), maxf(sz * 1.3, 61.0), inside)   # 13 % kleiner (John)
 	elif mc.has("ret") and is_instance_valid(mc.ret):
 		(mc.ret as CanvasItem).visible = false
+	# Annäherungs-Piepen ab der Zielerfassung: je näher, desto schneller (200 m: gemächlich, 50 m: fast Dauerton)
+	if dt_m <= 200.0 and not mc.has("ci"):
+		var now_b = Time.get_ticks_msec() / 1000.0
+		var iv = lerpf(0.09, 0.55, clampf((dt_m - 50.0) / 150.0, 0.0, 1.0))
+		if now_b - float(mc.get("bp", -9.0)) >= iv:
+			mc.bp = now_b
+			_snd("lock", 1.0, 1.35)
 	var nm = String(NAMES[int(tg.idx)] if int(tg.idx) < NAMES.size() else "").to_upper()
 	var frz = mc.has("frz")
 	if frz:
@@ -18826,7 +18833,9 @@ void fragment(){
 	// Atem beschlägt das Visier unten, stärker bei wenig Energie
 	float fog=smoothstep(.62,1.,uv.y)*smoothstep(.75,.15,abs(uv.x-.5))*br*(.75+.25*h(floor(uv*60.)));
 	vec3 col=vec3(.015,.018,.03)*fr+vec3(.25,.75,1.)*rim*.5+vec3(.85,.92,1.)*(rf+fog*.6);
-	float a=clamp(max(max(fr,tv),rim*.45)+rf+fog*.45,0.,1.);
+	// mehr Vignette oben und unten (John): weich abgedunkelt, wie der Rand eines engen Helms
+	float tb=smoothstep(.42,1.,abs(q.y))*.62;
+	float a=clamp(max(max(max(fr,tv),rim*.45),tb)+rf+fog*.45,0.,1.);
 	// Schaden: Riss-Flackern am Rand
 	a=max(a,dm*step(.97,h(floor(uv*vec2(40.,80.))+floor(TIME*12.)))*smoothstep(.6,1.,d));
 	COLOR=vec4(col,a);
