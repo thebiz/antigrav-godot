@@ -828,7 +828,7 @@ void fragment(){
 		float roll=fract(SCREEN_UV.y*.8-TIME*.55);
 		col+=vec3(.55,.75,1.)*bo*.07*smoothstep(0.,.05,roll)*smoothstep(.12,.05,roll);
 		col+=(hg(floor(SCREEN_UV/px*.5)+floor(TIME*30.)*13.)-.5)*(.04*bo+.1*eb);
-		col=mix(col,vec3(dot(col,vec3(.33))),.2*bo);
+		col=mix(col,vec3(dot(col,vec3(.299,.587,.114))),bo);   // ganz schwarz-weiß (John: deutlich zeigen)
 	}
 	// Vignette bei Tempo
 	col*=1.-spd*.25*smoothstep(.3,.9,length(cd*vec2(asp,1.))*1.4);
@@ -885,6 +885,22 @@ func _post_update(dt: float) -> void:
 		(hud.layer as CanvasLayer).offset = Vector2(randf_range(-9.0, 9.0), randf_range(-5.0, 5.0)) * blk_v if jit else Vector2.ZERO
 		if jit:
 			hud.gs = float(hud.gs) + randf_range(-30.0, 30.0) * blk_v   # Tachonadel spinnt
+	# rot blinkender Hinweis oben, solange der EMP wirkt
+	if hud.has("layer") and is_instance_valid(hud.layer):
+		if not hud.has("empl") or not is_instance_valid(hud.empl):
+			var el2 = _lbl("EMP – WEAPONS OFFLINE", 46)
+			el2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			el2.set_anchors_preset(Control.PRESET_TOP_WIDE)
+			el2.offset_top = get_viewport().get_visible_rect().size.y * 0.235
+			el2.add_theme_color_override("font_color", Color(1.0, 0.12, 0.1))
+			el2.add_theme_color_override("font_outline_color", Color(0.15, 0.0, 0.0))
+			el2.add_theme_constant_override("outline_size", 10)
+			el2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			el2.visible = false
+			(hud.layer as CanvasLayer).add_child(el2)
+			hud.empl = el2
+		var on = blk_t > 0.0 and state in ["race", "count"]
+		(hud.empl as Label).visible = on and fposmod(Time.get_ticks_msec() / 1000.0, 0.6) < 0.38
 	_sp(post, "bo", blk_v if OS.get_environment("DEMNOBO") == "" else 0.0)
 	if ck.has("body") and is_instance_valid(ck.body):
 		var dm = 1.0 - 0.3 * blk_v   # Cockpit etwas dunkler
