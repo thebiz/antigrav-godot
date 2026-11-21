@@ -68,7 +68,7 @@ var ui = {}
 var menu_t = 0.0
 var last_c = 99
 # Waffen und Energie (wie im alten Spiel)
-const WP = [["rak", 0.17], ["lenk", 0.17], ["mine", 0.12], ["schild", 0.09], ["turbo", 0.11], ["beben", 0.08], ["auto", 0.05], ["wand", 0.07], ["blk", 0.06], ["orbs", 0.08]]
+const WP = [["rak", 0.18], ["lenk", 0.18], ["mine", 0.13], ["schild", 0.10], ["turbo", 0.12], ["beben", 0.09], ["wand", 0.07], ["blk", 0.06], ["orbs", 0.07]]   # Autopilot entfernt (John)
 const WP_AI = [["lenk", 0.33], ["rak", 0.23], ["mine", 0.19], ["schild", 0.1], ["turbo", 0.1], ["blk", 0.05]]
 # eigene Farbe je Waffe, damit man sie im Augenwinkel unterscheiden kann
 const WC = {"rak": Color(1.0, 0.55, 0.12), "lenk": Color(1.0, 0.18, 0.22), "mine": Color(1.0, 0.86, 0.1), "orbs": Color(0.3, 0.6, 1.0),
@@ -10032,6 +10032,9 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	var f = T.frame(z)
 	var sf0 = T.sframe(z, lat)   # folgt auch der Röhrenwand
 	var pos: Vector3 = sf0.c + sf0.uu * 0.35
+	# Einschlag-Wiederholung: die Kamera steht dicht dran – Feuerball höchstens gut ein Drittel so groß wie der Abstand,
+	# sonst füllt er das ganze Bild weiß
+	k *= _kc_cap(pos, k * 1.3, 0.35)
 	# Nachexplosionen: zwei, drei kleinere Feuerbälle rundherum, kurz versetzt
 	var fa = float(X.fire)
 	for j in range(int(round((2 if big else 1) * float(X.after)))):
@@ -10072,17 +10075,17 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	var rg0 = (16.0 if int(cfg.gfx) >= 2 else 10.0) * k
 	lt.omni_range = rg0
 	lt.omni_attenuation = 0.7
-	lt.light_energy = 38.0 * float(X.light)
+	lt.light_energy = 38.0 * float(X.light) * (0.3 if state == "kill" else 1.0)   # Wiederholung: Kamera dicht dran, sonst alles weiß
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
-	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light), "hu": hu, "sf": sf0})
+	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light) * (0.3 if state == "kill" else 1.0), "hu": hu, "sf": sf0})
 	_snd("boom", 4.0 if big else 2.0, randf_range(0.85, 1.0), pos)
 	_snd("boom", 2.0, 0.55, pos)   # tiefer Wumms darunter
 	# Kamera rüttelt, je näher, desto stärker
 	var d = (pos - cam.global_position).length()
 	var near = clampf(1.0 - d / 35.0, 0.0, 1.0)
 	shake = maxf(shake, (2.0 if big else 1.3) * near * float(X.shake))
-	_flash(_hs(Color(1.0, 0.7, 0.4), hu), (0.55 if big else 0.35) * near * float(X.flash))
+	_flash(_hs(Color(1.0, 0.7, 0.4), hu), (0.55 if big else 0.35) * near * float(X.flash) * (0.35 if state == "kill" else 1.0))
 
 
 # Schaden: Schild schützt; leer = ausgeschieden; Meldung oben
@@ -10762,13 +10765,14 @@ func _braid(sh: Dictionary, n: int) -> void:
 # Rakete geht hoch: normal ein schwarzes Loch, Super-Rakete (Streubombe) zerplatzt in fünf kleine über die ganze Breite
 func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
 	_blast_push(z, lat, 3.2, 0.7, hit, int(sh.get("own", -1)))
+	# Treffer: Explosion aus den Bildfolgen (Feuerball, Funken, Trümmer, Rauch) statt schwarzem Loch
 	if not sh.get("cl", false):
-		_gbomb(z, lat, sh.own, hit, 1.0, sh.get("sup", false))
+		_explode(z, lat, sh.get("sup", false), 1.0)
 		return
 	for i in range(5):
 		var la = lerpf(-T.TW * 0.8, T.TW * 0.8, i / 4.0)
 		var zz = z + 1.0 + randf() * 2.5
-		_after(0.05 * i + 0.01, func(): _gbomb(zz, la, sh.own, -1, 0.5, true))
+		_after(0.05 * i + 0.01, func(): _explode(zz, la, false, 0.6))
 	_snd("boom", 0.0, 1.3)
 
 
@@ -11731,7 +11735,7 @@ func _show_help(on: bool) -> void:
 		["wpad", "Weapon pad", "A spinning ring. Fly through it to pick up a random weapon."],
 		["fire", "Fire", "Tap the round FIRE button at the bottom to use your weapon."],
 		["#", "Weapons", ""]]
-	for w in ["rak", "lenk", "mine", "orbs", "wand", "beben", "schild", "turbo", "auto", "blk"]:
+	for w in ["rak", "lenk", "mine", "orbs", "wand", "beben", "schild", "turbo", "blk"]:
 		rows.append([w, WN[w].capitalize(), WD[w]])
 	rows += [["#", "Power-ups", ""],
 		["super", "Super", "Keep your weapon and fly over 2 more weapon pads – it turns SUPER: stronger and gold."],
@@ -12978,9 +12982,9 @@ func _weapons(dt: float, racing: bool) -> void:
 				for j in range(3):
 					var oz = hz + [0.0, 1.3, 2.4][j]
 					var ol = clampf(hl + [0.0, -0.8, 0.8][j], -T.TW + 0.4, T.TW - 0.4)
-					# sofort (nicht zeitversetzt): sonst fielen die Löcher in die schon laufende Einschlag-Wiederholung
+					# sofort (nicht zeitversetzt): sonst fielen die Explosionen in die schon laufende Einschlag-Wiederholung
 					# und gingen dort auf, während die Raketen in der Zeitlupe noch 20 m entfernt waren
-					_gbomb(oz, ol, -2, hi, 0.68)
+					_explode(oz, ol, false, 0.65)   # Explosion statt schwarzem Loch (John)
 			else:
 				_dmg(hit, 0.3 if sh.pl else 0.35, sh.own, "rocket", sh.get("sup", false) or sh.get("cl", false))
 				_shot_boom(sh, hit.z, hit.lat, hit.idx)   # Explosion genau am getroffenen Schiff
