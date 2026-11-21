@@ -470,7 +470,7 @@ func _sounds() -> void:
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "vo_blk.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
 			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "blackout.wav", "minewarn.wav", "hover.wav", "ignite.wav",
-			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_menu.ogg",
+			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_race2.ogg", "music_race3.ogg", "music_race4.ogg", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
@@ -21217,6 +21217,10 @@ func _bus_levels() -> void:
 var music_p: AudioStreamPlayer
 var music_k = ""
 var music_f = 0.0
+var music_cur = ""   # gerade laufender Renn-Song
+var music_st = ""
+var music_nx = false
+const MUSIC_RACE = ["music_race", "music_race2", "music_race3", "music_race4"]
 
 
 func _music_update(dt: float) -> void:
@@ -21233,15 +21237,36 @@ func _music_update(dt: float) -> void:
 	var want = "music_menu" if state in ["menu", "lab", "bench"] else "music_race"
 	if float(cfg.get("music", 0.6)) < 0.01:
 		want = ""
+	# Rennmusik: mehrere Songs (John), zufällig – jedes neue Rennen und jedes Songende wechselt zu einem anderen
+	if state == "count" and music_st != "count":
+		music_nx = true
+	music_st = state
+	if want == "music_race" and music_k == "music_race" and (music_nx or not music_p.playing):
+		if not music_p.playing:
+			music_f = 0.0
+		want = "_next"
 	if want != music_k:
 		# alte Musik ausblenden, dann die neue einblenden
 		music_f = maxf(0.0, music_f - dt / 0.6)
 		if music_f <= 0.0:
-			music_k = want
-			if want == "":
+			music_k = "music_race" if want == "_next" else want
+			music_nx = false
+			if music_k == "":
 				music_p.stop()
+			elif music_k == "music_race":
+				var pool = []
+				for k in MUSIC_RACE:
+					if snd.get(k) != null and k != music_cur:
+						pool.append(k)
+				if pool.is_empty():
+					pool = [music_cur if music_cur != "" else "music_race"]
+				music_cur = pool[randi() % pool.size()]
+				music_p.stream = snd[music_cur]   # nicht in Schleife: am Ende kommt der nächste Song
+				if OS.get_environment("MUSDBG") != "":
+					print("MUSIC song=", music_cur, " len=", snd[music_cur].get_length(), " pool=", pool)
+				music_p.play()
 			else:
-				music_p.stream = _looped(snd[want])
+				music_p.stream = _looped(snd[music_k])
 				music_p.play()
 	else:
 		music_f = minf(1.0, music_f + dt / 1.2)
