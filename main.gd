@@ -707,6 +707,7 @@ uniform vec4 hr0=vec4(0.);uniform vec4 hr1=vec4(0.);uniform vec4 hr2=vec4(0.);  
 uniform vec4 hr3=vec4(0.);   // Wärmebild: Bildbereich der eigenen Rakete (Düsen glühen weiß)
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 // Filmkorn-Zufall ohne sin(): bleibt auch bei großen Pixelzahlen gleichmäßig (sin großer Werte wird auf Handy-GPUs ungenau → Muster)
+float hm(vec4 r,vec2 p){if(r.z<=r.x)return 0.;vec2 c=(r.xy+r.zw)*.5;vec2 h=max((r.zw-r.xy)*.5,vec2(1e-4));return 1.-smoothstep(.75,1.,length((p-c)/h));}
 float hg(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 void fragment(){
 	vec2 uv=SCREEN_UV;
@@ -785,16 +786,16 @@ void fragment(){
 		vec3 th=vec3(.06,.22,.1)*smoothstep(0.,.08,gy)+vec3(gy*.35,gy*1.05,gy*.45);
 		// Kennfarbe Magenta der gegnerischen Schiffe – nur innerhalb ihrer Bildbereiche gezählt (sonst würde rosa Neon mitglühen)
 		vec2 su=SCREEN_UV;
-		float inr=0.;
-		inr=max(inr,step(hr0.x,su.x)*step(su.x,hr0.z)*step(hr0.y,su.y)*step(su.y,hr0.w));
-		inr=max(inr,step(hr1.x,su.x)*step(su.x,hr1.z)*step(hr1.y,su.y)*step(su.y,hr1.w));
-		inr=max(inr,step(hr2.x,su.x)*step(su.x,hr2.z)*step(hr2.y,su.y)*step(su.y,hr2.w));
+		// weiche Ellipsen statt harter Rechtecke (sonst zeichnete der Schein um das Schiff ein helles Quadrat)
+		float inr=max(max(hm(hr0,su),hm(hr1,su)),hm(hr2,su));
 		float mgn=(c0.r+c0.b)*.5-c0.g;
-		float key=inr*smoothstep(.12,.35,mgn)*(1.-smoothstep(.3,.5,abs(c0.r-c0.b)));
+		float key=inr*smoothstep(.25,.5,mgn)*(1.-smoothstep(.3,.5,abs(c0.r-c0.b)));
 		// Raketendüsen: im Bereich der eigenen Rakete glüht alles sehr Helle (Flamme) weiß
-		float inr3=step(hr3.x,su.x)*step(su.x,hr3.z)*step(hr3.y,su.y)*step(su.y,hr3.w);
+		float inr3=hm(hr3,su);
 		float L0=dot(c0,vec3(.3,.55,.15));
-		key=max(key,inr3*smoothstep(.6,.9,L0));
+		// nur wirklich heiße Flammenpixel (sehr hell UND warm-gelblich) – sonst wurde der ganze Bereich als helles Quadrat sichtbar
+		float warm=smoothstep(.12,.3,c0.r-c0.b);
+		key=max(key,inr3*smoothstep(.82,.97,L0)*warm);
 		th=mix(th,vec3(1.,1.,.97),key);
 		th*=.93+.07*sin(SCREEN_UV.y/px.y*1.4+TIME*36.);   // Abtastzeilen
 		col=th+(hg(floor(SCREEN_UV/px*.5)+floor(TIME*24.))-.5)*.04;
