@@ -6083,6 +6083,86 @@ func _party_fig(nm: String, anim: String, pos: Vector3, look: Vector3, tint: Col
 	return root
 
 
+# Schärfentiefe bei der Siegerfeier (John): vorn Ren gestochen scharf, dahinter zunehmend unscharf –
+# die Leute direkt hinter ihm schon weich, Tribünen und Stadt ganz verschwommen (wie Porträt mit offener Blende)
+const DOF_CODE = """
+shader_type spatial;
+render_mode unshaded, cull_disabled, depth_test_disabled, depth_draw_never, fog_disabled, shadows_disabled;
+uniform sampler2D scr : hint_screen_texture, filter_linear_mipmap;
+uniform sampler2D dep : hint_depth_texture, filter_nearest;
+uniform float fd = 4.0;    // Schärfe-Entfernung (Ren)
+uniform float fr = 0.45;   // so weit dahinter bleibt es noch scharf
+uniform float sp = 1.0;    // wie schnell es dahinter unscharf wird (m bis volle Unschärfe, mal fd)
+uniform float mx = 0.016;  // größter Unschärfe-Radius (Bildbreite)
+void vertex(){ POSITION = vec4(VERTEX.xy * 2.0, 1.0, 1.0); }
+float lin(vec2 uv, mat4 ip){
+	float d = texture(dep, uv).r;
+#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
+	vec3 n = vec3(uv * 2.0 - 1.0, d * 2.0 - 1.0);
+#else
+	vec3 n = vec3(uv * 2.0 - 1.0, d);
+#endif
+	vec4 v = ip * vec4(n, 1.0);
+	return -v.z / v.w;
+}
+void fragment(){
+	vec2 uv = SCREEN_UV;
+	float z = lin(uv, INV_PROJECTION_MATRIX);
+	float coc = clamp((z - fd - fr) / max(0.5, fd * sp), 0.0, 1.0);
+	coc = sqrt(coc);
+	vec3 acc = texture(scr, uv).rgb;
+	float wsum = 1.0;
+	if (coc > 0.01){
+		float r = coc * mx;
+		float asp = VIEWPORT_SIZE.x / VIEWPORT_SIZE.y;
+		for (int i = 0; i < 24; i++){
+			float fi = float(i) + 0.5;
+			float a = fi * 2.39996;
+			float rr = sqrt(fi / 24.0) * r;
+			vec2 o = vec2(cos(a), sin(a) * asp) * rr;
+			vec2 su = uv + o;
+			// nichts Scharfes (Ren) in den Hintergrund hineinverwischen
+			float zs = lin(su, INV_PROJECTION_MATRIX);
+			float w = zs < fd + fr ? 0.15 : 1.0;
+			acc += textureLod(scr, su, coc * 2.0).rgb * w;
+			wsum += w;
+		}
+	}
+	ALBEDO = acc / wsum;
+}"""
+var dof_q: MeshInstance3D
+
+
+func _dof_on(on: bool) -> void:
+	if not on:
+		if dof_q != null and is_instance_valid(dof_q):
+			dof_q.queue_free()
+		dof_q = null
+		return
+	if dof_q != null and is_instance_valid(dof_q):
+		return
+	dof_q = MeshInstance3D.new()
+	var q = QuadMesh.new()
+	q.size = Vector2(1, 1)
+	dof_q.mesh = q
+	var m = _shader_mat(DOF_CODE)
+	m.render_priority = -128   # vor Konfetti & Co. (die bleiben scharf obendrauf)
+	dof_q.material_override = m
+	dof_q.extra_cull_margin = 16384.0
+	dof_q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	cam.add_child(dof_q)
+	dof_q.position = Vector3(0, 0, -1.0)
+
+
+func _dof_focus() -> void:
+	if dof_q == null or not is_instance_valid(dof_q) or party.is_empty() or not is_instance_valid(party.get("ren")):
+		return
+	var rp: Vector3 = (party.ren as Node3D).global_position + Vector3.UP * 0.35
+	var fwd: Vector3 = -cam.global_transform.basis.z
+	var fd = maxf(0.5, (rp - cam.global_position).dot(fwd))
+	(dof_q.material_override as ShaderMaterial).set_shader_parameter("fd", fd)
+
+
 func _party_start() -> void:
 	_bc("party start")
 	_dg_flush()
@@ -6251,6 +6331,7 @@ func _party_end() -> void:
 			_qf(c)
 	party = {}
 	party_on = false
+	_dof_on(false)
 	_wet_apply()
 	if not ships.is_empty():
 		for pj in (ships[0].node as Node3D).get_meta("pj", []):
@@ -6313,6 +6394,9 @@ func _party_live(dt: float) -> bool:
 	if party.is_empty():
 		return false
 	var t: float = fin.get("pt", 0.0)
+	if OS.get_environment("NODOF") == "":
+		_dof_on(true)
+		_dof_focus()
 	# Hostessen nach dem ersten Bild mit Bewegung auf den Boden stellen (tiefster Fußknochen + Sohle)
 	if t > 0.25 and not party.has("grounded"):
 		party.grounded = true
