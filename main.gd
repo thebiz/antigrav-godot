@@ -254,7 +254,7 @@ func _buses() -> void:
 		rv.dry = 0.9
 		rv.predelay_msec = 90.0
 		AudioServer.add_bus_effect(si, rv)
-	for nm in ["Game", "Voice", "Music", "Cabin"]:
+	for nm in ["Game", "Voice", "Music", "Cabin", "Talk"]:
 		if AudioServer.get_bus_index(nm) == -1:
 			AudioServer.add_bus()
 			var i = AudioServer.bus_count - 1
@@ -306,6 +306,23 @@ func _buses() -> void:
 		mlim.pre_gain_db = 0.0
 		mlim.release = 0.12
 		AudioServer.add_bus_effect(mui, mlim)
+	var tki = AudioServer.get_bus_index("Talk")
+	if AudioServer.get_bus_effect_count(tki) == 0:
+		var tcp = AudioEffectCompressor.new()
+		tcp.threshold = -14.0
+		tcp.ratio = 4.0
+		tcp.attack_us = 3000.0
+		tcp.release_ms = 150.0
+		AudioServer.add_bus_effect(tki, tcp)
+		var tlim = AudioEffectHardLimiter.new()
+		tlim.ceiling_db = -0.5
+		AudioServer.add_bus_effect(tki, tlim)
+	# Summen-Begrenzer ganz am Ende: Musik + Geräusche + Stimmen zusammen dürfen nie digital übersteuern (das knackt)
+	if AudioServer.get_bus_effect_count(0) == 0:
+		var mst = AudioEffectHardLimiter.new()
+		mst.ceiling_db = -0.3
+		mst.release = 0.2
+		AudioServer.add_bus_effect(0, mst)
 	var vi = AudioServer.get_bus_index("Voice")
 	_bus_levels()
 	# Begrenzer, damit die lautere Stimme nicht übersteuert
@@ -333,8 +350,9 @@ func _buses() -> void:
 		rds.drive = 0.22
 		rds.post_gain = 3.0
 		AudioServer.add_bus_effect(vi, rds)
+		# Helm-Kopfhörer (John): Ansagen und Warnungen klingen immer wie über den Helmfunk
 		for k in range(2, 5):
-			AudioServer.set_bus_effect_enabled(vi, k, false)
+			AudioServer.set_bus_effect_enabled(vi, k, true)
 
 
 # ---------------------------------------------------------------- Startsound-Labor: eigener Kanal „Start“ mit Tonhöhe, Klang, Echo, Hall, Biss
@@ -473,7 +491,7 @@ func _duck(delta: float) -> void:
 		# Ducking deutlich (John): bei Stimmen geht die Musik um ~12 dB runter, danach kommt sie kraftvoll zurück
 		# solange ein Comic (Start/Sieg/Niederlage) läuft, bleibt die Musik zusätzlich etwas leiser – Stimmen und Knüllen liegen klar darüber
 		cm_duck = move_toward(cm_duck, -7.0 if (cm.has("c") and str(cm.get("kind", "")) != "ko") else 0.0, delta * 20.0)
-		AudioServer.set_bus_volume_db(mi, duck_db * 0.86 + cm_duck + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 4.5)   # schön laut (John); der Begrenzer am Musikkanal hält es sauber   # lauter, bei Ansagen nur leicht gedämpft
+		AudioServer.set_bus_volume_db(mi, duck_db * 0.86 + cm_duck + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 2.0)   # laut, aber mit Luft – vorher fuhr der Begrenzer dauernd und es klang übersteuert   # lauter, bei Ansagen nur leicht gedämpft
 
 
 func _sounds() -> void:
@@ -484,7 +502,7 @@ func _sounds() -> void:
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
 			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "blackout.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_nr1.mp3", "music_nr2.mp3", "music_menu.ogg",
-			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav", "cm_crumple.wav"]:
+			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
 	for c in ["ren", "vega", "kato", "mira"]:
@@ -625,10 +643,9 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 		p.bus = "Board" if k in BOARD_VO else "Voice"
 		# solange die Stimme spricht (ohne den Hall am Ende), alles andere absenken
 		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + maxf(0.4, snd[k].get_length() - 0.25) / maxf(0.1, AudioServer.playback_speed_scale))
-	elif k.begins_with("cv_") or k.begins_with("an_") or k == "cm_crumple":
-		# Fehler seit Build 290: diese Stimmen liefen über den Spiel-Kanal – und der wird beim Ducken um 14 dB abgesenkt,
-		# d. h. sie haben sich selbst leise gemacht (John: japanische Stimmen kaum hörbar). Jetzt über den Stimmen-Kanal.
-		p.bus = "Voice"
+	elif k.begins_with("cv_") or k.begins_with("an_"):
+		# Comic-Stimmen und Stadionsprecher: eigener sauberer Kanal (nicht abgesenkt, ohne Helmfunk-Klang)
+		p.bus = "Talk"
 	else:
 		p.bus = "Game"
 	add_child(p)
@@ -19134,10 +19151,7 @@ func _ck_bus(v: float) -> void:
 	var on = v > 0.01
 	AudioServer.set_bus_effect_enabled(gi, 0, on)
 	AudioServer.set_bus_effect_enabled(gi, 1, on)
-	var vi = AudioServer.get_bus_index("Voice")
-	if vi >= 0 and AudioServer.get_bus_effect_count(vi) >= 5:
-		for k in range(2, 5):
-			AudioServer.set_bus_effect_enabled(vi, k, v > 0.5)
+	# (Helmfunk-Klang der Ansagen ist jetzt immer an – nicht mehr nur im Cockpit)
 	if not on:
 		return
 	var lp = AudioServer.get_bus_effect(gi, 0) as AudioEffectLowPassFilter
@@ -19852,8 +19866,7 @@ func _comic_build(kind: String) -> void:
 			var vk = randi() % 3   # nur einer der Verlierer meckert hörbar, sonst wird's ein Durcheinander
 			for i in [1, 2, 3]:
 				var ch2: Array = CHARS[i]
-				pn.append({"ch": ch2, "img": _cm_img(ch2[3] + "_1"), "line": _pick(CM_WIN[ch2[3]]), "t0": 0.8 + k2 * 0.3, "fy": 0.45, "vo": "cv_%s_lose" % ch2[3] if k2 == vk else "",
-					"img2": _cm_img(ch2[3] + "_1c") if ResourceLoader.exists("res://art/comic/%s_1c.jpg" % ch2[3]) else null})
+				pn.append({"ch": ch2, "img": _cm_img(ch2[3] + "_1"), "line": _pick(CM_WIN[ch2[3]]), "t0": 0.8 + k2 * 0.3, "fy": 0.45, "vo": "cv_%s_lose" % ch2[3] if k2 == vk else ""})
 				k2 += 1
 			stamp = ["VICTORY!", Color(1.0, 0.8, 0.2)]
 			hold = true
@@ -19929,13 +19942,6 @@ func _comic_update(dt: float) -> void:
 		cm.sth = true
 		cm.shake = 1.4
 		_snd("cm_stamp", -2.0)
-	# Verlierer zerknittern (John): erst kurz normal, dann Knüllgeräusch – und die Bilder sind zerknittert
-	if cm.kind == "win" and cm.t >= cm.st + 0.85 and not cm.get("crm", false) and cm.skip < 0.0:
-		cm.crm = true
-		cm.crt = cm.t
-		_snd("cm_crumple", 0.0)   # deutlich lauter (John): Datei verdichtet und hochgezogen
-		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + 1.5)   # Musik runter, solange geknüllt wird
-		cm.shake = maxf(float(cm.get("shake", 0.0)), 0.6)
 	cm.shake = maxf(0.0, cm.get("shake", 0.0) - dt * 6.0)
 	var fin = cm.end if cm.skip < 0.0 else cm.skip + 0.25
 	if cm.t > fin:
@@ -20148,26 +20154,6 @@ func _cm_panel(c: Control, font: Font, pd: Dictionary, base: Array, side: float,
 		var li = lerpf(0.42, 1.28, exp(-dl * dl * 1.8)) if kind != "ko" else 1.0
 		cs.append(Color(li + fl * 2.0, li + fl * 2.0, li * 0.97 + fl * 2.0, fa))
 	c.draw_polygon(poly, cs, uvs, img)
-	# zerknitterte Fassung: blendet mit dem Knüllgeräusch über (während des Knüllens kurz zusammengestaucht)
-	var img2 = pd.get("img2")
-	if img2 != null and cm.has("crt"):
-		var ct = (t - float(cm.crt)) / 0.55
-		if ct > 0.0:
-			var ka = clampf(ct, 0.0, 1.0)
-			var sq = sin(clampf(ct, 0.0, 1.0) * PI) * 0.05
-			var pc2 = (mn + mx) * 0.5
-			var p2 = PackedVector2Array()
-			var uv2 = PackedVector2Array()
-			var isz2: Vector2 = (img2 as Texture2D).get_size()
-			var cov2 = maxf(bw / isz2.x, bh / isz2.y)
-			for k in range(poly.size()):
-				var pt = poly[k]
-				p2.append(pc2 + (pt - pc2) * (1.0 - sq))
-				uv2.append(((pt - pc) / (cover * (1.06 - 0.05 * zt) / cover * cov2) + isz2 * Vector2(0.5, pd.fy)) / isz2)
-			var cs2 = PackedColorArray()
-			for k in range(4):
-				cs2.append(Color(cs[k].r, cs[k].g, cs[k].b, fa * ka))
-			c.draw_polygon(p2, cs2, uv2, img2)
 	# Rahmen: dick schwarz, innen eine feine Linie in der Fahrerfarbe
 	var cl = poly.duplicate()
 	cl.append(poly[0])
@@ -21588,6 +21574,9 @@ func _bus_levels() -> void:
 	var vi = AudioServer.get_bus_index("Voice")
 	if vi >= 0:
 		AudioServer.set_bus_volume_db(vi, 6.0 + linear_to_db(maxf(0.001, float(cfg.get("voice", 1.0)))))
+	var tki = AudioServer.get_bus_index("Talk")
+	if tki >= 0:
+		AudioServer.set_bus_volume_db(tki, 6.0 + linear_to_db(maxf(0.001, float(cfg.get("voice", 1.0)))))
 
 
 var music_p: AudioStreamPlayer
@@ -21679,7 +21668,7 @@ var music_st = ""
 var music_nx = false
 # Renn-Songs (John: erstmal nur die zwei „Night Race“-Songs im Wechsel; die alten vier liegen noch in sfx/, sind aber raus)
 const MUSIC_RACE = ["music_nr1", "music_nr2"]
-const MUSIC_GAIN = {"music_nr1": 2.0, "music_nr2": 2.0}   # etwas leiser gemastert als die alten
+const MUSIC_GAIN = {"music_nr1": 0.0, "music_nr2": 0.0}   # etwas leiser gemastert als die alten
 
 
 func _music_update(dt: float) -> void:
@@ -21738,8 +21727,8 @@ func _music_update(dt: float) -> void:
 	else:
 		music_f = minf(1.0, music_f + dt / 1.2)
 	music_p.volume_db = linear_to_db(maxf(0.0005, music_f)) + (float(MUSIC_GAIN.get(music_cur, 0.0)) if music_k == "music_race" else 0.0)
-	# Zeitlupe verlangsamt alle Töne – die Musik soll dabei nicht dumpf und tief werden (John)
-	music_p.pitch_scale = clampf(1.0 / maxf(0.1, AudioServer.playback_speed_scale), 1.0, 4.0)
+	# Zeitlupe: Musik wird wie alles andere hörbar langsamer und tiefer (John mag den Effekt)
+	music_p.pitch_scale = 1.0
 
 
 # ================================================================ Fehlerprotokoll
