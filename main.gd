@@ -10671,6 +10671,17 @@ void fragment(){
 	return false
 
 
+# Explosionsklang wie bei der Super-Rakete (John: „den will ich für alle“): fünf Knalle kurz versetzt
+# an der Einschlagstelle plus ein heller Knall ohne Entfernungsdämpfung
+var boom_mute = false
+
+
+func _boom_snd(pos: Vector3) -> void:
+	for i in range(5):
+		_after(0.05 * i + 0.01, func(): _snd("boom", 4.0, randf_range(0.95, 1.05), pos))
+	_snd("boom", 0.0, 1.3)
+
+
 func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	if state == "kill" and not rp_ev:
 		return
@@ -10731,7 +10742,8 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
 	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light) * (0.3 if _cine() else 1.0), "hu": hu, "sf": sf0})
-	_snd("boom", 4.0, randf_range(0.95, 1.05), pos)   # normale Explosion genauso kräftig wie die große (John)
+	if not boom_mute:
+		_boom_snd(pos)
 	# (früher lief dieselbe Datei zusätzlich halb so schnell als „Wumms“ darunter – mit der neuen Explosion klang das matschig)
 	# Kamera rüttelt, je näher, desto stärker
 	var d = (pos - cam.global_position).length()
@@ -11480,8 +11492,11 @@ func _shot_boom(sh: Dictionary, z: float, lat: float, hit: int) -> void:
 	for i in range(5):
 		var la = lerpf(-T.TW * 0.8, T.TW * 0.8, i / 4.0)
 		var zz = z + 1.0 + randf() * 2.5
-		_after(0.05 * i + 0.01, func(): _explode(zz, la, false, 0.6))
-	_snd("boom", 0.0, 1.3)
+		_after(0.05 * i + 0.01, func():
+			boom_mute = true
+			_explode(zz, la, false, 0.6)
+			boom_mute = false)
+	_boom_snd(T.sframe(z + 2.0, 0.0).c)
 
 
 # Minen fallen nacheinander hinten aus dem Schiff: „dupp, dupp, dupp“; Super-Minen: Teppich über die ganze Breite
