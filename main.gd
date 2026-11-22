@@ -13167,7 +13167,9 @@ async function sndUp(x,file){
  try{const ac=new AudioContext();const b=await ac.decodeAudioData(await file.arrayBuffer());ac.close();
   const sr=44100,n=Math.ceil(b.duration*sr);const oc=new OfflineAudioContext(1,n,sr);const src=oc.createBufferSource();src.buffer=b;src.connect(oc.destination);src.start();
   const out=await oc.startRendering();let d=out.getChannelData(0);let cut=0;
-  if(document.getElementById('sotrim').checked){const th=0.0056;let i=0;while(i<d.length&&Math.abs(d[i])<th)i++;cut=Math.max(0,i-Math.round(0.005*sr));d=d.slice(cut);
+  if(document.getElementById('sotrim').checked){let p0=0;for(let j=0;j<d.length;j++)p0=Math.max(p0,Math.abs(d[j]));
+   // schneiden bis dahin, wo es wirklich laut wird (15 % vom lautesten Punkt) – leises Rauschen vorn zählt nicht als Ton
+   const th=Math.max(0.0056,p0*0.15);let i=0;while(i<d.length&&Math.abs(d[i])<th)i++;cut=Math.max(0,i-Math.round(0.012*sr));d=d.slice(cut);
    const fz=Math.min(d.length,Math.round(0.004*sr));for(let j=0;j<fz;j++)d[j]*=j/fz;}
   let pk=0;for(let j=0;j<d.length;j++)pk=Math.max(pk,Math.abs(d[j]));
   if(document.getElementById('sonorm').checked&&pk>0){const k=0.89/pk;for(let j=0;j<d.length;j++)d[j]*=k;}
