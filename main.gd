@@ -317,12 +317,11 @@ func _buses() -> void:
 		var tlim = AudioEffectHardLimiter.new()
 		tlim.ceiling_db = -0.5
 		AudioServer.add_bus_effect(tki, tlim)
-	# Summen-Begrenzer ganz am Ende: Musik + Geräusche + Stimmen zusammen dürfen nie digital übersteuern (das knackt)
-	if AudioServer.get_bus_effect_count(0) == 0:
-		var mst = AudioEffectHardLimiter.new()
-		mst.ceiling_db = -0.3
-		mst.release = 0.2
-		AudioServer.add_bus_effect(0, mst)
+	# (Summen-Begrenzer auf Master wieder entfernt: lauter Antrieb hat damit die Musik mit zusammengedrückt – dumpf und leise)
+	if OS.get_environment("MUSONLY") != "":
+		for nm2 in ["Game", "Voice", "Talk", "Stadium", "Cabin", "Board", "Start"]:
+			if AudioServer.get_bus_index(nm2) >= 0:
+				AudioServer.set_bus_mute(AudioServer.get_bus_index(nm2), true)
 	var vi = AudioServer.get_bus_index("Voice")
 	_bus_levels()
 	# Begrenzer, damit die lautere Stimme nicht übersteuert
@@ -340,15 +339,15 @@ func _buses() -> void:
 	if AudioServer.get_bus_effect_count(vi) == 2:
 		# Bordfunk im Cockpit (sonst aus): schmalbandig, leicht angezerrt, dadurch klar und knackig über dem dumpfen Rest
 		var rhp = AudioEffectHighPassFilter.new()
-		rhp.cutoff_hz = 380.0
+		rhp.cutoff_hz = 550.0
 		AudioServer.add_bus_effect(vi, rhp)
 		var rlp = AudioEffectLowPassFilter.new()
-		rlp.cutoff_hz = 4200.0
+		rlp.cutoff_hz = 3300.0
 		AudioServer.add_bus_effect(vi, rlp)
 		var rds = AudioEffectDistortion.new()
 		rds.mode = AudioEffectDistortion.MODE_OVERDRIVE
-		rds.drive = 0.22
-		rds.post_gain = 3.0
+		rds.drive = 0.38
+		rds.post_gain = 1.0
 		AudioServer.add_bus_effect(vi, rds)
 		# Helm-Kopfhörer (John): Ansagen und Warnungen klingen immer wie über den Helmfunk
 		for k in range(2, 5):
@@ -491,7 +490,7 @@ func _duck(delta: float) -> void:
 		# Ducking deutlich (John): bei Stimmen geht die Musik um ~12 dB runter, danach kommt sie kraftvoll zurück
 		# solange ein Comic (Start/Sieg/Niederlage) läuft, bleibt die Musik zusätzlich etwas leiser – Stimmen und Knüllen liegen klar darüber
 		cm_duck = move_toward(cm_duck, -7.0 if (cm.has("c") and str(cm.get("kind", "")) != "ko") else 0.0, delta * 20.0)
-		AudioServer.set_bus_volume_db(mi, duck_db * 0.86 + cm_duck + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 2.0)   # laut, aber mit Luft – vorher fuhr der Begrenzer dauernd und es klang übersteuert   # lauter, bei Ansagen nur leicht gedämpft
+		AudioServer.set_bus_volume_db(mi, duck_db * 0.86 + cm_duck + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 3.5)   # laut, aber mit Luft – vorher fuhr der Begrenzer dauernd und es klang übersteuert   # lauter, bei Ansagen nur leicht gedämpft
 
 
 func _sounds() -> void:
@@ -21729,6 +21728,10 @@ func _music_update(dt: float) -> void:
 	music_p.volume_db = linear_to_db(maxf(0.0005, music_f)) + (float(MUSIC_GAIN.get(music_cur, 0.0)) if music_k == "music_race" else 0.0)
 	# Zeitlupe: Musik wird wie alles andere hörbar langsamer und tiefer (John mag den Effekt)
 	music_p.pitch_scale = 1.0
+	# Sicherung: läuft gerade keine Zeitlupe, spielt der Ton in Normaltempo. Sonst konnte das Tempo nach einer
+	# Raketen-Zeitlupe hängen bleiben – die Musik lief dann dauerhaft langsamer, tiefer und dumpf (John)
+	if Engine.time_scale >= 0.999 and AudioServer.playback_speed_scale != 1.0:
+		AudioServer.playback_speed_scale = 1.0
 
 
 # ================================================================ Fehlerprotokoll
