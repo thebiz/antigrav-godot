@@ -298,6 +298,14 @@ func _buses() -> void:
 		AudioServer.add_bus_effect(gi, ceq)
 		AudioServer.set_bus_effect_enabled(gi, 0, false)
 		AudioServer.set_bus_effect_enabled(gi, 1, false)
+	# Musik: nur ein Begrenzer gegen Übersteuern – kein Filter, damit die Songs klar und offen klingen
+	var mui = AudioServer.get_bus_index("Music")
+	if AudioServer.get_bus_effect_count(mui) == 0:
+		var mlim = AudioEffectHardLimiter.new()
+		mlim.ceiling_db = -0.8
+		mlim.pre_gain_db = 0.0
+		mlim.release = 0.12
+		AudioServer.add_bus_effect(mui, mlim)
 	var vi = AudioServer.get_bus_index("Voice")
 	_bus_levels()
 	# Begrenzer, damit die lautere Stimme nicht übersteuert
@@ -461,7 +469,7 @@ func _duck(delta: float) -> void:
 	var mi = AudioServer.get_bus_index("Music")
 	if mi >= 0:
 		# eigener Song (mit Gesang): bei Ansagen deutlich leiser, damit man die Stimme versteht
-		AudioServer.set_bus_volume_db(mi, duck_db * (0.65 if music_cur == "own" else 0.3) + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 2.0)   # lauter, bei Ansagen nur leicht gedämpft
+		AudioServer.set_bus_volume_db(mi, duck_db * (0.65 if music_cur == "own" else 0.3) + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 4.5)   # schön laut (John); der Begrenzer am Musikkanal hält es sauber   # lauter, bei Ansagen nur leicht gedämpft
 
 
 func _sounds() -> void:
@@ -21489,7 +21497,9 @@ func _music_update(dt: float) -> void:
 				music_p.play()
 	else:
 		music_f = minf(1.0, music_f + dt / 1.2)
-	music_p.volume_db = linear_to_db(maxf(0.0005, music_f))
+	music_p.volume_db = linear_to_db(maxf(0.0005, music_f)) + (2.0 if music_cur == "music_race" and music_k == "music_race" else 0.0)   # alter Song ist leiser gemastert
+	# Zeitlupe verlangsamt alle Töne – die Musik soll dabei nicht dumpf und tief werden (John)
+	music_p.pitch_scale = clampf(1.0 / maxf(0.1, AudioServer.playback_speed_scale), 1.0, 4.0)
 
 
 # ================================================================ Fehlerprotokoll
