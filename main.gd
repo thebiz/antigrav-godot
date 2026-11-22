@@ -481,7 +481,7 @@ func _sounds() -> void:
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
 			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "blackout.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_nr1.mp3", "music_nr2.mp3", "music_menu.ogg",
-			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
+			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav", "cm_crumple.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
 	for c in ["ren", "vega", "kato", "mira"]:
@@ -9063,7 +9063,7 @@ func _start() -> void:
 	ui.root.visible = false
 	hud.layer.visible = true
 	if int(cfg.get("comic", 1)) == 1 and not free_ride and rpf.is_empty() and (shot_s in ["", "?"] or shot_s.contains("comic")):
-		_comic_start("start")
+		_comic_start(OS.get_environment("CMKIND") if OS.get_environment("CMKIND") != "" else "start")
 
 
 var rtouch = {}
@@ -19845,7 +19845,8 @@ func _comic_build(kind: String) -> void:
 			var vk = randi() % 3   # nur einer der Verlierer meckert hörbar, sonst wird's ein Durcheinander
 			for i in [1, 2, 3]:
 				var ch2: Array = CHARS[i]
-				pn.append({"ch": ch2, "img": _cm_img(ch2[3] + "_1"), "line": _pick(CM_WIN[ch2[3]]), "t0": 0.8 + k2 * 0.3, "fy": 0.45, "vo": "cv_%s_lose" % ch2[3] if k2 == vk else ""})
+				pn.append({"ch": ch2, "img": _cm_img(ch2[3] + "_1"), "line": _pick(CM_WIN[ch2[3]]), "t0": 0.8 + k2 * 0.3, "fy": 0.45, "vo": "cv_%s_lose" % ch2[3] if k2 == vk else "",
+					"img2": _cm_img(ch2[3] + "_1c") if ResourceLoader.exists("res://art/comic/%s_1c.jpg" % ch2[3]) else null})
 				k2 += 1
 			stamp = ["VICTORY!", Color(1.0, 0.8, 0.2)]
 			hold = true
@@ -19921,6 +19922,12 @@ func _comic_update(dt: float) -> void:
 		cm.sth = true
 		cm.shake = 1.4
 		_snd("cm_stamp", -2.0)
+	# Verlierer zerknittern (John): erst kurz normal, dann Knüllgeräusch – und die Bilder sind zerknittert
+	if cm.kind == "win" and cm.t >= cm.st + 0.85 and not cm.get("crm", false) and cm.skip < 0.0:
+		cm.crm = true
+		cm.crt = cm.t
+		_snd("cm_crumple", 0.0)
+		cm.shake = maxf(float(cm.get("shake", 0.0)), 0.6)
 	cm.shake = maxf(0.0, cm.get("shake", 0.0) - dt * 6.0)
 	var fin = cm.end if cm.skip < 0.0 else cm.skip + 0.25
 	if cm.t > fin:
@@ -20028,7 +20035,7 @@ func _comic_draw(c: Control) -> void:
 			var pt2 = GradientTexture2D.new()
 			var pg = Gradient.new()
 			pg.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
-			pg.colors = PackedColorArray([Color(1.0, 0.93, 0.82, 0.5), Color(1.0, 0.9, 0.8, 0.2), Color(1.0, 0.9, 0.8, 0.0)])
+			pg.colors = PackedColorArray([Color(1.0, 0.93, 0.82, 0.62), Color(1.0, 0.9, 0.8, 0.26), Color(1.0, 0.9, 0.8, 0.0)])
 			pt2.gradient = pg
 			pt2.fill = GradientTexture2D.FILL_RADIAL
 			pt2.fill_from = Vector2(0.5, 0.5)
@@ -20050,7 +20057,7 @@ func _comic_draw(c: Control) -> void:
 			var gt = GradientTexture2D.new()
 			var gr = Gradient.new()
 			gr.offsets = PackedFloat32Array([0.0, 0.35, 0.75, 1.0])
-			gr.colors = PackedColorArray([Color(0, 0, 0, 0), Color(0, 0, 0, 0.08), Color(0, 0, 0, 0.42), Color(0, 0, 0, 0.55)])
+			gr.colors = PackedColorArray([Color(0, 0, 0, 0), Color(0, 0, 0, 0.12), Color(0, 0, 0, 0.58), Color(0, 0, 0, 0.74)])
 			gt.gradient = gr
 			gt.fill = GradientTexture2D.FILL_RADIAL
 			gt.fill_from = Vector2(0.5, 0.5)
@@ -20059,7 +20066,7 @@ func _comic_draw(c: Control) -> void:
 			gt.height = 256
 			cm_tex["_spot"] = gt
 		var R2 = float(cm.spr) * 1.6
-		var dk = Color(0, 0, 0, 0.55 * fa)
+		var dk = Color(0, 0, 0, 0.74 * fa)
 		var rr2 = Rect2(spot - Vector2(R2, R2), Vector2(R2, R2) * 2.0)
 		c.draw_texture_rect(cm_tex["_spot"], rr2, false, Color(1, 1, 1, fa))
 		c.draw_rect(Rect2(0, 0, W, maxf(0.0, rr2.position.y)), dk)
@@ -20130,9 +20137,29 @@ func _cm_panel(c: Control, font: Font, pd: Dictionary, base: Array, side: float,
 	for k in range(4):
 		# Licht je Ecke: im Kegel hell (leicht überstrahlt), außerhalb gedämpft
 		var dl = poly[k].distance_to(spot) / spr
-		var li = lerpf(0.55, 1.18, exp(-dl * dl * 1.6)) if kind != "ko" else 1.0
+		var li = lerpf(0.42, 1.28, exp(-dl * dl * 1.8)) if kind != "ko" else 1.0
 		cs.append(Color(li + fl * 2.0, li + fl * 2.0, li * 0.97 + fl * 2.0, fa))
 	c.draw_polygon(poly, cs, uvs, img)
+	# zerknitterte Fassung: blendet mit dem Knüllgeräusch über (während des Knüllens kurz zusammengestaucht)
+	var img2 = pd.get("img2")
+	if img2 != null and cm.has("crt"):
+		var ct = (t - float(cm.crt)) / 0.55
+		if ct > 0.0:
+			var ka = clampf(ct, 0.0, 1.0)
+			var sq = sin(clampf(ct, 0.0, 1.0) * PI) * 0.05
+			var pc2 = (mn + mx) * 0.5
+			var p2 = PackedVector2Array()
+			var uv2 = PackedVector2Array()
+			var isz2: Vector2 = (img2 as Texture2D).get_size()
+			var cov2 = maxf(bw / isz2.x, bh / isz2.y)
+			for k in range(poly.size()):
+				var pt = poly[k]
+				p2.append(pc2 + (pt - pc2) * (1.0 - sq))
+				uv2.append(((pt - pc) / (cover * (1.06 - 0.05 * zt) / cover * cov2) + isz2 * Vector2(0.5, pd.fy)) / isz2)
+			var cs2 = PackedColorArray()
+			for k in range(4):
+				cs2.append(Color(cs[k].r, cs[k].g, cs[k].b, fa * ka))
+			c.draw_polygon(p2, cs2, uv2, img2)
 	# Rahmen: dick schwarz, innen eine feine Linie in der Fahrerfarbe
 	var cl = poly.duplicate()
 	cl.append(poly[0])
