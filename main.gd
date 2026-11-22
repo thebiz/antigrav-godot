@@ -489,8 +489,8 @@ func _duck(delta: float) -> void:
 		# eigener Song (mit Gesang): bei Ansagen deutlich leiser, damit man die Stimme versteht
 		# Ducking deutlich (John): bei Stimmen geht die Musik um ~12 dB runter, danach kommt sie kraftvoll zurück
 		# solange ein Comic (Start/Sieg/Niederlage) läuft, bleibt die Musik zusätzlich etwas leiser – Stimmen und Knüllen liegen klar darüber
-		cm_duck = move_toward(cm_duck, -7.0 if (cm.has("c") and str(cm.get("kind", "")) != "ko") else 0.0, delta * 20.0)
-		AudioServer.set_bus_volume_db(mi, duck_db * 0.86 + cm_duck + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 3.5)   # laut, aber mit Luft – vorher fuhr der Begrenzer dauernd und es klang übersteuert   # lauter, bei Ansagen nur leicht gedämpft
+		# John: Musik ganz ohne Ducking – sie läuft immer gleichmäßig durch, Stimmen liegen auf eigenen Kanälen darüber
+		AudioServer.set_bus_volume_db(mi, linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 3.5)   # laut, aber mit Luft – vorher fuhr der Begrenzer dauernd und es klang übersteuert   # lauter, bei Ansagen nur leicht gedämpft
 
 
 func _sounds() -> void:
@@ -8985,7 +8985,45 @@ func _show_replays(on: bool) -> void:
 	pnl.add_child(back)
 
 
+var set_in_pause = false   # Einstellungen gerade aus dem Pausenmenü geöffnet (Rennen läuft danach weiter)
+
+
+# Einstellungen im Pausenmenü: das Einstellungsfenster wird kurz in die Pausen-Ebene umgehängt,
+# „Back“ führt zurück in die Pause, „Resume“ fährt an derselben Stelle weiter (John)
+func _pause_settings(open: bool) -> void:
+	if not ui.has("setp") or not is_instance_valid(ui.setp):
+		return
+	var sp: Control = ui.setp
+	if open:
+		if paused_ui == null or not is_instance_valid(paused_ui):
+			return
+		if not ui.has("setp_par"):
+			ui.setp_par = sp.get_parent()
+		set_in_pause = true
+		sp.reparent(paused_ui, false)
+		sp.process_mode = Node.PROCESS_MODE_ALWAYS
+		if paused_ui.has_meta("box"):
+			(paused_ui.get_meta("box") as Control).visible = false
+			(paused_ui.get_meta("dim") as ColorRect).color = Color(0.02, 0.02, 0.04, 0.9)   # Rennen dahinter ruhig abdunkeln
+		_fit(sp)
+		sp.visible = true
+		_scr_prep(sp)
+		_refresh_ui()
+	else:
+		set_in_pause = false
+		sp.visible = false
+		if ui.has("setp_par") and is_instance_valid(ui.setp_par) and sp.get_parent() != ui.setp_par:
+			sp.reparent(ui.setp_par, false)
+		sp.process_mode = Node.PROCESS_MODE_INHERIT
+		if paused_ui != null and is_instance_valid(paused_ui) and paused_ui.has_meta("box"):
+			(paused_ui.get_meta("box") as Control).visible = true
+			(paused_ui.get_meta("dim") as ColorRect).color = Color(0, 0, 0, 0.62)
+
+
 func _show_settings(on: bool) -> void:
+	if not on and set_in_pause:
+		_pause_settings(false)
+		return
 	if on:
 		_fit(ui.setp)
 	ui.setp.visible = on
@@ -21443,6 +21481,8 @@ func _to_menu() -> void:
 func _pause(on: bool) -> void:
 	_bc("pause %s" % on)
 	if not on:
+		if set_in_pause:
+			_pause_settings(false)
 		get_tree().paused = false
 		if paused_ui != null and is_instance_valid(paused_ui):
 			paused_ui.queue_free()
@@ -21506,6 +21546,11 @@ func _pause(on: bool) -> void:
 		AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.001, float(cfg.vol))))
 		_save_cfg())
 	bx.add_child(hs)
+	var bse = _solid(_btn("SETTINGS"))
+	bse.pressed.connect(func(): _pause_settings(true))
+	bx.add_child(bse)
+	cl.set_meta("box", bx)
+	cl.set_meta("dim", dim)
 	var b2 = _solid(_btn("RESTART"))
 	b2.pressed.connect(func(): _race_again())
 	bx.add_child(b2)
@@ -21846,6 +21891,18 @@ func _dg_tick(delta: float) -> void:
 		set_meta("ftl", now)
 		if ft > float(OS.get_environment("FTDBG")):
 			print("FT %.0f ms state=%s t=%.2f warm=%.2f" % [ft, state, t_state, warm_t])
+	if OS.get_environment("PAUSESET") != "" and state == "race" and t_state > 1.5 and not has_meta("pst"):
+		set_meta("pst", true)
+		_pause(true)
+		_pause_settings(true)
+		var tm = get_tree().create_timer(1.2, true)
+		tm.timeout.connect(func():
+			get_viewport().get_texture().get_image().save_png(OS.get_environment("PAUSESET"))
+			_show_settings(false)
+			var tm2 = get_tree().create_timer(0.6, true)
+			tm2.timeout.connect(func():
+				get_viewport().get_texture().get_image().save_png(OS.get_environment("PAUSESET").replace(".png", "_b.png"))
+				get_tree().quit()))
 	if OS.get_environment("BENCHBTN") != "" and OS.get_environment("AG_RELOADED") == "" and not has_meta("bb") and Engine.get_process_frames() > 20:
 		# nur zum Testen: wie der Knopf „Performance test“ in den Einstellungen
 		set_meta("bb", 1)
