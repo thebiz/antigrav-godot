@@ -456,6 +456,7 @@ func _start_play(short: bool) -> void:
 
 var duck_until = 0.0
 var duck_db = 0.0
+var cm_duck = 0.0
 
 
 func _duck(delta: float) -> void:
@@ -470,7 +471,9 @@ func _duck(delta: float) -> void:
 	if mi >= 0:
 		# eigener Song (mit Gesang): bei Ansagen deutlich leiser, damit man die Stimme versteht
 		# Ducking deutlich (John): bei Stimmen geht die Musik um ~12 dB runter, danach kommt sie kraftvoll zurück
-		AudioServer.set_bus_volume_db(mi, duck_db * 0.86 + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 4.5)   # schön laut (John); der Begrenzer am Musikkanal hält es sauber   # lauter, bei Ansagen nur leicht gedämpft
+		# solange ein Comic (Start/Sieg/Niederlage) läuft, bleibt die Musik zusätzlich etwas leiser – Stimmen und Knüllen liegen klar darüber
+		cm_duck = move_toward(cm_duck, -7.0 if (cm.has("c") and str(cm.get("kind", "")) != "ko") else 0.0, delta * 20.0)
+		AudioServer.set_bus_volume_db(mi, duck_db * 0.86 + cm_duck + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 4.5)   # schön laut (John); der Begrenzer am Musikkanal hält es sauber   # lauter, bei Ansagen nur leicht gedämpft
 
 
 func _sounds() -> void:
@@ -19926,7 +19929,8 @@ func _comic_update(dt: float) -> void:
 	if cm.kind == "win" and cm.t >= cm.st + 0.85 and not cm.get("crm", false) and cm.skip < 0.0:
 		cm.crm = true
 		cm.crt = cm.t
-		_snd("cm_crumple", 0.0)
+		_snd("cm_crumple", 0.0)   # deutlich lauter (John): Datei verdichtet und hochgezogen
+		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + 1.5)   # Musik runter, solange geknüllt wird
 		cm.shake = maxf(float(cm.get("shake", 0.0)), 0.6)
 	cm.shake = maxf(0.0, cm.get("shake", 0.0) - dt * 6.0)
 	var fin = cm.end if cm.skip < 0.0 else cm.skip + 0.25
