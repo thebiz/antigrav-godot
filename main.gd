@@ -625,6 +625,10 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 		p.bus = "Board" if k in BOARD_VO else "Voice"
 		# solange die Stimme spricht (ohne den Hall am Ende), alles andere absenken
 		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + maxf(0.4, snd[k].get_length() - 0.25) / maxf(0.1, AudioServer.playback_speed_scale))
+	elif k.begins_with("cv_") or k.begins_with("an_") or k == "cm_crumple":
+		# Fehler seit Build 290: diese Stimmen liefen über den Spiel-Kanal – und der wird beim Ducken um 14 dB abgesenkt,
+		# d. h. sie haben sich selbst leise gemacht (John: japanische Stimmen kaum hörbar). Jetzt über den Stimmen-Kanal.
+		p.bus = "Voice"
 	else:
 		p.bus = "Game"
 	add_child(p)
