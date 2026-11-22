@@ -57,7 +57,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1, "tmega": 0, "fblur": 1, "osong": "", "osongn": ""}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1, "tmega": 0, "fblur": 1, "osong": "", "osongn": "", "duck": 0.5}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -300,12 +300,8 @@ func _buses() -> void:
 		AudioServer.set_bus_effect_enabled(gi, 1, false)
 	# Musik: nur ein Begrenzer gegen Übersteuern – kein Filter, damit die Songs klar und offen klingen
 	var mui = AudioServer.get_bus_index("Music")
-	if AudioServer.get_bus_effect_count(mui) == 0:
-		var mlim = AudioEffectHardLimiter.new()
-		mlim.ceiling_db = -0.8
-		mlim.pre_gain_db = 0.0
-		mlim.release = 0.12
-		AudioServer.add_bus_effect(mui, mlim)
+	while AudioServer.get_bus_effect_count(mui) > 0:
+		AudioServer.remove_bus_effect(mui, 0)   # keinerlei Effekt auf der Musik
 	var tki = AudioServer.get_bus_index("Talk")
 	if AudioServer.get_bus_effect_count(tki) == 0:
 		var tcp = AudioEffectCompressor.new()
@@ -486,11 +482,10 @@ func _duck(delta: float) -> void:
 		AudioServer.set_bus_volume_db(gi, duck_db)
 	var mi = AudioServer.get_bus_index("Music")
 	if mi >= 0:
-		# eigener Song (mit Gesang): bei Ansagen deutlich leiser, damit man die Stimme versteht
-		# Ducking deutlich (John): bei Stimmen geht die Musik um ~12 dB runter, danach kommt sie kraftvoll zurück
-		# solange ein Comic (Start/Sieg/Niederlage) läuft, bleibt die Musik zusätzlich etwas leiser – Stimmen und Knüllen liegen klar darüber
-		# John: Musik ganz ohne Ducking – sie läuft immer gleichmäßig durch, Stimmen liegen auf eigenen Kanälen darüber
-		AudioServer.set_bus_volume_db(mi, linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 3.5)   # laut, aber mit Luft – vorher fuhr der Begrenzer dauernd und es klang übersteuert   # lauter, bei Ansagen nur leicht gedämpft
+		# Musik: unverändert (kein Filter, kein Begrenzer), Lautstärke nur über den Music-Regler.
+		# Bei Ansagen geht sie um den Ducking-Regler herunter (0 … 18 dB) – John stellt das selbst ein
+		var dk = clampf(duck_db / -14.0, 0.0, 1.0) * float(cfg.get("duck", 0.5)) * -18.0
+		AudioServer.set_bus_volume_db(mi, linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 2.0 + dk)
 
 
 func _sounds() -> void:
@@ -537,6 +532,7 @@ func _sounds() -> void:
 		loops[k] = p2
 	# Musik: eigener Kanal (Regler „Music“ in den Einstellungen), wechselt weich zwischen Menü und Rennen
 	music_p = AudioStreamPlayer.new()
+	music_p.process_mode = Node.PROCESS_MODE_ALWAYS   # Musik läuft in der Pause weiter (Regler sofort hörbar)
 	music_p.bus = "Music"
 	music_p.volume_db = -80.0
 	add_child(music_p)
@@ -610,6 +606,14 @@ var vo_probe_t = 0.0
 var vo_probe_i = 0
 
 
+# Musik-Vorschau beim Music-Regler: läuft keine Musik (z. B. in der Pause), spielt kurz der Renn-Song an
+func _music_probe() -> void:
+	if music_p != null and not music_p.playing:
+		music_p.stream = snd.get(MUSIC_RACE[0], music_p.stream)
+		music_p.play()
+		music_f = 1.0
+
+
 func _voice_probe() -> void:
 	var now = Time.get_ticks_msec() / 1000.0
 	if now - vo_probe_t < 0.8:
@@ -634,6 +638,8 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 	p.stream = snd[k]
 	p.volume_db = db
 	p.pitch_scale = pitch
+	if get_tree().paused:
+		p.process_mode = Node.PROCESS_MODE_ALWAYS   # z. B. Stimmprobe in den Einstellungen im Pausenmenü
 	if k.begins_with("cv_") or k.begins_with("an_"):
 		# Fahrer-Sprüche und Stadionsprecher: Musik ebenfalls absenken, damit man sie versteht
 		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + maxf(0.4, snd[k].get_length() - 0.25) / maxf(0.1, AudioServer.playback_speed_scale))
@@ -8656,7 +8662,7 @@ func _menu() -> void:
 	top.add_child(spc)
 	sp.add_child(top)
 	ui.sl = {}
-	for it in [["speed", 0.5, 4.0], ["ai", 0.7, 1.4], ["res", 0.5, 1.0], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0], ["music", 0.0, 1.0], ["voice", 0.0, 2.0]]:
+	for it in [["speed", 0.5, 4.0], ["ai", 0.7, 1.4], ["res", 0.5, 1.0], ["glow", 0.0, 1.5], ["neon", 0.2, 1.5], ["vol", 0.0, 1.0], ["music", 0.0, 1.0], ["voice", 0.0, 2.0], ["duck", 0.0, 1.0]]:
 		var k: String = it[0]
 		var lb = _lbl("", 30)
 		sp.add_child(lb)
@@ -8679,8 +8685,11 @@ func _menu() -> void:
 			_refresh_ui()
 			_apply_cfg()
 			_save_cfg()
-			if k == "voice":
-				_voice_probe())
+			# sofort hören, wie es klingt: Stimme bei Voices, Stimme + abgesenkte Musik beim Ducking
+			if k == "voice" or k == "duck":
+				_voice_probe()
+			if k == "music":
+				_music_probe())
 		sp.add_child(hs)
 		ui.sl[k] = lb
 	sp.add_child(_lbl("Graphics", 32))
@@ -8990,6 +8999,24 @@ var set_in_pause = false   # Einstellungen gerade aus dem Pausenmenü geöffnet 
 
 # Einstellungen im Pausenmenü: das Einstellungsfenster wird kurz in die Pausen-Ebene umgehängt,
 # „Back“ führt zurück in die Pause, „Resume“ fährt an derselben Stelle weiter (John)
+var pause_fwd: Node = null
+
+
+# Hilfsknoten, der auch in der Pause läuft: reicht Fingereingaben an die Einstellungen weiter (Regler, Scrollen)
+# und lässt das Ducking weiterlaufen – sonst reagierte in der Pause nichts (John)
+func _pause_fwd_make() -> void:
+	if pause_fwd != null and is_instance_valid(pause_fwd):
+		return
+	var gs = GDScript.new()
+	gs.source_code = "extends Node\nvar m\nfunc _input(e):\n\tif get_tree().paused and m != null and m.set_in_pause:\n\t\tm._input(e)\nfunc _process(d):\n\tif get_tree().paused and m != null:\n\t\tm._duck(d)\n"
+	gs.reload()
+	pause_fwd = Node.new()
+	pause_fwd.set_script(gs)
+	pause_fwd.set("m", self)
+	pause_fwd.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(pause_fwd)
+
+
 func _pause_settings(open: bool) -> void:
 	if not ui.has("setp") or not is_instance_valid(ui.setp):
 		return
@@ -9000,6 +9027,8 @@ func _pause_settings(open: bool) -> void:
 		if not ui.has("setp_par"):
 			ui.setp_par = sp.get_parent()
 		set_in_pause = true
+		if OS.get_environment("NOFWD") == "":
+			_pause_fwd_make()
 		sp.reparent(paused_ui, false)
 		sp.process_mode = Node.PROCESS_MODE_ALWAYS
 		if paused_ui.has_meta("box"):
@@ -9057,6 +9086,7 @@ func _refresh_ui() -> void:
 	ui.sl.vol.text = "Volume  %d %%" % int(round(float(cfg.vol) * 100.0))
 	ui.sl.music.text = "Music  %d %%" % int(round(float(cfg.music) * 100.0))
 	ui.sl.voice.text = "Voices  %d %%" % int(round(float(cfg.voice) * 100.0))
+	ui.sl.duck.text = "Music ducking on voices  −%d dB" % int(round(float(cfg.get("duck", 0.5)) * 18.0))
 	for q in range(3):
 		ui.gfx[q].button_pressed = int(cfg.gfx) == q
 		var on = int(cfg.gfx) == q
@@ -21721,6 +21751,7 @@ func _music_update(dt: float) -> void:
 	if not is_instance_valid(music_p):
 		# (wurde früher beim Neustart des Rennens mit weggeräumt – dann war die Musik stumm)
 		music_p = AudioStreamPlayer.new()
+		music_p.process_mode = Node.PROCESS_MODE_ALWAYS
 		music_p.bus = "Music"
 		music_p.volume_db = -80.0
 		add_child(music_p)
@@ -21897,6 +21928,51 @@ func _dg_tick(delta: float) -> void:
 		_pause_settings(true)
 		var tm = get_tree().create_timer(1.2, true)
 		tm.timeout.connect(func():
+			var tb: Button = null
+			for b in (ui.setp as Node).find_children("*", "Button", true, false):
+				if (b as Button).text == "Medium":
+					tb = b
+			(ui.setp as ScrollContainer).ensure_control_visible(tb)
+			await get_tree().create_timer(0.2, true).timeout
+			var xf = get_viewport().get_final_transform()
+			var cpos = xf * tb.get_global_rect().get_center()
+			for pr in [true, false]:
+				var te = InputEventScreenTouch.new()
+				te.index = 0
+				te.position = cpos
+				te.pressed = pr
+				Input.parse_input_event(te)
+			var gsl: Slider = null
+			for n in (ui.setp as Node).find_children("*", "Slider", true, false):
+				if gsl == null and (n as Slider).is_visible_in_tree() and (n as Slider).get_global_rect().position.y > 200:
+					gsl = n
+			var r0 = gsl.get_global_rect()
+			var r = Rect2(xf * r0.position, r0.size * xf.get_scale())
+			var v0 = gsl.value
+			var t0 = InputEventScreenTouch.new()
+			t0.index = 1
+			t0.position = r.position + Vector2(r.size.x * 0.2, r.size.y * 0.5)
+			t0.pressed = true
+			Input.parse_input_event(t0)
+			for k in range(1, 8):
+				var dr = InputEventScreenDrag.new()
+				dr.index = 1
+				dr.position = r.position + Vector2(r.size.x * (0.2 + 0.1 * k), r.size.y * 0.5)
+				dr.relative = Vector2(r.size.x * 0.1, 0)
+				Input.parse_input_event(dr)
+			var t1 = InputEventScreenTouch.new()
+			t1.index = 1
+			t1.position = r.position + Vector2(r.size.x * 0.9, r.size.y * 0.5)
+			t1.pressed = false
+			Input.parse_input_event(t1)
+			var mm = InputEventMouseMotion.new()
+			mm.position = cpos
+			mm.global_position = cpos
+			Input.parse_input_event(mm)
+			await get_tree().create_timer(0.3, true).timeout
+			var hc = get_viewport().gui_get_hovered_control()
+			print("PTEST hovered=", hc, " ", hc.get_path() if hc != null else "", " btnproc=", tb.can_process(), " vis=", tb.is_visible_in_tree(), " rect=", tb.get_global_rect())
+			print("PTEST gfx=", cfg.gfx, " slider ", v0, " -> ", gsl.value)
 			get_viewport().get_texture().get_image().save_png(OS.get_environment("PAUSESET"))
 			_show_settings(false)
 			var tm2 = get_tree().create_timer(0.6, true)
