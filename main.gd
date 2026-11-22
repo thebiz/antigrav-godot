@@ -469,7 +469,8 @@ func _duck(delta: float) -> void:
 	var mi = AudioServer.get_bus_index("Music")
 	if mi >= 0:
 		# eigener Song (mit Gesang): bei Ansagen deutlich leiser, damit man die Stimme versteht
-		AudioServer.set_bus_volume_db(mi, duck_db * (0.65 if music_cur == "own" else 0.3) + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 4.5)   # schön laut (John); der Begrenzer am Musikkanal hält es sauber   # lauter, bei Ansagen nur leicht gedämpft
+		# Ducking deutlich (John): bei Stimmen geht die Musik um ~12 dB runter, danach kommt sie kraftvoll zurück
+		AudioServer.set_bus_volume_db(mi, duck_db * 0.86 + linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 4.5)   # schön laut (John); der Begrenzer am Musikkanal hält es sauber   # lauter, bei Ansagen nur leicht gedämpft
 
 
 func _sounds() -> void:
@@ -613,6 +614,9 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 	p.stream = snd[k]
 	p.volume_db = db
 	p.pitch_scale = pitch
+	if k.begins_with("cv_") or k.begins_with("an_"):
+		# Fahrer-Sprüche und Stadionsprecher: Musik ebenfalls absenken, damit man sie versteht
+		duck_until = maxf(duck_until, Time.get_ticks_msec() / 1000.0 + maxf(0.4, snd[k].get_length() - 0.25) / maxf(0.1, AudioServer.playback_speed_scale))
 	if k.begins_with("vo_") or k == "incoming":
 		_rev(["vo", k, db])   # Ansagen auch in der Wiederholung
 		p.bus = "Board" if k in BOARD_VO else "Voice"
