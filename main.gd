@@ -502,8 +502,24 @@ const SND_NAMES = {"boom": "Explosion", "engine": "Schiff – Fahrt (Schleife)",
 	"crash_bump": "Wand-Stoß", "crash_scrape": "Wand-Schrammen", "debris": "Trümmer", "start": "Start", "go": "GO", "win": "Sieg", "lap": "Runde"}
 
 
+# Lautstärke je Ansicht: g = Außenansicht, h = Helm (fehlt h, gilt g) – gleitet mit dem Umschalten
 func _sg(k: String) -> float:
-	return float(sadj.get(k, {}).get("g", 0.0))
+	var a: Dictionary = sadj.get(k, {})
+	var g0 = float(a.get("g", 0.0))
+	return lerpf(g0, float(a.get("h", g0)), ck_snd)
+
+
+# Klang-Grundeinstellungen aus dem Sounds-Reiter
+const SGL_DEF = {"hlp": 1400.0, "hb": 1.0, "br": 14.0, "slo": 1.0}
+
+
+func _sgl(n: String) -> float:
+	return float(sadj.get("_", {}).get(n, SGL_DEF[n]))
+
+
+# Zeitlupe: wie stark der Ton mit langsamer wird (0 = gar nicht, 1 = wie bisher)
+func _pss(v: float) -> void:
+	AudioServer.playback_speed_scale = lerpf(1.0, v, clampf(_sgl("slo"), 0.0, 1.0))
 
 
 func _sp_(k: String) -> float:
@@ -556,6 +572,49 @@ func _snd_replace_loop(k: String) -> void:
 
 
 # Vorhören am Handy: einmal abspielen (Schleifen 4 s lang), unabhängig vom Ducking
+func _prev_bus(helm: bool) -> void:
+	var bi = AudioServer.get_bus_index("Prev")
+	if bi < 0:
+		AudioServer.add_bus()
+		bi = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(bi, "Prev")
+		AudioServer.set_bus_send(bi, "Master")
+		AudioServer.add_bus_effect(bi, AudioEffectLowPassFilter.new())
+		AudioServer.add_bus_effect(bi, AudioEffectEQ6.new())
+	var lp = AudioServer.get_bus_effect(bi, 0) as AudioEffectLowPassFilter
+	lp.cutoff_hz = _sgl("hlp")
+	lp.resonance = 0.6
+	var eq = AudioServer.get_bus_effect(bi, 1) as AudioEffectEQ6
+	var hb = _sgl("hb")
+	eq.set_band_gain_db(0, 5.0 * hb)
+	eq.set_band_gain_db(1, 4.0 * hb)
+	eq.set_band_gain_db(2, 1.5 * hb)
+	AudioServer.set_bus_effect_enabled(bi, 0, helm)
+	AudioServer.set_bus_effect_enabled(bi, 1, helm)
+
+
+# Vorhören so, wie es im Spiel klingt: gewählte Ansicht (Helm mit Helm-Dämpfung), Explosion mit allen Knallen
+func _snd_preview_v(k: String, helm: bool) -> void:
+	if not snd.has(k) or snd[k] == null:
+		return
+	_prev_bus(helm)
+	var a: Dictionary = sadj.get(k, {})
+	var gv = float(a.get("h", a.get("g", 0.0))) if helm else float(a.get("g", 0.0))
+	var lay = [[0.0, 0.0, 1.0]]
+	if k == "boom":
+		lay = [[0.01, 4.0, 1.0], [0.06, 4.0, 0.97], [0.11, 4.0, 1.03], [0.16, 4.0, 0.99], [0.21, 4.0, 1.02], [0.0, 0.0, 1.3]]
+	for L in lay:
+		var p = AudioStreamPlayer.new()
+		p.stream = snd[k]
+		p.bus = "Prev"
+		p.volume_db = gv + float(L[1]) - 6.0
+		p.pitch_scale = _sp_(k) * float(L[2])
+		p.process_mode = Node.PROCESS_MODE_ALWAYS
+		add_child(p)
+		get_tree().create_timer(float(L[0]), true, false, true).timeout.connect(p.play)
+		get_tree().create_timer(minf(6.0, (snd[k] as AudioStream).get_length() + 0.5), true, false, true).timeout.connect(p.queue_free)
+
+
 func _snd_preview(k: String) -> void:
 	if not snd.has(k) or snd[k] == null:
 		return
@@ -578,7 +637,7 @@ func _snd_list() -> Array:
 		if snd[k] == null or k in ["amb_city", "amb_jungle"] or str(k).begins_with("music_"):
 			continue
 		var lp = loops.has(k) or k == "rk_loop"
-		out.append({"k": k, "n": SND_NAMES.get(k, ""), "len": snappedf((snd[k] as AudioStream).get_length(), 0.01), "g": _sg(k), "p": _sp_(k),
+		out.append({"k": k, "n": SND_NAMES.get(k, ""), "len": snappedf((snd[k] as AudioStream).get_length(), 0.01), "g": float(sadj.get(k, {}).get("g", 0.0)), "h": float(sadj.get(k, {}).get("h", sadj.get(k, {}).get("g", 0.0))), "p": _sp_(k),
 			"c": snd_orig.has(k), "loop": lp})
 	return out
 
@@ -759,7 +818,7 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 		p = AudioStreamPlayer.new()
 	else:
 		p = AudioStreamPlayer3D.new()
-		p.unit_size = 14.0 if k in ["boom", "ko_boom", "minedrop"] else 4.0   # Explosionen auch aus der Entfernung kräftig
+		p.unit_size = _sgl("br") if k in ["boom", "ko_boom", "minedrop"] else 4.0   # Explosionen: Reichweite im Sounds-Reiter
 		p.max_distance = 120.0 if k in ["boom", "ko_boom"] else 70.0
 		p.position = at
 	p.stream = snd[k]
@@ -795,6 +854,8 @@ func _sound_update(dt: float) -> void:
 	var ckt = 1.0 if _ck_on() else 0.0
 	ck_snd += (ckt - ck_snd) * (1.0 - exp(-dt / 0.15))
 	_ck_bus(ck_snd)
+	for lk in loops:
+		_snd_live_apply(lk)   # Schleifen: Lautstärke je Ansicht (Außen/Helm) mitgleiten lassen
 	var pk = 1.0 - 0.14 * ck_snd
 	# neue Aufnahmen (John): Fahrt-Sound wird mit dem Tempo lauter und nur leicht höher, der Stand-Sound blendet beim Losfahren aus
 	var spc = clampf(sp, 0.0, 1.4)
@@ -10677,6 +10738,8 @@ var boom_mute = false
 
 
 func _boom_snd(pos: Vector3) -> void:
+	if warm:
+		return   # Vorwärmen beim Start: stumm (sonst kam der Knall verspätet doch noch)
 	for i in range(5):
 		_after(0.05 * i + 0.01, func(): _snd("boom", 4.0, randf_range(0.95, 1.05), pos))
 	_snd("boom", 0.0, 1.3)
@@ -12869,15 +12932,27 @@ func _live_answer(c: StreamPeerTCP, path: String, body := PackedByteArray()) -> 
 				qs[kv.get_slice("=", 0)] = kv.get_slice("=", 1).uri_decode()
 		var sk = str(qs.get("k", ""))
 		if path.begins_with("/snd/list"):
-			_live_send(c, "application/json", JSON.stringify(_snd_list()))
+			var G = {}
+			for n in SGL_DEF:
+				G[n] = _sgl(n)
+			_live_send(c, "application/json", JSON.stringify({"l": _snd_list(), "G": G, "ck": ck_snd > 0.5}))
 		elif path.begins_with("/snd/play"):
-			_snd_preview(sk)
+			_snd_preview_v(sk, str(qs.get("v", "a")) == "h")
 			_live_send(c, "text/plain", "ok")
 		elif path.begins_with("/snd/set"):
 			if snd.has(sk):
-				sadj[sk] = {"g": clampf(float(qs.get("g", "0")), -30.0, 18.0), "p": clampf(float(qs.get("p", "1")), 0.3, 3.0)}
+				sadj[sk] = {"g": clampf(float(qs.get("g", "0")), -30.0, 18.0), "h": clampf(float(qs.get("h", qs.get("g", "0"))), -30.0, 18.0), "p": clampf(float(qs.get("p", "1")), 0.3, 3.0)}
 				_snd_live_apply(sk)
 				_sadj_save()
+			_live_send(c, "text/plain", "ok")
+		elif path.begins_with("/snd/glob"):
+			var G2 = sadj.get("_", {})
+			for n in SGL_DEF:
+				if qs.has(n):
+					G2[n] = float(qs[n])
+			sadj["_"] = G2
+			ck_bus_v = -1.0   # Helm-Filter sofort neu setzen
+			_sadj_save()
 			_live_send(c, "text/plain", "ok")
 		elif path.begins_with("/snd/up"):
 			_live_send(c, "text/plain", _snd_upload(sk, body))
@@ -13140,35 +13215,57 @@ function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked&&D[i].g!='sounds'
    s.value=Math.min(it.hi,Math.max(it.lo,+s.value+(e.deltaY<0?st:-st)));s.oninput();},{passive:false});
   r.append(l,s,v,z);m.append(r);});
 }
-// ---- Sounds: anhören (am Handy), Lautstärke/Tonhöhe, eigene Datei reinziehen
-let SL=[],SF='';
+// ---- Sounds: anhören (am Handy, so wie im Spiel), Lautstärke je Ansicht, Helm-Klang, eigene Datei reinziehen
+let SL=[],SF='',SG={},SV=localStorage.getItem('sv')||'a';
+function sbtn(t,on){const b=document.createElement('button');b.textContent=t;b.style.cssText='background:'+(on?'#ef6a2e':'#151a2a')+';color:#fff;border:1px solid #2a3350;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:14px';return b;}
 function sndUI(m){
+ const vb=document.createElement('div');vb.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 8px';
+ const vl=document.createElement('span');vl.textContent='Ansicht:';vl.style.color='#9fb0cc';vb.append(vl);
+ [['a','Außenansicht'],['h','Helm']].forEach(([v,n])=>{const b=sbtn(n,SV==v);b.onclick=()=>{SV=v;localStorage.setItem('sv',v);show(cur);};vb.append(b);});
+ const vh=document.createElement('span');vh.style.cssText='font-size:12px;color:#6c7a96';vh.textContent='Lautstärken gelten nur für die gewählte Ansicht. ▶ spielt am Handy so ab, wie es in dieser Ansicht im Spiel klingt.';vb.append(vh);m.append(vb);
+ const gb=document.createElement('div');gb.style.cssText='border:1px solid #2a3350;border-radius:8px;padding:6px 12px;margin:0 0 12px';m.append(gb);
  const top=document.createElement('div');top.style.cssText='display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:4px 0 10px';
  const f=document.createElement('input');f.placeholder='Suchen …';f.value=SF;f.style.cssText='background:#151a2a;color:#e8ecf5;border:1px solid #2a3350;border-radius:8px;padding:7px 10px;width:180px';
  const o1=document.createElement('label');o1.innerHTML='<input type="checkbox" id="sotrim" checked> Stille am Anfang entfernen';
  const o2=document.createElement('label');o2.innerHTML='<input type="checkbox" id="sonorm" checked> auf volle Lautstärke bringen';
  [o1,o2].forEach(o=>o.style.cssText='color:#cfd8ea;display:flex;gap:5px;align-items:center;font-size:13px');
  const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:#6c7a96;width:100%';
- hint.textContent='▶ spielt den Sound am Handy ab. Neue Datei (wav, mp3, ogg): einfach auf die Zeile ziehen oder „Datei …“ – wirkt sofort im Spiel, ohne neue APK.';
+ hint.textContent='Neue Datei (wav, mp3, ogg): einfach auf die Zeile ziehen oder „Datei …“ – wirkt sofort im Spiel, ohne neue APK. Explosion: ▶ spielt alle Knalle wie im Spiel.';
  top.append(f,o1,o2,hint);m.append(top);
  const box=document.createElement('div');m.append(box);
  f.oninput=()=>{SF=f.value.toLowerCase();rows();};
  function rows(){box.innerHTML='';SL.filter(x=>!SF||x.k.toLowerCase().includes(SF)||x.n.toLowerCase().includes(SF)).forEach(x=>box.append(sndRow(x)));}
- fetch('/snd/list').then(r=>r.json()).then(l=>{SL=l;l.sort((a,b)=>(b.n?1:0)-(a.n?1:0)||a.k.localeCompare(b.k));rows();}).catch(()=>st.textContent='keine Verbindung');}
+ fetch('/snd/list').then(r=>r.json()).then(d=>{SL=d.l;SG=d.G;SL.sort((a,b)=>(b.n?1:0)-(a.n?1:0)||a.k.localeCompare(b.k));globUI(gb);rows();}).catch(()=>st.textContent='keine Verbindung');}
+function globUI(gb){gb.innerHTML='';
+ const h=document.createElement('div');h.textContent='Klang im Spiel';h.style.cssText='color:#5ee8ff;font-size:14px;margin:4px 0';gb.append(h);
+ const G=[['hlp','Helm: wie dumpf (Höhen ab)',600,8000,10,v=>(v/1000).toFixed(1)+' kHz',1400,'Je kleiner, desto dumpfer klingt alles im Helm. Standard 1,4 kHz.'],
+  ['hb','Helm: Bass',0,2.5,0.05,v=>Math.round(v*100)+' %',1,'Wie viel Tiefbass der Helm dazugibt. 100 % = Standard.'],
+  ['br','Explosion: Reichweite',3,40,0.5,v=>v.toFixed(1),14,'Wie weit weg eine Explosion noch kräftig klingt. Größer = auch aus der Ferne laut.'],
+  ['slo','Zeitlupe bremst den Ton',0,1,0.01,v=>Math.round(v*100)+' %',1,'100 % = Ton wird in der Zeitlupe langsamer und tiefer (wie bisher). 0 % = Ton läuft normal weiter.']];
+ G.forEach(([k,n,lo,hi,stp,fm,df,info])=>{const r=document.createElement('div');r.className='r';
+  const l=document.createElement('div');l.textContent=n;const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t=info;ii.onclick=()=>ii.classList.toggle('show');l.append(ii);
+  const s=document.createElement('input');s.type='range';s.min=lo;s.max=hi;s.step=stp;s.value=SG[k]??df;
+  const v=document.createElement('div');v.className='v';v.textContent=fm(+s.value);
+  const z=document.createElement('button');z.textContent='↺';z.title='Standard';
+  s.oninput=()=>{SG[k]=+s.value;v.textContent=fm(+s.value);lastSend=Date.now();clearTimeout(tm['g'+k]);tm['g'+k]=setTimeout(()=>fetch('/snd/glob?'+k+'='+s.value).then(()=>st.textContent='gesetzt: '+n),60);};
+  s.addEventListener('change',()=>{if(k=='hlp'||k=='hb')setTimeout(()=>fetch('/snd/play?k=boom&v=h'),120);});
+  z.onclick=()=>{s.value=df;s.oninput();};r.append(l,s,v,z);gb.append(r);});}
 function sndRow(x){
  const r=document.createElement('div');r.style.cssText='display:grid;grid-template-columns:190px 40px 1fr 1fr 70px 34px;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #141a28;border-radius:6px';
  const l=document.createElement('div');l.innerHTML='<div>'+(x.n||x.k)+(x.c?' <span style="color:#7fe0b0;font-size:11px">● eigene</span>':'')+'</div><div style="font-size:11px;color:#6c7a96">'+x.k+' · '+x.len.toFixed(2)+' s'+(x.loop?' · Schleife':'')+'</div>';
- const pb=document.createElement('button');pb.textContent='▶';pb.title='am Handy abspielen';pb.style.cssText='background:#ef6a2e;color:#fff;border:0;border-radius:6px;height:30px;cursor:pointer';
- pb.onclick=()=>fetch('/snd/play?k='+x.k).then(()=>st.textContent='spielt: '+(x.n||x.k));
+ const pb=document.createElement('button');pb.textContent='▶';pb.title='am Handy abspielen, so wie es in der gewählten Ansicht klingt';pb.style.cssText='background:#ef6a2e;color:#fff;border:0;border-radius:6px;height:30px;cursor:pointer';
+ const play=()=>fetch('/snd/play?k='+x.k+'&v='+SV).then(()=>st.textContent='spielt ('+(SV=='h'?'Helm':'Außen')+'): '+(x.n||x.k));
+ pb.onclick=play;
  function sl(lbl,lo,hi,stp,val,fm){const w=document.createElement('div');const t=document.createElement('div');t.style.cssText='font-size:11px;color:#9fb0cc';
   const s=document.createElement('input');s.type='range';s.min=lo;s.max=hi;s.step=stp;s.value=val;s.style.cssText='width:100%;accent-color:#ef6a2e';
   const u=()=>t.textContent=lbl+' '+fm(+s.value);u();w.append(t,s);w.s=s;w.u=u;return w;}
- const g=sl('Lautstärke',-24,12,0.5,x.g,v=>(v>0?'+':'')+v.toFixed(1)+' dB');
+ const gk=SV=='h'?'h':'g';
+ const g=sl('Lautstärke '+(SV=='h'?'Helm':'Außen'),-24,12,0.5,x[gk],v=>(v>0?'+':'')+v.toFixed(1)+' dB');
  const p=sl('Tonhöhe',0.5,2,0.01,x.p,v=>'× '+v.toFixed(2));
- const snd=()=>{x.g=+g.s.value;x.p=+p.s.value;g.u();p.u();lastSend=Date.now();clearTimeout(tm['s'+x.k]);
-  tm['s'+x.k]=setTimeout(()=>fetch('/snd/set?k='+x.k+'&g='+x.g+'&p='+x.p).then(()=>st.textContent='gesetzt: '+x.k),60);};
+ const snd=()=>{x[gk]=+g.s.value;x.p=+p.s.value;g.u();p.u();lastSend=Date.now();clearTimeout(tm['s'+x.k]);
+  tm['s'+x.k]=setTimeout(()=>fetch('/snd/set?k='+x.k+'&g='+x.g+'&h='+x.h+'&p='+x.p).then(()=>st.textContent='gesetzt: '+x.k),60);};
  g.s.oninput=snd;p.s.oninput=snd;
- [g,p].forEach(w=>w.s.addEventListener('change',()=>fetch('/snd/play?k='+x.k)));
+ [g,p].forEach(w=>w.s.addEventListener('change',()=>setTimeout(play,120)));
  const fi=document.createElement('input');fi.type='file';fi.accept='audio/*';fi.style.display='none';
  const ub=document.createElement('button');ub.textContent='Datei …';ub.style.cssText='background:#151a2a;color:#cfd8ea;border:1px solid #2a3350;border-radius:6px;height:30px;cursor:pointer';
  ub.onclick=()=>fi.click();fi.onchange=()=>{if(fi.files[0])sndUp(x,fi.files[0]);};
@@ -13195,7 +13292,7 @@ async function sndUp(x,file){
   st.textContent='sende '+Math.round(buf.byteLength/1024)+' KB ans Handy …';
   const t=await (await fetch('/snd/up?k='+x.k,{method:'POST',body:buf})).text();
   st.textContent=t=='ok'?(x.n||x.k)+': neue Datei aktiv'+(cut>0?' (Stille vorn: '+(cut/sr).toFixed(2)+' s entfernt)':''):'Fehler: '+t;
-  if(t=='ok'){fetch('/snd/play?k='+x.k);show(cur);}}
+  if(t=='ok'){fetch('/snd/play?k='+x.k+'&v='+SV);show(cur);}}
  catch(e){st.textContent='Datei konnte nicht gelesen werden: '+e;}}
 let CV=null,CD=null;
 function reloadAll(n){fetch('/fx').then(r=>r.json()).then(dd=>{D=dd.tabs;D.push({g:'sounds',n:'🔊 Sounds',it:[]});VER=dd.ver;CTRL=dd.ctrl;CN=dd.cn;CC=dd.cc;modeBar();fetch('/curve').then(r=>r.json()).then(c=>{CV=c.cur;CD=c.def;show(cur);st.textContent='Voreinstellung: '+n;});});}
@@ -15113,7 +15210,7 @@ func _kc_start() -> void:
 	kco.who.text = NAMES[kc.victim].to_upper()
 	kco.title.text = "REC   IMPACT  1/3" if imp else "REC   KILL CAM"
 	(kco.look as ShaderMaterial).set_shader_parameter("kcol", 0.7 if imp else 0.0)
-	AudioServer.playback_speed_scale = 0.75
+	_pss(0.75)
 
 
 const KC_PASS = [[-1.7, -0.05, 0.8], [-2.0, 0.5, 0.5], [-0.35, 1.15, 0.5]]   # Einschlag-Wiederholung: von, bis (s zum Treffer), Tempo
@@ -15155,7 +15252,7 @@ func _kc_step(dt: float) -> void:
 		var PS: Array = kc.get("passes", KC_PASS)
 		var ps: Array = PS[int(kc.pass)]
 		Engine.time_scale = float(ps[2])
-		AudioServer.playback_speed_scale = clampf(float(ps[2]) * 1.3, 0.45, 1.0)
+		_pss(clampf(float(ps[2]) * 1.3, 0.45, 1.0))
 		_replay(dt)
 		if state != "kill":
 			return
@@ -18405,7 +18502,7 @@ func _drop_cine(sh: Dictionary) -> void:
 	_drop_mark(sh)
 	dcam = {"sh": sh, "w": 0.0}
 	Engine.time_scale = 0.55
-	AudioServer.playback_speed_scale = 0.8
+	_pss(0.8)
 
 
 func _drop_end() -> void:
@@ -19010,7 +19107,7 @@ func _mc_cam(dt: float) -> bool:
 		# vor dem Einschlag Zeitlupe, nach dem Einschlag gegen Ende sanft zurück auf Normaltempo
 		var slo = 0.3 if mc.hold < 0.0 else lerpf(0.3, 1.0, clampf((0.8 - float(mc.hold)) / 0.8, 0.0, 1.0))
 		Engine.time_scale = slo
-		AudioServer.playback_speed_scale = clampf(slo * 1.5, 0.5, 1.0)
+		_pss(clampf(slo * 1.5, 0.5, 1.0))
 		var ct = mc.get("ctg")
 		if ct == null or not is_instance_valid(ct.node):
 			_mc_end()
@@ -19482,11 +19579,12 @@ func _ck_bus(v: float) -> void:
 	if not on:
 		return
 	var lp = AudioServer.get_bus_effect(gi, 0) as AudioEffectLowPassFilter
-	lp.cutoff_hz = 20000.0 * pow(1400.0 / 20000.0, v)   # 20 kHz → 1,4 kHz
+	lp.cutoff_hz = 20000.0 * pow(_sgl("hlp") / 20000.0, v)   # 20 kHz → Helm-Grenze (Standard 1,4 kHz, Sounds-Reiter)
 	var eq = AudioServer.get_bus_effect(gi, 1) as AudioEffectEQ6
-	eq.set_band_gain_db(0, 5.0 * v)    # 32 Hz
-	eq.set_band_gain_db(1, 4.0 * v)    # 100 Hz
-	eq.set_band_gain_db(2, 1.5 * v)    # 320 Hz
+	var hb = _sgl("hb")
+	eq.set_band_gain_db(0, 5.0 * v * hb)    # 32 Hz
+	eq.set_band_gain_db(1, 4.0 * v * hb)    # 100 Hz
+	eq.set_band_gain_db(2, 1.5 * v * hb)    # 320 Hz
 
 
 func _ck_build(cl: CanvasLayer) -> void:
