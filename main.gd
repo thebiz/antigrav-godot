@@ -13333,7 +13333,7 @@ func _weapons(dt: float, racing: bool) -> void:
 		var hmk = sh.hm and not sh.pl and not sh.get("mega", false)
 		var vs = spd
 		if hmk:
-			vs = base_spd * (1.82 if sh.get("sup", false) else 1.68) * float(fx.rak.speed)
+			vs = base_spd * 3.75 * float(fx.rak.speed)   # so schnell wie die Mega-Rakete (John) – gilt für Normal und Super
 		elif sh.get("mega", false):
 			vs = base_spd * 3.75 * float(fx.rak.speed)   # Mega: ein Blitz – selbst eine ganze Runde dauert nur Sekunden
 		var drp = float(sh.get("drp", 0.0))   # normal 0: zündet sofort; nur beim Close-up klinkt sie sichtbar aus
@@ -18325,12 +18325,15 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 			var blink_off = mc.get("hoff", false)
 			# hell (fast weiß-grün) mit dunklem Rand – auf dem grünen Nachtsichtbild sonst unsichtbar
 			# kräftiges Neon-Grün mit Leuchtschein (John)
-			var col = Color(0.25, 1.0, 0.35, 0.75 + 0.25 * lk)
+			# Rot-Orange, gleißend (John): fast weißer Kern, kräftige Farbe, breiter Leuchtschein in zwei Stufen
+			var col = Color(1.0, 0.32, 0.05, 0.85 + 0.15 * lk)
 			if blink_off:
 				col.a = 0.2
-			var shd = Color(0.0, 0.08, 0.02, col.a * 0.85)
-			var glw = Color(0.2, 1.0, 0.3, col.a * 0.22)
-			var w = 2.0 + 1.5 * lk
+			var shd = Color(0.08, 0.0, 0.0, col.a * 0.85)
+			var glw = Color(1.0, 0.3, 0.0, col.a * 0.16)
+			var glw2 = Color(1.0, 0.45, 0.1, col.a * 0.32)
+			var hot = Color(1.0, 0.9, 0.72, col.a)
+			var w = 5.0 + 2.5 * lk
 			var ang = float(mc.get("rang", 0.0)) * (1.0 - lk)
 			var e = h * 0.38
 			for k in range(4):
@@ -18338,22 +18341,24 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 				var cx = Vector2(cos(a + PI * 0.25), sin(a + PI * 0.25)) * h * 1.414
 				var d1 = Vector2(cos(a + PI), sin(a + PI)) * e
 				var d2 = Vector2(cos(a - PI * 0.5), sin(a - PI * 0.5)) * e
-				c.draw_line(p + cx, p + cx + d1, glw, w + 12.0)
-				c.draw_line(p + cx, p + cx + d2, glw, w + 12.0)
-				c.draw_line(p + cx, p + cx + d1, shd, w + 3.0)
-				c.draw_line(p + cx, p + cx + d2, shd, w + 3.0)
-				c.draw_line(p + cx, p + cx + d1, col, w)
-				c.draw_line(p + cx, p + cx + d2, col, w)
+				for dd in [d1, d2]:
+					c.draw_line(p + cx, p + cx + dd, glw, w + 22.0)
+					c.draw_line(p + cx, p + cx + dd, glw2, w + 10.0)
+					c.draw_line(p + cx, p + cx + dd, shd, w + 3.0)
+					c.draw_line(p + cx, p + cx + dd, col, w)
+					c.draw_line(p + cx, p + cx + dd, hot, maxf(1.5, w * 0.35))
 			# Fadenkreuz in der Mitte: beim Suchen offen, eingerastet ein kleiner Punkt
 			var g = 8.0
 			if lk < 0.5:
-				c.draw_line(p + Vector2(-g * 2.2, 0), p + Vector2(-g, 0), col, 2.0)
-				c.draw_line(p + Vector2(g, 0), p + Vector2(g * 2.2, 0), col, 2.0)
-				c.draw_line(p + Vector2(0, -g * 2.2), p + Vector2(0, -g), col, 2.0)
-				c.draw_line(p + Vector2(0, g), p + Vector2(0, g * 2.2), col, 2.0)
+				for sg in [[Vector2(-g * 2.2, 0), Vector2(-g, 0)], [Vector2(g, 0), Vector2(g * 2.2, 0)], [Vector2(0, -g * 2.2), Vector2(0, -g)], [Vector2(0, g), Vector2(0, g * 2.2)]]:
+					c.draw_line(p + sg[0], p + sg[1], glw2, 9.0)
+					c.draw_line(p + sg[0], p + sg[1], col, 3.5)
 			else:
-				c.draw_circle(p, 4.5, shd)
-				c.draw_circle(p, 3.0, col)
+				c.draw_circle(p, 13.0, glw)
+				c.draw_circle(p, 8.0, glw2)
+				c.draw_circle(p, 6.0, shd)
+				c.draw_circle(p, 4.5, col)
+				c.draw_circle(p, 2.2, hot)
 			)
 		hud.layer.add_child(c)
 		mc.ret = c
@@ -18449,8 +18454,8 @@ func _mc_mark(tg) -> void:
 	var locked = float(mc.get("rlk", 0.0)) >= 0.99 and mc.has("ret") and (mc.ret as CanvasItem).visible
 	lb.visible = locked
 	lb.text = "LOCK-ON"
-	lb.add_theme_color_override("font_color", Color(0.3, 1.0, 0.4))
-	lb.add_theme_color_override("font_shadow_color", Color(0.2, 1.0, 0.3, 0.55))
+	lb.add_theme_color_override("font_color", Color(1.0, 0.5, 0.2))
+	lb.add_theme_color_override("font_shadow_color", Color(1.0, 0.3, 0.0, 0.6))
 	lb.add_theme_constant_override("shadow_outline_size", 14)
 	lb.add_theme_constant_override("shadow_offset_x", 0)
 	lb.add_theme_constant_override("shadow_offset_y", 0)
@@ -19974,12 +19979,71 @@ func _comic_draw(c: Control) -> void:
 			c.draw_line(ctr + Vector2(cos(a), sin(a)) * r0, ctr + Vector2(cos(a), sin(a)) * W * 1.6, Color(lc, 0.35 * fa), 2.0 + fmod(i * 1.7, 3.0))
 	var pn: Array = cm.pn
 	var lay = _cm_layout(kind, pn.size(), W, H)
+	# Spot (John): wandert von Panel zu Panel – erst zum gerade reinfliegenden, danach im Wechsel über alle;
+	# die Seite drumherum liegt im Dunkeln, die Panels werfen Schatten vom Licht weg
+	var ctrs = []
+	for L in lay:
+		var cc = Vector2.ZERO
+		for pt in L[0]:
+			cc += pt
+		ctrs.append(cc / 4.0)
+	var fi = 0
+	for i in range(pn.size()):
+		if t >= float(pn[i].t0):
+			fi = i
+	if t > float(cm.st) + 0.9 and pn.size() > 1:
+		fi = int(floor((t - float(cm.st) - 0.9) / 1.5)) % pn.size()
+	var tgt: Vector2 = ctrs[fi] + Vector2(sin(t * 0.9) * W * 0.06, cos(t * 0.7) * W * 0.04)
+	var ldt = clampf(t - float(cm.get("spt", t)), 0.0, 0.1)
+	cm.spt = t
+	var spot: Vector2 = cm.get("spot", tgt)
+	spot = spot.lerp(tgt, 1.0 - exp(-ldt * 4.5))
+	cm.spot = spot
+	cm.spr = W * 0.62 if kind != "ko" else W * 0.9
+	# Lichtpfütze auf dem Hintergrund – erst darauf werden die Schatten der Panels sichtbar
+	if kind != "ko":
+		if not cm_tex.has("_pool"):
+			var pt2 = GradientTexture2D.new()
+			var pg = Gradient.new()
+			pg.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+			pg.colors = PackedColorArray([Color(1.0, 0.93, 0.82, 0.5), Color(1.0, 0.9, 0.8, 0.2), Color(1.0, 0.9, 0.8, 0.0)])
+			pt2.gradient = pg
+			pt2.fill = GradientTexture2D.FILL_RADIAL
+			pt2.fill_from = Vector2(0.5, 0.5)
+			pt2.fill_to = Vector2(1.0, 0.5)
+			pt2.width = 256
+			pt2.height = 256
+			cm_tex["_pool"] = pt2
+		var R1 = float(cm.spr) * 1.1
+		c.draw_texture_rect(cm_tex["_pool"], Rect2(spot - Vector2(R1, R1), Vector2(R1, R1) * 2.0), false, Color(1, 1, 1, fa * clampf(t / 0.3, 0.0, 1.0)))
 	for i in range(pn.size()):
 		var pd: Dictionary = pn[i]
 		var a = clampf((t - pd.t0) / 0.3, 0.0, 1.0)
 		if a <= 0.0:
 			continue
 		_cm_panel(c, font, pd, lay[i][0], lay[i][1], t, a, sh, fa, W, kind)
+	# Dunkel um den Lichtkegel (weicher Rand), über allem außer dem Schlussstempel
+	if kind != "ko":
+		if not cm_tex.has("_spot"):
+			var gt = GradientTexture2D.new()
+			var gr = Gradient.new()
+			gr.offsets = PackedFloat32Array([0.0, 0.35, 0.75, 1.0])
+			gr.colors = PackedColorArray([Color(0, 0, 0, 0), Color(0, 0, 0, 0.08), Color(0, 0, 0, 0.42), Color(0, 0, 0, 0.55)])
+			gt.gradient = gr
+			gt.fill = GradientTexture2D.FILL_RADIAL
+			gt.fill_from = Vector2(0.5, 0.5)
+			gt.fill_to = Vector2(1.0, 0.5)
+			gt.width = 256
+			gt.height = 256
+			cm_tex["_spot"] = gt
+		var R2 = float(cm.spr) * 1.6
+		var dk = Color(0, 0, 0, 0.55 * fa)
+		var rr2 = Rect2(spot - Vector2(R2, R2), Vector2(R2, R2) * 2.0)
+		c.draw_texture_rect(cm_tex["_spot"], rr2, false, Color(1, 1, 1, fa))
+		c.draw_rect(Rect2(0, 0, W, maxf(0.0, rr2.position.y)), dk)
+		c.draw_rect(Rect2(0, rr2.end.y, W, maxf(0.0, H - rr2.end.y)), dk)
+		c.draw_rect(Rect2(0, rr2.position.y, maxf(0.0, rr2.position.x), rr2.size.y), dk)
+		c.draw_rect(Rect2(rr2.end.x, rr2.position.y, maxf(0.0, W - rr2.end.x), rr2.size.y), dk)
 	# Schluss: großer Stempel quer über die Seite
 	var tz = t - cm.st
 	if tz > 0.0:
@@ -20031,8 +20095,21 @@ func _cm_panel(c: Control, font: Font, pd: Dictionary, base: Array, side: float,
 		uvs.append(((pt - pc) / zoom + isz * Vector2(0.5, pd.fy)) / isz)
 	var cs = PackedColorArray()
 	var fl = clampf(1.0 - (t - pd.t0 - 0.3) / 0.12, 0.0, 1.0) if t > pd.t0 + 0.3 else 0.0   # Aufblitzen beim Aufprall
-	for _k in range(4):
-		cs.append(Color(1.0 + fl * 2.0, 1.0 + fl * 2.0, 1.0 + fl * 2.0, fa))
+	# Schatten vom Spot weg: die Karte liegt leicht erhöht, der Schatten wandert mit dem Licht
+	var spot: Vector2 = cm.get("spot", (mn + mx) * 0.5)
+	var spr = float(cm.get("spr", W * 0.6))
+	var away: Vector2 = ((mn + mx) * 0.5 - spot)
+	var sd: Vector2 = away.normalized() * (W * 0.016 + minf(away.length(), W) * 0.05) if away.length() > 1.0 else Vector2(0, W * 0.016)
+	for sl2 in [[1.0, 0.22], [0.7, 0.28], [0.4, 0.36]]:
+		var shp = PackedVector2Array()
+		for pt in poly:
+			shp.append(pt + sd * float(sl2[0]) + (pt - (mn + mx) * 0.5).normalized() * W * 0.006 * float(sl2[0]))
+		c.draw_colored_polygon(shp, Color(0, 0, 0, float(sl2[1]) * fa * a))
+	for k in range(4):
+		# Licht je Ecke: im Kegel hell (leicht überstrahlt), außerhalb gedämpft
+		var dl = poly[k].distance_to(spot) / spr
+		var li = lerpf(0.55, 1.18, exp(-dl * dl * 1.6)) if kind != "ko" else 1.0
+		cs.append(Color(li + fl * 2.0, li + fl * 2.0, li * 0.97 + fl * 2.0, fa))
 	c.draw_polygon(poly, cs, uvs, img)
 	# Rahmen: dick schwarz, innen eine feine Linie in der Fahrerfarbe
 	var cl = poly.duplicate()
