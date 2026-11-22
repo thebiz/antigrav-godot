@@ -488,6 +488,132 @@ func _duck(delta: float) -> void:
 		AudioServer.set_bus_volume_db(mi, linear_to_db(maxf(0.001, float(cfg.get("music", 0.6)))) + 2.0 + dk)
 
 
+# ---------------------------------------------------------------- Sound-Werkstatt (PC-Seite, Reiter „Sounds“)
+# Jeder Sound: Lautstärke (dB) und Tonhöhe einstellbar, eigene Datei per PC hochladen (wird im Browser schon
+# von Stille am Anfang befreit) – alles wirkt sofort am Handy, ohne neue APK (John)
+const SADJ_PATH = "user://snd_adj.json"
+var sadj = {}        # Sound → {"g": dB, "p": Tonhöhe}
+var snd_orig = {}    # Original aus dem Spiel, falls eine eigene Datei es ersetzt
+var sadj_sv = -1.0
+const SND_NAMES = {"boom": "Explosion", "engine": "Schiff – Fahrt (Schleife)", "idle": "Schiff – Stand (Schleife)", "rak": "Rakete – Abschuss",
+	"rk_loop": "Rakete – Triebwerk (Schleife)", "minedrop": "Mine – Ablegen", "ko_boom": "K.o.-Knall", "shield": "Schild", "boost": "Boost",
+	"pick": "Waffe eingesammelt", "zap": "Treffer-Zap", "quake": "Beben", "field": "Kraftfeld (Schleife)", "hover": "Schweben (Schleife)",
+	"amb": "Umgebung (Schleife)", "crowd": "Publikum", "crowd_roar": "Publikum jubelt", "lock": "Zielerfassung", "incoming": "Warnung Rakete",
+	"crash_bump": "Wand-Stoß", "crash_scrape": "Wand-Schrammen", "debris": "Trümmer", "start": "Start", "go": "GO", "win": "Sieg", "lap": "Runde"}
+
+
+func _sg(k: String) -> float:
+	return float(sadj.get(k, {}).get("g", 0.0))
+
+
+func _sp_(k: String) -> float:
+	return float(sadj.get(k, {}).get("p", 1.0))
+
+
+# Schleifen: in einen Synchron-Strom gepackt, dessen Lautstärke sich live ändern lässt
+func _loop_wrap(k: String) -> AudioStream:
+	var sy = AudioStreamSynchronized.new()
+	sy.stream_count = 1
+	sy.set_sync_stream(0, _looped(snd[k]))
+	sy.set_sync_stream_volume(0, _sg(k))
+	return sy
+
+
+func _snd_custom_load() -> void:
+	if FileAccess.file_exists(SADJ_PATH):
+		var d = JSON.parse_string(FileAccess.get_file_as_string(SADJ_PATH))
+		if d is Dictionary:
+			sadj = d
+	for k in snd.keys():
+		var pth = "user://snd/%s.wav" % k
+		if FileAccess.file_exists(pth):
+			var st = AudioStreamWAV.load_from_buffer(FileAccess.get_file_as_bytes(pth))
+			if st != null:
+				snd_orig[k] = snd[k]
+				snd[k] = st
+
+
+func _sadj_save() -> void:
+	var f = FileAccess.open(SADJ_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(sadj))
+		f.close()
+
+
+# Lautstärke/Tonhöhe einer laufenden Schleife sofort nachziehen
+func _snd_live_apply(k: String) -> void:
+	if loops.has(k) and is_instance_valid(loops[k]) and loops[k].stream is AudioStreamSynchronized:
+		(loops[k].stream as AudioStreamSynchronized).set_sync_stream_volume(0, _sg(k))
+
+
+func _snd_replace_loop(k: String) -> void:
+	if loops.has(k) and is_instance_valid(loops[k]):
+		var pl: AudioStreamPlayer = loops[k]
+		var v = pl.volume_db
+		pl.stream = _loop_wrap(k)
+		pl.volume_db = v
+		pl.play()
+
+
+# Vorhören am Handy: einmal abspielen (Schleifen 4 s lang), unabhängig vom Ducking
+func _snd_preview(k: String) -> void:
+	if not snd.has(k) or snd[k] == null:
+		return
+	var p = AudioStreamPlayer.new()
+	p.stream = snd[k]
+	p.bus = "Talk"
+	p.volume_db = _sg(k) - 4.0
+	p.pitch_scale = _sp_(k)
+	p.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(p)
+	p.play()
+	get_tree().create_timer(minf(6.0, (snd[k] as AudioStream).get_length() + 0.2), true, false, true).timeout.connect(p.queue_free)
+
+
+func _snd_list() -> Array:
+	var out = []
+	var ks = snd.keys()
+	ks.sort()
+	for k in ks:
+		if snd[k] == null or k in ["amb_city", "amb_jungle"] or str(k).begins_with("music_"):
+			continue
+		var lp = loops.has(k) or k == "rk_loop"
+		out.append({"k": k, "n": SND_NAMES.get(k, ""), "len": snappedf((snd[k] as AudioStream).get_length(), 0.01), "g": _sg(k), "p": _sp_(k),
+			"c": snd_orig.has(k), "loop": lp})
+	return out
+
+
+func _snd_upload(k: String, body: PackedByteArray) -> String:
+	if not snd.has(k):
+		return "unbekannter Sound"
+	var st = AudioStreamWAV.load_from_buffer(body)
+	if st == null or st.get_length() < 0.05:
+		return "Datei nicht lesbar"
+	DirAccess.make_dir_recursive_absolute("user://snd")
+	var f = FileAccess.open("user://snd/%s.wav" % k, FileAccess.WRITE)
+	if f == null:
+		return "Speichern fehlgeschlagen"
+	f.store_buffer(body)
+	f.close()
+	if not snd_orig.has(k):
+		snd_orig[k] = snd[k]
+	snd[k] = st
+	_snd_replace_loop(k)
+	return "ok"
+
+
+func _snd_reset(k: String) -> void:
+	var pth = "user://snd/%s.wav" % k
+	if FileAccess.file_exists(pth):
+		DirAccess.remove_absolute(pth)
+	if snd_orig.has(k):
+		snd[k] = snd_orig[k]
+		snd_orig.erase(k)
+	sadj.erase(k)
+	_sadj_save()
+	_snd_replace_loop(k)
+
+
 func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "engine.wav", "idle.wav", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
@@ -504,10 +630,11 @@ func _sounds() -> void:
 			var pth = "res://sfx/cv_%s_%s.wav" % [c, k]
 			if ResourceLoader.exists(pth):
 				snd["cv_%s_%s" % [c, k]] = load(pth)
+	_snd_custom_load()
 	snd["amb"] = snd["amb_jungle"] if _jungle() else snd["amb_city"]   # Hintergrund passend zur Strecke
 	for k in ["engine", "idle", "field", "hover", "amb", "dmg_spark", "dmg_fire"]:
 		var p = AudioStreamPlayer.new()
-		p.stream = _looped(snd[k])
+		p.stream = _loop_wrap(k)
 		p.volume_db = -80.0
 		p.bus = "Game"
 		add_child(p)
@@ -524,7 +651,7 @@ func _sounds() -> void:
 	# Cockpit: Herzschlag und Warntöne – eigener Kanal ohne Dämpfung, laufen still mit und werden nur hochgezogen
 	for k in ["ck_herz90", "ck_herz140", "ck_mines", "ck_missile"]:
 		var p2 = AudioStreamPlayer.new()
-		p2.stream = _looped(snd[k])
+		p2.stream = _loop_wrap(k)
 		p2.volume_db = -80.0
 		p2.bus = "Cabin"
 		add_child(p2)
@@ -632,12 +759,12 @@ func _snd(k: String, db := 0.0, pitch := 1.0, at = null) -> void:
 		p = AudioStreamPlayer.new()
 	else:
 		p = AudioStreamPlayer3D.new()
-		p.unit_size = 4.0
-		p.max_distance = 70.0
+		p.unit_size = 14.0 if k in ["boom", "ko_boom", "minedrop"] else 4.0   # Explosionen auch aus der Entfernung kräftig
+		p.max_distance = 120.0 if k in ["boom", "ko_boom"] else 70.0
 		p.position = at
 	p.stream = snd[k]
-	p.volume_db = db
-	p.pitch_scale = pitch
+	p.volume_db = db + _sg(k)
+	p.pitch_scale = pitch * _sp_(k)
 	if get_tree().paused:
 		p.process_mode = Node.PROCESS_MODE_ALWAYS   # z. B. Stimmprobe in den Einstellungen im Pausenmenü
 	if k.begins_with("cv_") or k.begins_with("an_"):
@@ -5456,7 +5583,7 @@ func _stadium(k: String, db: float) -> void:
 	if stadium_p == null or not snd.has(k):
 		return
 	stadium_p.stream = snd[k]
-	stadium_p.volume_db = db + 4.0
+	stadium_p.volume_db = db + 4.0 + _sg(k)
 	stadium_p.play()
 
 
@@ -10604,8 +10731,8 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
 	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light) * (0.3 if _cine() else 1.0), "hu": hu, "sf": sf0})
-	_snd("boom", 4.0 if big else 2.0, randf_range(0.85, 1.0), pos)
-	_snd("boom", 2.0, 0.55, pos)   # tiefer Wumms darunter
+	_snd("boom", 4.0 if big else 2.0, randf_range(0.95, 1.05), pos)
+	# (früher lief dieselbe Datei zusätzlich halb so schnell als „Wumms“ darunter – mit der neuen Explosion klang das matschig)
 	# Kamera rüttelt, je näher, desto stärker
 	var d = (pos - cam.global_position).length()
 	var near = clampf(1.0 - d / 35.0, 0.0, 1.0)
@@ -11278,7 +11405,8 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 		rs.bus = "Game"
 		rs.unit_size = 3.5
 		rs.max_distance = 90.0
-		rs.volume_db = -3.0
+		rs.volume_db = -3.0 + _sg("rk_loop")
+		rs.pitch_scale = _sp_("rk_loop")
 		rs.doppler_tracking = AudioStreamPlayer3D.DOPPLER_TRACKING_PHYSICS_STEP
 		rs.autoplay = true
 		mi.add_child(rs)
@@ -11900,7 +12028,7 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 					quake = _quake_make(g.z + 3.0, 1.0, quake)
 					quake.sup = true
 					quake.full = true
-					_snd("boom", 3.0, 0.55))
+					_snd("boom", 3.0, 1.0))
 		"auto":
 			# 8 s Autopilot, dabei geschützt
 			g.auto = 8.0
@@ -12646,14 +12774,33 @@ func _live_poll(dt: float) -> void:
 			var r = c.get_data(n)
 			if r[0] == OK:
 				e.b.append_array(r[1])
-		var txt = e.b.get_string_from_utf8()
-		if txt.contains("\r\n\r\n"):
-			var line = txt.get_slice("\r\n", 0)
-			var path = line.get_slice(" ", 1)
-			live_seen = 0.0
-			_live_answer(c, path)
-			c.disconnect_from_host()
-			live_cons.remove_at(i)
+		# Kopf endet bei CRLF CRLF; bei POST (Datei-Upload) danach noch den Inhalt abwarten
+		var he = -1
+		var bb: PackedByteArray = e.b
+		for j in range(maxi(0, int(e.get("hs", 0))), bb.size() - 3):
+			if bb[j] == 13 and bb[j + 1] == 10 and bb[j + 2] == 13 and bb[j + 3] == 10:
+				he = j
+				break
+		if he < 0:
+			e.hs = maxi(0, bb.size() - 3)
+			continue
+		var head = bb.slice(0, he).get_string_from_utf8()
+		var line = head.get_slice("\r\n", 0)
+		var path = line.get_slice(" ", 1)
+		var body = PackedByteArray()
+		if line.begins_with("POST"):
+			var cl = 0
+			for hl in head.split("\r\n"):
+				if hl.to_lower().begins_with("content-length:"):
+					cl = int(hl.get_slice(":", 1).strip_edges())
+			e.t = minf(e.t, 1.0)   # Upload läuft: nicht abbrechen
+			if bb.size() - (he + 4) < cl:
+				continue
+			body = bb.slice(he + 4, he + 4 + cl)
+		live_seen = 0.0
+		_live_answer(c, path, body)
+		c.disconnect_from_host()
+		live_cons.remove_at(i)
 	if live_sv > 0.0:
 		live_sv -= dt
 		if live_sv <= 0.0:
@@ -12698,7 +12845,33 @@ func _live_send(c: StreamPeerTCP, ctype: String, body: String) -> void:
 	c.put_data(b)
 
 
-func _live_answer(c: StreamPeerTCP, path: String) -> void:
+func _live_answer(c: StreamPeerTCP, path: String, body := PackedByteArray()) -> void:
+	if path.begins_with("/snd/"):
+		var qs = {}
+		var qi2 = path.find("?")
+		if qi2 >= 0:
+			for kv in path.substr(qi2 + 1).split("&"):
+				qs[kv.get_slice("=", 0)] = kv.get_slice("=", 1).uri_decode()
+		var sk = str(qs.get("k", ""))
+		if path.begins_with("/snd/list"):
+			_live_send(c, "application/json", JSON.stringify(_snd_list()))
+		elif path.begins_with("/snd/play"):
+			_snd_preview(sk)
+			_live_send(c, "text/plain", "ok")
+		elif path.begins_with("/snd/set"):
+			if snd.has(sk):
+				sadj[sk] = {"g": clampf(float(qs.get("g", "0")), -30.0, 18.0), "p": clampf(float(qs.get("p", "1")), 0.3, 3.0)}
+				_snd_live_apply(sk)
+				_sadj_save()
+			_live_send(c, "text/plain", "ok")
+		elif path.begins_with("/snd/up"):
+			_live_send(c, "text/plain", _snd_upload(sk, body))
+		elif path.begins_with("/snd/reset"):
+			_snd_reset(sk)
+			_live_send(c, "text/plain", "ok")
+		else:
+			_live_send(c, "text/plain", "?")
+		return
 	if path.begins_with("/fx"):
 		# alle Reiter mit Reglern und aktuellen Werten
 		var tabs = []
@@ -12933,8 +13106,9 @@ document.getElementById('fire').onclick=()=>fetch('/fire?g='+D[cur].g+'&s='+(sup
 setInterval(()=>fetch('/ping').catch(()=>{}),2000);
 document.getElementById('drive').onclick=()=>fetch('/drive').then(()=>st.textContent='weiter im Free ride');
 let ssT=null,SS=null,EDS=[];
-function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D[i].g);document.querySelectorAll('#tabs button').forEach((b,j)=>b.className=j==i?'on':'');
+function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked&&D[i].g!='sounds')fetch('/tab?g='+D[i].g);document.querySelectorAll('#tabs button').forEach((b,j)=>b.className=j==i?'on':'');
  const m=document.getElementById('m');m.innerHTML='';const T=D[i];
+ if(T.g=='sounds'){sndUI(m);return;}
  if(T.g=='steer_old'){const pr=document.createElement('div');pr.id='pre';const lb=document.createElement('span');lb.textContent='Voreinstellung zum Vergleichen:';lb.style.color='#9fb0cc';pr.append(lb);
   ['Ruhig','Mittel','Scharf'].forEach((n,k)=>{const b=document.createElement('button');b.textContent=n;b.onclick=()=>fetch('/preset?n='+k).then(()=>reloadAll(n));pr.append(b);});
   const ii=document.createElement('span');ii.className='ii';ii.textContent='i';ii.dataset.t='Setzt Lenkkurve, Anlaufzeit, Ausklingzeit und im Reiter Ship auch Steering lag, Steering strength und Grip auf einen festen Satz. Fahr mit jeder Voreinstellung eine Runde und sag, welche am nächsten dran ist.';pr.append(ii);m.append(pr);
@@ -12951,8 +13125,63 @@ function show(i){cur=i;clearInterval(ssT);EDS=[];if(pv.checked)fetch('/tab?g='+D
    s.value=Math.min(it.hi,Math.max(it.lo,+s.value+(e.deltaY<0?st:-st)));s.oninput();},{passive:false});
   r.append(l,s,v,z);m.append(r);});
 }
+// ---- Sounds: anhören (am Handy), Lautstärke/Tonhöhe, eigene Datei reinziehen
+let SL=[],SF='';
+function sndUI(m){
+ const top=document.createElement('div');top.style.cssText='display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:4px 0 10px';
+ const f=document.createElement('input');f.placeholder='Suchen …';f.value=SF;f.style.cssText='background:#151a2a;color:#e8ecf5;border:1px solid #2a3350;border-radius:8px;padding:7px 10px;width:180px';
+ const o1=document.createElement('label');o1.innerHTML='<input type="checkbox" id="sotrim" checked> Stille am Anfang entfernen';
+ const o2=document.createElement('label');o2.innerHTML='<input type="checkbox" id="sonorm" checked> auf volle Lautstärke bringen';
+ [o1,o2].forEach(o=>o.style.cssText='color:#cfd8ea;display:flex;gap:5px;align-items:center;font-size:13px');
+ const hint=document.createElement('div');hint.style.cssText='font-size:12px;color:#6c7a96;width:100%';
+ hint.textContent='▶ spielt den Sound am Handy ab. Neue Datei (wav, mp3, ogg): einfach auf die Zeile ziehen oder „Datei …“ – wirkt sofort im Spiel, ohne neue APK.';
+ top.append(f,o1,o2,hint);m.append(top);
+ const box=document.createElement('div');m.append(box);
+ f.oninput=()=>{SF=f.value.toLowerCase();rows();};
+ function rows(){box.innerHTML='';SL.filter(x=>!SF||x.k.toLowerCase().includes(SF)||x.n.toLowerCase().includes(SF)).forEach(x=>box.append(sndRow(x)));}
+ fetch('/snd/list').then(r=>r.json()).then(l=>{SL=l;l.sort((a,b)=>(b.n?1:0)-(a.n?1:0)||a.k.localeCompare(b.k));rows();}).catch(()=>st.textContent='keine Verbindung');}
+function sndRow(x){
+ const r=document.createElement('div');r.style.cssText='display:grid;grid-template-columns:190px 40px 1fr 1fr 70px 34px;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #141a28;border-radius:6px';
+ const l=document.createElement('div');l.innerHTML='<div>'+(x.n||x.k)+(x.c?' <span style="color:#7fe0b0;font-size:11px">● eigene</span>':'')+'</div><div style="font-size:11px;color:#6c7a96">'+x.k+' · '+x.len.toFixed(2)+' s'+(x.loop?' · Schleife':'')+'</div>';
+ const pb=document.createElement('button');pb.textContent='▶';pb.title='am Handy abspielen';pb.style.cssText='background:#ef6a2e;color:#fff;border:0;border-radius:6px;height:30px;cursor:pointer';
+ pb.onclick=()=>fetch('/snd/play?k='+x.k).then(()=>st.textContent='spielt: '+(x.n||x.k));
+ function sl(lbl,lo,hi,stp,val,fm){const w=document.createElement('div');const t=document.createElement('div');t.style.cssText='font-size:11px;color:#9fb0cc';
+  const s=document.createElement('input');s.type='range';s.min=lo;s.max=hi;s.step=stp;s.value=val;s.style.cssText='width:100%;accent-color:#ef6a2e';
+  const u=()=>t.textContent=lbl+' '+fm(+s.value);u();w.append(t,s);w.s=s;w.u=u;return w;}
+ const g=sl('Lautstärke',-24,12,0.5,x.g,v=>(v>0?'+':'')+v.toFixed(1)+' dB');
+ const p=sl('Tonhöhe',0.5,2,0.01,x.p,v=>'× '+v.toFixed(2));
+ const snd=()=>{x.g=+g.s.value;x.p=+p.s.value;g.u();p.u();lastSend=Date.now();clearTimeout(tm['s'+x.k]);
+  tm['s'+x.k]=setTimeout(()=>fetch('/snd/set?k='+x.k+'&g='+x.g+'&p='+x.p).then(()=>st.textContent='gesetzt: '+x.k),60);};
+ g.s.oninput=snd;p.s.oninput=snd;
+ [g,p].forEach(w=>w.s.addEventListener('change',()=>fetch('/snd/play?k='+x.k)));
+ const fi=document.createElement('input');fi.type='file';fi.accept='audio/*';fi.style.display='none';
+ const ub=document.createElement('button');ub.textContent='Datei …';ub.style.cssText='background:#151a2a;color:#cfd8ea;border:1px solid #2a3350;border-radius:6px;height:30px;cursor:pointer';
+ ub.onclick=()=>fi.click();fi.onchange=()=>{if(fi.files[0])sndUp(x,fi.files[0]);};
+ const z=document.createElement('button');z.textContent='↺';z.title='Original-Sound, Lautstärke und Tonhöhe zurück';z.style.cssText='background:#151a2a;color:#9fb0cc;border:1px solid #2a3350;border-radius:6px;height:30px;cursor:pointer';
+ z.onclick=()=>fetch('/snd/reset?k='+x.k).then(()=>{st.textContent='zurückgesetzt: '+x.k;show(cur);});
+ r.ondragover=e=>{e.preventDefault();r.style.background='#2a335080';};r.ondragleave=()=>r.style.background='';
+ r.ondrop=e=>{e.preventDefault();r.style.background='';const fl=e.dataTransfer.files[0];if(fl)sndUp(x,fl);};
+ r.append(l,pb,g,p,ub,z,fi);return r;}
+async function sndUp(x,file){
+ st.textContent='bereite vor: '+file.name+' …';
+ try{const ac=new AudioContext();const b=await ac.decodeAudioData(await file.arrayBuffer());ac.close();
+  const sr=44100,n=Math.ceil(b.duration*sr);const oc=new OfflineAudioContext(1,n,sr);const src=oc.createBufferSource();src.buffer=b;src.connect(oc.destination);src.start();
+  const out=await oc.startRendering();let d=out.getChannelData(0);let cut=0;
+  if(document.getElementById('sotrim').checked){const th=0.0056;let i=0;while(i<d.length&&Math.abs(d[i])<th)i++;cut=Math.max(0,i-Math.round(0.005*sr));d=d.slice(cut);
+   const fz=Math.min(d.length,Math.round(0.004*sr));for(let j=0;j<fz;j++)d[j]*=j/fz;}
+  let pk=0;for(let j=0;j<d.length;j++)pk=Math.max(pk,Math.abs(d[j]));
+  if(document.getElementById('sonorm').checked&&pk>0){const k=0.89/pk;for(let j=0;j<d.length;j++)d[j]*=k;}
+  const buf=new ArrayBuffer(44+d.length*2),v=new DataView(buf);const ws=(o,t)=>{for(let j=0;j<t.length;j++)v.setUint8(o+j,t.charCodeAt(j));};
+  ws(0,'RIFF');v.setUint32(4,36+d.length*2,true);ws(8,'WAVE');ws(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);ws(36,'data');v.setUint32(40,d.length*2,true);
+  for(let j=0;j<d.length;j++)v.setInt16(44+j*2,Math.max(-1,Math.min(1,d[j]))*32767,true);
+  st.textContent='sende '+Math.round(buf.byteLength/1024)+' KB ans Handy …';
+  const t=await (await fetch('/snd/up?k='+x.k,{method:'POST',body:buf})).text();
+  st.textContent=t=='ok'?(x.n||x.k)+': neue Datei aktiv'+(cut>0?' (Stille vorn: '+(cut/sr).toFixed(2)+' s entfernt)':''):'Fehler: '+t;
+  if(t=='ok'){fetch('/snd/play?k='+x.k);show(cur);}}
+ catch(e){st.textContent='Datei konnte nicht gelesen werden: '+e;}}
 let CV=null,CD=null;
-function reloadAll(n){fetch('/fx').then(r=>r.json()).then(dd=>{D=dd.tabs;VER=dd.ver;CTRL=dd.ctrl;CN=dd.cn;CC=dd.cc;modeBar();fetch('/curve').then(r=>r.json()).then(c=>{CV=c.cur;CD=c.def;show(cur);st.textContent='Voreinstellung: '+n;});});}
+function reloadAll(n){fetch('/fx').then(r=>r.json()).then(dd=>{D=dd.tabs;D.push({g:'sounds',n:'🔊 Sounds',it:[]});VER=dd.ver;CTRL=dd.ctrl;CN=dd.cn;CC=dd.cc;modeBar();fetch('/curve').then(r=>r.json()).then(c=>{CV=c.cur;CD=c.def;show(cur);st.textContent='Voreinstellung: '+n;});});}
 function sendCurve(){lastSend=Date.now();clearTimeout(tm.cv);tm.cv=setTimeout(()=>fetch('/curve?d='+encodeURIComponent(JSON.stringify(CV))).then(()=>st.textContent='Lenkkurve gesendet').catch(()=>st.textContent='keine Verbindung'),60);}
 function curveUI(m){
  if(!CV){fetch('/curve').then(r=>r.json()).then(d=>{CV=d.cur;CD=d.def;curveUI(m);});return;}
@@ -13016,8 +13245,8 @@ document.addEventListener('pointerdown',()=>mdown=true,true);document.addEventLi
 // Neu zeichnen nur bei Änderung und höchstens einmal pro Bildschirmbild
 (function loop(){if(dirty&&EDS.length&&!EDS.dragging){dirty=false;EDS.forEach(f=>f());}requestAnimationFrame(loop);})();
 function syncFrom(ver){if(ver==VER||mdown||Date.now()-lastSend<800)return;VER=ver;
- fetch('/fx').then(r=>r.json()).then(d=>{if(d.ctrl!=CTRL){D=d.tabs;CTRL=d.ctrl;modeBar();show(cur);return;}const T=d.tabs;T.forEach((t,i)=>{if(D[i])D[i].it=t.it;});
-  document.querySelectorAll('#m .r').forEach(r=>{const it=D[cur].it.find(x=>x.k==r.dataset.k);if(!it)return;const s=r.querySelector('input');if(s&&document.activeElement!==s){s.value=it.v;r.querySelector('.v').textContent=fmt(it,it.v);}});
+ fetch('/fx').then(r=>r.json()).then(d=>{if(d.ctrl!=CTRL){D=d.tabs;D.push({g:'sounds',n:'🔊 Sounds',it:[]});CTRL=d.ctrl;modeBar();show(cur);return;}const T=d.tabs;T.forEach((t,i)=>{if(D[i])D[i].it=t.it;});
+  if(D[cur].g=='sounds')return;document.querySelectorAll('#m .r').forEach(r=>{const it=D[cur].it.find(x=>x.k==r.dataset.k);if(!it)return;const s=r.querySelector('input');if(s&&document.activeElement!==s){s.value=it.v;r.querySelector('.v').textContent=fmt(it,it.v);}});
   if(D[cur].g=='steer_old')fetch('/curve').then(r=>r.json()).then(c=>{if(!EDS.dragging){CV=c.cur;EDS.forEach(f=>f());}});});}
 function wsConnect(){try{const ws=new WebSocket('ws://'+location.hostname+':8081');
  ws.onmessage=e=>{lastWs=Date.now();const d=JSON.parse(e.data);
@@ -13037,7 +13266,7 @@ document.getElementById('bkul').onclick=()=>document.getElementById('bkf').click
 document.getElementById('bkf').onchange=e=>{const f=e.target.files[0];if(!f)return;f.text().then(t=>bkRestore(t,f.name));};
 document.getElementById('bkrs').onclick=()=>{const b=localStorage.getItem('ag_backup');if(b&&confirm('Browser-Sicherung aufs Handy zurückspielen? Die aktuellen Werte am Handy werden ersetzt.'))bkRestore(b,'Browser');};
 bkShow();setInterval(()=>{if(Date.now()-lastSend<5000)bkSave();},4000);
-fetch('/fx').then(r=>r.json()).then(dd=>{const d=dd.tabs;VER=dd.ver;D=d;CTRL=dd.ctrl;CN=dd.cn;CC=dd.cc;modeBar();
+fetch('/fx').then(r=>r.json()).then(dd=>{const d=dd.tabs;d.push({g:'sounds',n:'🔊 Sounds',it:[]});VER=dd.ver;D=d;CTRL=dd.ctrl;CN=dd.cn;CC=dd.cc;modeBar();
  const ob=localStorage.getItem('ag_backup');
  if(dd.fresh&&ob){let tt='';try{tt=JSON.parse(ob).time.replace('T',' ');}catch(e){}if(confirm('Das Spiel am Handy hat frische Standardwerte (neu installiert?).\\nDeine Sicherung vom '+tt+' jetzt zurückspielen?'))bkRestore(ob,'Browser');}
  else if(!dd.fresh)bkSave();
