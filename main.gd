@@ -10731,7 +10731,7 @@ func _explode(z: float, lat: float, big := false, sc := 1.0) -> void:
 	lt.position = pos + f.uu * 0.9
 	add_child(lt)
 	fxs.append({"ring": ring, "rm": rm, "l": lt, "t": fx_age, "big": big, "f": f, "lat": lat, "rg": rg0, "sz": sz, "lk": float(X.light) * (0.3 if _cine() else 1.0), "hu": hu, "sf": sf0})
-	_snd("boom", 4.0 if big else 2.0, randf_range(0.95, 1.05), pos)
+	_snd("boom", 4.0, randf_range(0.95, 1.05), pos)   # normale Explosion genauso kräftig wie die große (John)
 	# (früher lief dieselbe Datei zusätzlich halb so schnell als „Wumms“ darunter – mit der neuen Explosion klang das matschig)
 	# Kamera rüttelt, je näher, desto stärker
 	var d = (pos - cam.global_position).length()
@@ -13706,7 +13706,7 @@ func _weapons(dt: float, racing: bool) -> void:
 					if o.idx != sh.own and not o.out and (o.z - sh.z) * sdir > -1.0 and (o.z - sh.z) * sdir < bd:
 						bd = (o.z - sh.z) * sdir
 						sh.tg = o
-			if mg and sh.tg != null:
+			if mg and sh.tg != null and state != "lab":   # im FX Lab nicht um die Runde springen – sonst knallt es weit weg und unhörbar
 				z0 += _mega_lap(sh)   # Trefferprüfung: Weg in diesem Bild mit verschieben
 			if sh.tg != null:
 				# je näher, desto härter auf die Spur des Ziels – die Lenkrakete schlägt direkt ein
