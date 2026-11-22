@@ -18316,50 +18316,17 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 		var c = Control.new()
 		c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		c.set_anchors_preset(Control.PRESET_FULL_RECT)
-		c.draw.connect(func():
-			if mc.is_empty() or not mc.has("rp"):
-				return
-			var p: Vector2 = mc.rp
-			var h = float(mc.rs) * 0.5
-			var lk = float(mc.get("rlk", 0.0))
-			var blink_off = mc.get("hoff", false)
-			# hell (fast weiß-grün) mit dunklem Rand – auf dem grünen Nachtsichtbild sonst unsichtbar
-			# kräftiges Neon-Grün mit Leuchtschein (John)
-			# Rot-Orange, gleißend (John): fast weißer Kern, kräftige Farbe, breiter Leuchtschein in zwei Stufen
-			var col = Color(1.0, 0.32, 0.05, 0.85 + 0.15 * lk)
-			if blink_off:
-				col.a = 0.2
-			var shd = Color(0.08, 0.0, 0.0, col.a * 0.85)
-			var glw = Color(1.0, 0.3, 0.0, col.a * 0.16)
-			var glw2 = Color(1.0, 0.45, 0.1, col.a * 0.32)
-			var hot = Color(1.0, 0.9, 0.72, col.a)
-			var w = 5.0 + 2.5 * lk
-			var ang = float(mc.get("rang", 0.0)) * (1.0 - lk)
-			var e = h * 0.38
-			for k in range(4):
-				var a = ang + k * PI * 0.5
-				var cx = Vector2(cos(a + PI * 0.25), sin(a + PI * 0.25)) * h * 1.414
-				var d1 = Vector2(cos(a + PI), sin(a + PI)) * e
-				var d2 = Vector2(cos(a - PI * 0.5), sin(a - PI * 0.5)) * e
-				for dd in [d1, d2]:
-					c.draw_line(p + cx, p + cx + dd, glw, w + 22.0)
-					c.draw_line(p + cx, p + cx + dd, glw2, w + 10.0)
-					c.draw_line(p + cx, p + cx + dd, shd, w + 3.0)
-					c.draw_line(p + cx, p + cx + dd, col, w)
-					c.draw_line(p + cx, p + cx + dd, hot, maxf(1.5, w * 0.35))
-			# Fadenkreuz in der Mitte: beim Suchen offen, eingerastet ein kleiner Punkt
-			var g = 8.0
-			if lk < 0.5:
-				for sg in [[Vector2(-g * 2.2, 0), Vector2(-g, 0)], [Vector2(g, 0), Vector2(g * 2.2, 0)], [Vector2(0, -g * 2.2), Vector2(0, -g)], [Vector2(0, g), Vector2(0, g * 2.2)]]:
-					c.draw_line(p + sg[0], p + sg[1], glw2, 9.0)
-					c.draw_line(p + sg[0], p + sg[1], col, 3.5)
-			else:
-				c.draw_circle(p, 13.0, glw)
-				c.draw_circle(p, 8.0, glw2)
-				c.draw_circle(p, 6.0, shd)
-				c.draw_circle(p, 4.5, col)
-				c.draw_circle(p, 2.2, hot)
-			)
+		c.draw.connect(_ret_draw.bind(c, false))
+		# Leuchtschein in eigener Ebene, additiv gemischt: addiert Licht aufs Schwarz-Weiß-Bild – wirkt wie HDR-Neon
+		var cg = Control.new()
+		cg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cg.set_anchors_preset(Control.PRESET_FULL_RECT)
+		var am = CanvasItemMaterial.new()
+		am.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+		cg.material = am
+		cg.draw.connect(_ret_draw.bind(cg, true))
+		c.add_child(cg)
+		mc.retg = cg
 		hud.layer.add_child(c)
 		mc.ret = c
 		var vp0 = get_viewport().get_visible_rect().size
@@ -18372,7 +18339,7 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 	mc.rt = now
 	var k = 1.0 - exp(-rdt * (9.0 if on_target else 5.0))
 	mc.rp = (mc.rp as Vector2).lerp(want, k)
-	var tsz = wsz if on_target else 104.0 + 9.0 * sin(now * 5.0)
+	var tsz = maxf(wsz, 110.0) if on_target else 120.0 + 10.0 * sin(now * 5.0)   # nie winzig, auch bei fernem Ziel
 	mc.rs = lerpf(float(mc.rs), tsz, k)
 	var near = on_target and (mc.rp as Vector2).distance_to(want) < maxf(10.0, wsz * 0.15)
 	mc.rlk = move_toward(float(mc.get("rlk", 0.0)), 1.0 if near else 0.0, rdt * 5.0)
@@ -18380,8 +18347,59 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 		mc.rang = fmod(float(mc.get("rang", 0.0)) + rdt * 1.2, TAU)
 	(mc.ret as Control).visible = true
 	(mc.ret as Control).queue_redraw()
+	if mc.has("retg") and is_instance_valid(mc.retg):
+		(mc.retg as Control).queue_redraw()
 	if OS.get_environment("KCDBG") != "":
 		print("RET rp=", mc.rp, " rs=", snappedf(float(mc.rs), 0.1), " lk=", snappedf(float(mc.rlk), 0.01), " vis=", (mc.ret as Control).is_visible_in_tree(), " rect=", (mc.ret as Control).get_global_rect())
+
+
+# Zielkreuz in Rot-Orange (John: muss richtig rausleuchten). glow=true: additive Leuchtebene, sonst Kontur + Farbe + heißer Kern
+func _ret_draw(c: Control, glow: bool) -> void:
+	if mc.is_empty() or not mc.has("rp"):
+		return
+	var p: Vector2 = mc.rp
+	var h = float(mc.rs) * 0.5
+	var lk = float(mc.get("rlk", 0.0))
+	var al = 0.2 if mc.get("hoff", false) else 1.0
+	var pulse = 0.85 + 0.15 * sin(Time.get_ticks_msec() / 1000.0 * (14.0 if lk >= 0.99 else 6.0))
+	var w = 7.0 + 3.0 * lk
+	var ang = float(mc.get("rang", 0.0)) * (1.0 - lk)
+	var e = h * 0.45
+	var segs = []
+	for k in range(4):
+		var a = ang + k * PI * 0.5
+		var cx = p + Vector2(cos(a + PI * 0.25), sin(a + PI * 0.25)) * h * 1.414
+		segs.append([cx, cx + Vector2(cos(a + PI), sin(a + PI)) * e])
+		segs.append([cx, cx + Vector2(cos(a - PI * 0.5), sin(a - PI * 0.5)) * e])
+	var g = 10.0
+	if lk < 0.5:
+		for sg in [[Vector2(-g * 2.4, 0), Vector2(-g, 0)], [Vector2(g, 0), Vector2(g * 2.4, 0)], [Vector2(0, -g * 2.4), Vector2(0, -g)], [Vector2(0, g), Vector2(0, g * 2.4)]]:
+			segs.append([p + sg[0], p + sg[1]])
+	if glow:
+		# mehrere weiche Schichten übereinander: breiter roter Hof, orange Schein, gelblich-heißer Kern
+		for L in [[44.0, Color(1.0, 0.12, 0.0, 0.10)], [28.0, Color(1.0, 0.25, 0.0, 0.16)], [16.0, Color(1.0, 0.4, 0.05, 0.28)], [8.0, Color(1.0, 0.6, 0.2, 0.45)]]:
+			var cc: Color = L[1]
+			cc.a *= al * pulse
+			for sg in segs:
+				c.draw_line(sg[0], sg[1], cc, w + float(L[0]))
+				c.draw_circle(sg[0], (w + float(L[0])) * 0.5, cc)
+				c.draw_circle(sg[1], (w + float(L[0])) * 0.5, cc)
+		if lk >= 0.5:
+			for L in [[30.0, 0.14], [18.0, 0.25], [10.0, 0.45]]:
+				c.draw_circle(p, float(L[0]), Color(1.0, 0.35, 0.05, float(L[1]) * al * pulse))
+		return
+	var col = Color(1.0, 0.35, 0.05, al)
+	var hot = Color(1.0, 0.93, 0.78, al)
+	var shd = Color(0.06, 0.0, 0.0, 0.8 * al)
+	for sg in segs:
+		c.draw_line(sg[0], sg[1], shd, w + 4.0)
+	for sg in segs:
+		c.draw_line(sg[0], sg[1], col, w)
+		c.draw_line(sg[0], sg[1], hot, maxf(2.0, w * 0.38))
+	if lk >= 0.5:
+		c.draw_circle(p, 8.0, shd)
+		c.draw_circle(p, 6.0, col)
+		c.draw_circle(p, 3.0, hot)
 
 
 func _mc_mark(tg) -> void:
