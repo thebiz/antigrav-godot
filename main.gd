@@ -479,7 +479,7 @@ func _sounds() -> void:
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "vo_blk.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
 			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "blackout.wav", "minewarn.wav", "hover.wav", "ignite.wav",
-			"amb_city.ogg", "amb_jungle.ogg", "music_race.ogg", "music_race2.ogg", "music_race3.ogg", "music_race4.ogg", "music_menu.ogg",
+			"amb_city.ogg", "amb_jungle.ogg", "music_nr1.mp3", "music_nr2.mp3", "music_menu.ogg",
 			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
@@ -21638,7 +21638,9 @@ func _own_song_lbl() -> String:
 	return "Own race song: " + (n.substr(0, 22) + "…" if n.length() > 23 else n) + "  (tap to remove)"
 var music_st = ""
 var music_nx = false
-const MUSIC_RACE = ["music_race", "music_race2", "music_race3", "music_race4"]
+# Renn-Songs (John: erstmal nur die zwei „Night Race“-Songs im Wechsel; die alten vier liegen noch in sfx/, sind aber raus)
+const MUSIC_RACE = ["music_nr1", "music_nr2"]
+const MUSIC_GAIN = {"music_nr1": 2.0, "music_nr2": 2.0}   # etwas leiser gemastert als die alten
 
 
 func _music_update(dt: float) -> void:
@@ -21685,7 +21687,7 @@ func _music_update(dt: float) -> void:
 					if snd.get(k) != null and k != music_cur:
 						pool.append(k)
 				if pool.is_empty():
-					pool = [music_cur if music_cur != "" else "music_race"]
+					pool = [music_cur if snd.get(music_cur) != null else MUSIC_RACE[0]]
 				music_cur = pool[randi() % pool.size()]
 				music_p.stream = snd[music_cur]   # nicht in Schleife: am Ende kommt der nächste Song
 				if OS.get_environment("MUSDBG") != "":
@@ -21696,7 +21698,7 @@ func _music_update(dt: float) -> void:
 				music_p.play()
 	else:
 		music_f = minf(1.0, music_f + dt / 1.2)
-	music_p.volume_db = linear_to_db(maxf(0.0005, music_f)) + (2.0 if music_cur == "music_race" and music_k == "music_race" else 0.0)   # alter Song ist leiser gemastert
+	music_p.volume_db = linear_to_db(maxf(0.0005, music_f)) + (float(MUSIC_GAIN.get(music_cur, 0.0)) if music_k == "music_race" else 0.0)
 	# Zeitlupe verlangsamt alle Töne – die Musik soll dabei nicht dumpf und tief werden (John)
 	music_p.pitch_scale = clampf(1.0 / maxf(0.1, AudioServer.playback_speed_scale), 1.0, 4.0)
 
