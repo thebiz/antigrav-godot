@@ -496,7 +496,7 @@ func _sounds() -> void:
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
 			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "blackout.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_nr1.mp3", "music_nr2.mp3", "music_menu.ogg",
-			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav"]:
+			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav", "rk_loop.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
 	for c in ["ren", "vega", "kato", "mira"]:
@@ -669,10 +669,13 @@ func _sound_update(dt: float) -> void:
 	ck_snd += (ckt - ck_snd) * (1.0 - exp(-dt / 0.15))
 	_ck_bus(ck_snd)
 	var pk = 1.0 - 0.14 * ck_snd
-	loops.engine.pitch_scale = clampf((0.7 + 0.6 * sp + 0.35 * g.boost) * pk, 0.3, 3.0)
-	loops.engine.volume_db = linear_to_db(0.02 + (0.5 + 0.35 * sp + 0.35 * g.boost if on else 0.12)) + 1.5 * ck_snd
-	loops.idle.pitch_scale = clampf((0.75 + 0.45 * sp + 0.25 * g.boost) * (1.0 - 0.25 * ck_snd), 0.3, 3.0)
-	loops.idle.volume_db = linear_to_db((0.32 if state != "menu" else 0.2) * (1.0 + 0.9 * ck_snd))
+	# neue Aufnahmen (John): Fahrt-Sound wird mit dem Tempo lauter und nur leicht höher, der Stand-Sound blendet beim Losfahren aus
+	var spc = clampf(sp, 0.0, 1.4)
+	loops.engine.pitch_scale = clampf((0.86 + 0.22 * spc + 0.18 * g.boost) * pk, 0.3, 3.0)
+	loops.engine.volume_db = linear_to_db(0.02 + (0.12 + 0.6 * clampf(sp * 1.3, 0.0, 1.0) + 0.3 * g.boost if on else 0.04)) + 1.5 * ck_snd
+	var stand = 1.0 - clampf(sp * 1.6, 0.0, 1.0)
+	loops.idle.pitch_scale = clampf((0.97 + 0.08 * spc) * (1.0 - 0.15 * ck_snd), 0.3, 3.0)
+	loops.idle.volume_db = linear_to_db(maxf(0.001, (0.12 + 0.7 * stand) * (0.6 if state == "menu" else 1.0) * (1.0 + 0.6 * ck_snd)))
 	if loops.has("water"):
 		var onw = state in ["race", "done"] and T.in_water(T.lz(float(g.z))) and not g.air and not g.out
 		wat_snd = move_toward(wat_snd, (0.35 + 0.4 * clampf(float(g.spd) / maxf(1.0, base_spd), 0.0, 1.5)) if onw else 0.0, dt * 2.5)
@@ -11268,6 +11271,17 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	gb.position = Vector3(0, cap.height * 0.45, 0)
 	fl.add_child(gb)
 	mi.add_child(_rocket_model(rl))
+	# Raketen-Triebwerk (neue Aufnahme): fliegt mit, laut in der Verfolgungskamera, Doppler beim Vorbeiflug
+	if snd.has("rk_loop") and not warm:
+		var rs = AudioStreamPlayer3D.new()
+		rs.stream = _looped(snd["rk_loop"])
+		rs.bus = "Game"
+		rs.unit_size = 3.5
+		rs.max_distance = 90.0
+		rs.volume_db = -3.0
+		rs.doppler_tracking = AudioStreamPlayer3D.DOPPLER_TRACKING_PHYSICS_STEP
+		rs.autoplay = true
+		mi.add_child(rs)
 	var lt = OmniLight3D.new()
 	lt.light_color = Color(1.0, 0.55, 0.2)
 	lt.omni_range = 4.0 * sqrt(float(X.size))
