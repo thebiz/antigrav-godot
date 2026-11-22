@@ -799,7 +799,8 @@ void fragment(){
 		// Grell weiß sind nur die gegnerischen Schiffe – die bleiben als reines Weiß stehen (_heat_on).
 		float L=clamp(dot(col,vec3(.3,.55,.15)),0.,1.);
 		// wieder Schwarz-Weiß (John): Umgebung kühl und gedämpft, Hitze (Gegner, Düsen) grell weiß
-		float gy=pow(L,.85)*.36;
+		// kontrastreicher (John): echtes Schwarz, helle Lichter – nicht blass und verwaschen
+		float gy=pow(smoothstep(.02,.62,L),1.35)*.8;
 		vec3 th=vec3(gy*.92,gy*.96,gy*1.04);
 		// Kennfarbe Magenta der gegnerischen Schiffe – nur innerhalb ihrer Bildbereiche gezählt (sonst würde rosa Neon mitglühen)
 		vec2 su=SCREEN_UV;
@@ -6459,10 +6460,82 @@ func _party_start() -> void:
 		["mech", "waving", 1.05, 0.65, Color(1, 1, 1)], ["mech", "clapping", -1.0, 0.7, Color(0.85, 0.9, 1.0)], ["mech", "cheering", -0.9, -0.85, Color(1.0, 0.92, 0.85)],
 		["fan1", "cheering", 0.15, 0.95, Color(1, 1, 1)], ["fan2", "rallying", 0.8, 1.25, Color(1, 1, 1)], ["fan1", "standing_cheering", -0.55, 1.25, Color(0.85, 0.8, 1.0)],
 		["fan2", "cheering", 1.5, 1.0, Color(1.0, 0.85, 0.85)], ["fan1", "clapping", -1.5, 1.05, Color(0.8, 1.0, 0.9)], ["fan2", "waving", 0.35, 1.55, Color(0.9, 0.9, 1.0)],
-		["fan1", "rallying", -1.1, 1.5, Color(1.0, 1.0, 0.8)], ["fan2", "standing_cheering", 1.25, 1.55, Color(0.85, 1.0, 1.0)], ["fan2", "clapping", -0.2, 1.6, Color(1, 1, 1)]]
+		["fan1", "rallying", -1.1, 1.5, Color(1.0, 1.0, 0.8)], ["fan2", "standing_cheering", 1.25, 1.55, Color(0.85, 1.0, 1.0)], ["fan2", "clapping", -0.2, 1.6, Color(1, 1, 1)],
+		# ein paar Fans weiter vorn an den Bildrändern (John: die 3D-Figuren eher in den Vordergrund)
+		["fan1", "cheering", 1.35, -1.05, Color(1.0, 0.9, 0.95)], ["fan2", "rallying", -1.3, -1.15, Color(0.9, 1.0, 0.9)],
+		["fan2", "standing_cheering", 1.7, -0.55, Color(1, 1, 1)], ["fan1", "waving", -1.75, -0.6, Color(0.9, 0.9, 1.0)]]
 	for pe in people:
 		var pp2: Vector3 = at.call(float(pe[2]) + randf_range(-0.08, 0.08), float(pe[3]) + randf_range(-0.06, 0.06))
 		_party_fig(pe[0], pe[1], pp2, rp, pe[4], randf_range(0.93, 1.05), randf() * 3.0)
+	# Menge im Hintergrund: die flachen Zuschauer von den Tribünen, in mehreren Reihen hinter Team und Schiffen –
+	# durch die Unschärfe hinten fällt nicht auf, dass sie flach sind (John: mehr Leute, mehr Action)
+	if crowd_mat == null:
+		crowd_mat = _shader_mat(CROWD_CODE)
+		crowd_mat.set_shader_parameter("tx", load("res://art/crowd.png"))
+		crowd_mat.set_shader_parameter("k", 0.7 if _noir() else 0.9)
+	var cq = QuadMesh.new()
+	cq.size = Vector2(0.3, 0.45)
+	cq.center_offset = Vector3(0, 0.225, 0)
+	var crng = RandomNumberGenerator.new()
+	crng.seed = 77
+	var cpts = []
+	for row in range(5):
+		var cl = 2.0 + row * 0.24
+		var dzc = -3.2
+		while dzc < 3.4:
+			dzc += crng.randf_range(0.17, 0.3)
+			cpts.append(at.call(dzc, cl + crng.randf_range(-0.05, 0.05)) + f.uu * (row * 0.07))
+	# und je ein Pulk links und rechts hinter den Pylonen
+	for sd3 in [-1.0, 1.0]:
+		for i3 in range(26):
+			cpts.append(at.call(sd3 * crng.randf_range(3.4, 4.6), crng.randf_range(-1.6, 1.8)))
+	var cmm = MultiMesh.new()
+	cmm.transform_format = MultiMesh.TRANSFORM_3D
+	cmm.use_custom_data = true
+	cmm.mesh = cq
+	cmm.instance_count = cpts.size()
+	for i3 in range(cpts.size()):
+		cmm.set_instance_transform(i3, Transform3D(Basis().scaled(Vector3.ONE * crng.randf_range(0.92, 1.1)), cpts[i3]))
+		# schneller wippen als auf der Tribüne: hier wird gefeiert
+		cmm.set_instance_custom_data(i3, Color((crng.randi() % 16) / 16.0 + 0.01, 0.55 + crng.randf() * 0.45, crng.randf() * 0.999, 0))
+	var cmi = MultiMeshInstance3D.new()
+	cmi.multimesh = cmm
+	cmi.material_override = crowd_mat
+	cmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(cmi)
+	# Blitzlichtgewitter: kurze, grelle Blitze aus der Menge, die die Szene aufleuchten lassen
+	var fls = []
+	var fmat = StandardMaterial3D.new()
+	fmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fmat.albedo_color = Color(4.0, 4.0, 4.4)
+	fmat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var fg = GradientTexture2D.new()
+	var fgr = Gradient.new()
+	fgr.colors = PackedColorArray([Color(1, 1, 1, 1), Color(1, 1, 1, 0)])
+	fg.gradient = fgr
+	fg.fill = GradientTexture2D.FILL_RADIAL
+	fg.fill_from = Vector2(0.5, 0.5)
+	fg.fill_to = Vector2(1.0, 0.5)
+	fmat.albedo_texture = fg
+	for i3 in range(4):
+		var fl = OmniLight3D.new()
+		fl.light_color = Color(0.92, 0.95, 1.0)
+		fl.light_energy = 0.0
+		fl.omni_range = 3.8
+		root.add_child(fl)
+		var fq = MeshInstance3D.new()
+		var fqm = QuadMesh.new()
+		fqm.size = Vector2(0.22, 0.22)
+		fq.mesh = fqm
+		fq.material_override = fmat
+		fq.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		fq.visible = false
+		root.add_child(fq)
+		fls.append({"l": fl, "q": fq, "t": 0.0})
+	party.fls = fls
+	party.flt = 0.4
+	party.fat = at
 	# Licht auf die Szene (es ist Nacht)
 	# (nicht direkt über den abgestellten Schiffen, sonst strahlen deren Rümpfe weiß aus)
 	for lp in [[0.0, -1.6, Color(1.0, 0.85, 0.7), 1.7], [0.9, 1.9, Color(1.0, 0.6, 0.8), 2.6], [-0.9, 1.9, Color(0.5, 0.8, 1.0), 2.6]]:
@@ -6563,6 +6636,25 @@ func _party_live(dt: float) -> bool:
 	if party.is_empty():
 		return false
 	var t: float = fin.get("pt", 0.0)
+	# Blitzlichtgewitter
+	if party.has("fls"):
+		var rdtf = clampf(dt / maxf(0.05, Engine.time_scale), 0.0, 0.1)
+		party.flt = float(party.flt) - rdtf
+		if float(party.flt) <= 0.0:
+			party.flt = randf_range(0.07, 0.42) if randf() < 0.75 else randf_range(0.6, 1.0)
+			var fl: Dictionary = party.fls[randi() % (party.fls as Array).size()]
+			var fz = T.frame(float(party.z))
+			var crowd_f = randf() < 0.7
+			fl.e = 7.0 if crowd_f else 3.2   # von vorn schwächer, sonst überstrahlt Ren
+			var pos: Vector3 = (party.fat as Callable).call(randf_range(-3.0, 3.0), randf_range(1.9, 2.9) if crowd_f else -2.4)   # meist aus der Menge, manchmal von vorn (Fotografen hinter der Kamera) + fz.uu * randf_range(0.42, 0.6)
+			(fl.l as OmniLight3D).global_position = pos
+			(fl.q as MeshInstance3D).global_position = pos
+			fl.t = 0.11
+		for fl in party.fls:
+			fl.t = maxf(0.0, float(fl.t) - rdtf)
+			var k = float(fl.t) / 0.11
+			(fl.l as OmniLight3D).light_energy = float(fl.get("e", 7.0)) * k * k
+			(fl.q as MeshInstance3D).visible = k > 0.35
 	if OS.get_environment("NODOF") == "":
 		if dof_q == null or not is_instance_valid(dof_q):
 			_dof_on(true)
@@ -18232,10 +18324,12 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 			var lk = float(mc.get("rlk", 0.0))
 			var blink_off = mc.get("hoff", false)
 			# hell (fast weiß-grün) mit dunklem Rand – auf dem grünen Nachtsichtbild sonst unsichtbar
-			var col = Color(0.8, 1.0, 0.82, 0.7 + 0.3 * lk)
+			# kräftiges Neon-Grün mit Leuchtschein (John)
+			var col = Color(0.25, 1.0, 0.35, 0.75 + 0.25 * lk)
 			if blink_off:
 				col.a = 0.2
 			var shd = Color(0.0, 0.08, 0.02, col.a * 0.85)
+			var glw = Color(0.2, 1.0, 0.3, col.a * 0.22)
 			var w = 2.0 + 1.5 * lk
 			var ang = float(mc.get("rang", 0.0)) * (1.0 - lk)
 			var e = h * 0.38
@@ -18244,6 +18338,8 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 				var cx = Vector2(cos(a + PI * 0.25), sin(a + PI * 0.25)) * h * 1.414
 				var d1 = Vector2(cos(a + PI), sin(a + PI)) * e
 				var d2 = Vector2(cos(a - PI * 0.5), sin(a - PI * 0.5)) * e
+				c.draw_line(p + cx, p + cx + d1, glw, w + 12.0)
+				c.draw_line(p + cx, p + cx + d2, glw, w + 12.0)
 				c.draw_line(p + cx, p + cx + d1, shd, w + 3.0)
 				c.draw_line(p + cx, p + cx + d2, shd, w + 3.0)
 				c.draw_line(p + cx, p + cx + d1, col, w)
@@ -18353,7 +18449,11 @@ func _mc_mark(tg) -> void:
 	var locked = float(mc.get("rlk", 0.0)) >= 0.99 and mc.has("ret") and (mc.ret as CanvasItem).visible
 	lb.visible = locked
 	lb.text = "LOCK-ON"
-	lb.add_theme_color_override("font_color", Color(0.85, 1.0, 0.88))
+	lb.add_theme_color_override("font_color", Color(0.3, 1.0, 0.4))
+	lb.add_theme_color_override("font_shadow_color", Color(0.2, 1.0, 0.3, 0.55))
+	lb.add_theme_constant_override("shadow_outline_size", 14)
+	lb.add_theme_constant_override("shadow_offset_x", 0)
+	lb.add_theme_constant_override("shadow_offset_y", 0)
 	lb.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	lb.size = Vector2(300, 64)
 	# links neben der Zielerfassung
@@ -18377,7 +18477,7 @@ func _mc_card(tg, dz: float) -> void:
 		return
 	var ch: Array = CHARS[int(tg.idx)]
 	var vs = get_viewport().get_visible_rect().size
-	var grn = Color(0.35, 1.0, 0.45)
+	var grn = Color(0.2, 1.0, 0.32)   # Neon-Grün
 	var box = Control.new()
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.size = Vector2(250, 372)
@@ -18385,7 +18485,9 @@ func _mc_card(tg, dz: float) -> void:
 	var bg = Panel.new()
 	var st = StyleBoxFlat.new()
 	st.bg_color = Color(0.0, 0.05, 0.02, 0.78)
-	st.border_color = Color(grn, 0.85)
+	st.border_color = Color(grn, 1.0)
+	st.shadow_color = Color(0.2, 1.0, 0.3, 0.35)   # grüner Leuchtschein um die Karte
+	st.shadow_size = 14
 	st.set_border_width_all(2)
 	st.set_corner_radius_all(6)
 	bg.add_theme_stylebox_override("panel", st)
@@ -18430,7 +18532,9 @@ void fragment(){
 	lk.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	lk.add_theme_font_override("font", mc_font)
 	lk.add_theme_font_size_override("font_size", 22)
-	lk.add_theme_color_override("font_color", Color(0.75, 1.0, 0.8))
+	lk.add_theme_color_override("font_color", Color(0.3, 1.0, 0.42))
+	lk.add_theme_color_override("font_shadow_color", Color(0.2, 1.0, 0.3, 0.55))
+	lk.add_theme_constant_override("shadow_outline_size", 12)
 	lk.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lk.position = Vector2(0, 330)
 	lk.size = Vector2(250, 30)
