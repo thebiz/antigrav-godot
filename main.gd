@@ -18553,7 +18553,7 @@ func _mega_lap(sh: Dictionary) -> float:
 	for e in sh.get("ex", []):
 		if is_instance_valid(e):
 			(e as Node3D).global_position += off
-	if not mc.is_empty() and mc.get("sh") == sh:
+	if not mc.is_empty() and mc.get("sh") == sh and not mc.has("ci"):   # Zeitlupe am Ziel: Kamera bleibt beim Ziel (sprang sonst weg)
 		mc.p = (mc.p as Vector3) + off
 		mc.l = (mc.l as Vector3) + off
 		mc.pm = (mc.pm as Vector3) + off
@@ -19152,7 +19152,14 @@ func _mc_cam(dt: float) -> bool:
 			mc.oa = float(mc.get("oa", 0.0)) + rdt0
 			var a = lerpf(0.35, 1.9, clampf(float(mc.oa) / 2.8, 0.0, 1.0)) * float(mc.side)
 			var off = f3.fw * (cos(a) * 9.0) + f3.rr * (sin(a) * 9.0) + f3.uu * (1.8 + 0.6 * float(mc.oa) / 2.8)   # weiter weg: die (jetzt riesige) Explosion passt ins Bild
-			mc.p = (mc.p as Vector3).lerp(TP + off, 1.0 - exp(-rdt0 * 6.0))
+			var want3: Vector3 = TP + off
+			# Röhre/Tunnel: die Kamera bleibt drinnen (9 m zur Seite lag sie draußen hinter der Wand – man sah nur die Stadt,
+			# nicht die Explosion, John). Stattdessen vor dem Schiff längs der Röhre, leicht seitlich, an der Wand entlang.
+			if T.pipe_k(float(ct.z)) > 0.05 or T.in_tun(T.lz(float(ct.z)), 3.0):
+				var a2 = lerpf(0.3, 1.0, clampf(float(mc.oa) / 2.8, 0.0, 1.0)) * float(mc.side)
+				var sfc = T.sframe(float(ct.z) + cos(a2) * 8.5, float(ct.lat) + sin(a2) * 1.5)
+				want3 = sfc.c + sfc.uu * (1.15 + 0.25 * float(mc.oa) / 2.8)
+			mc.p = (mc.p as Vector3).lerp(want3, 1.0 - exp(-rdt0 * 6.0))
 			mc.l = (mc.l as Vector3).lerp(TP, 1.0 - exp(-rdt0 * 8.0))
 			if mc.hold <= 0.0:
 				_mc_end()
