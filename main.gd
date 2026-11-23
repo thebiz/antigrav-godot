@@ -21764,6 +21764,14 @@ func _soft_reset() -> bool:
 		paused_ui.queue_free()
 	paused_ui = null
 	_hull_update(null, false, 0.0)
+	# Wärmebild der Mega-Raketenkamera abbauen: sonst bleibt der magentafarbene Kennüberzug auf den Gegnern
+	# (Neustart mitten in der Raketenkamera → pinke Schiffe, John)
+	_heat_off()
+	for o in ships:
+		if is_instance_valid(o.node):
+			for mi in (o.node as Node3D).find_children("*", "MeshInstance3D", true, false):
+				if heat_mat != null and (mi as MeshInstance3D).material_overlay == heat_mat:
+					(mi as MeshInstance3D).material_overlay = null
 	_party_end()
 	for o in ships:
 		(o.node as Node3D).visible = true
