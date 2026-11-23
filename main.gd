@@ -444,6 +444,7 @@ func _start_step(c: int, first: bool) -> void:
 	_snd("vo_go" if c <= 0 else "vo_%d" % clampi(c, 1, 3), -5.0)   # Countdown leiser (war zu laut und hat gekratzt)
 	if c <= 0:
 		_snd("ignite", -1.0)   # bei GO zünden die Triebwerke
+		_start_snd(snd.get("startfx"), 0.0)   # Johns Startsound, zusätzlich zum GO (Lautstärke im Sounds-Reiter)
 	if first:
 		if float(S.rumble) > 0.01:
 			_start_snd(snd.get("start"), linear_to_db(float(S.rumble)))
@@ -464,10 +465,14 @@ func _start_play(short: bool) -> void:
 			var cc: int = stp[1]
 			if stp[0] <= 0.0:
 				start_prev.append(_start_snd(snd.get("go" if cc <= 0 else "cbeep"), linear_to_db(float(S.beeps)) - 2.0))
+				if cc <= 0:
+					start_prev.append(_start_snd(snd.get("startfx"), 0.0))
 			else:
 				get_tree().create_timer(stp[0]).timeout.connect(func():
 					if state == "lab":
-						start_prev.append(_start_snd(snd.get("go" if cc <= 0 else "cbeep"), linear_to_db(float(S.beeps)) - 2.0)))
+						start_prev.append(_start_snd(snd.get("go" if cc <= 0 else "cbeep"), linear_to_db(float(S.beeps)) - 2.0))
+						if cc <= 0:
+							start_prev.append(_start_snd(snd.get("startfx"), 0.0)))
 	if float(S.rumble) > 0.01:
 		start_prev.append(_start_snd(snd.get("start"), linear_to_db(float(S.rumble)), t0 * 0.5))
 
@@ -504,7 +509,7 @@ const SND_NAMES = {"boom": "Explosion", "engine": "Schiff – Fahrt (Schleife)",
 	"rk_loop": "Rakete – Triebwerk (Schleife)", "minedrop": "Mine – Ablegen", "ko_boom": "K.o.-Knall", "shield": "Schild", "boost": "Boost",
 	"pick": "Waffe eingesammelt", "zap": "Treffer-Zap", "quake": "Beben", "field": "Kraftfeld (Schleife)", "hover": "Schweben (Schleife)",
 	"amb": "Umgebung (Schleife)", "crowd": "Publikum", "crowd_roar": "Publikum jubelt", "lock": "Zielerfassung", "incoming": "Warnung Rakete",
-	"crash_bump": "Wand-Stoß", "crash_scrape": "Wand-Schrammen", "debris": "Trümmer", "start": "Start", "go": "GO", "win": "Sieg", "lap": "Runde"}
+	"crash_bump": "Wand-Stoß", "crash_scrape": "Wand-Schrammen", "debris": "Trümmer", "start": "Start", "go": "GO", "startfx": "Startsound (nach GO)", "win": "Sieg", "lap": "Runde"}
 
 
 # Lautstärke je Ansicht: g = Außenansicht, h = Helm (fehlt h, gilt g) – gleitet mit dem Umschalten
@@ -681,7 +686,7 @@ func _snd_reset(k: String) -> void:
 func _sounds() -> void:
 	_buses()
 	for n in ["boom.ogg", "engine.wav", "idle.wav", "pick.ogg", "rak.ogg", "shield.ogg", "start.ogg", "win.ogg", "wallon.ogg",
-			"boost.wav", "zap.wav", "beep.wav", "go.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
+			"boost.wav", "zap.wav", "beep.wav", "go.wav", "startfx.wav", "pass.wav", "land.wav", "field.wav", "gbomb.wav", "phase.wav",
 			"vo_rak.wav", "vo_lenk.wav", "vo_mine.wav", "vo_orbs.wav", "vo_wand.wav", "vo_beben.wav", "vo_schild.wav", "vo_auto.wav", "vo_turbo.wav", "vo_elim.wav", "vo_enlow.wav", "vo_super.wav", "vo_mega.wav", "vo_blk.wav", "minedrop.wav",
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
 			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "blackout.wav", "minewarn.wav", "hover.wav", "ignite.wav",
