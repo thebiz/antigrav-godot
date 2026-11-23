@@ -422,6 +422,11 @@ func _start_snd(st: AudioStream, db: float, from := 0.0) -> AudioStreamPlayer:
 	var p = AudioStreamPlayer.new()
 	p.stream = st
 	p.volume_db = db
+	# Lautstärke/Tonhöhe aus dem Sounds-Reiter (je Ansicht) gilt auch für Countdown, GO und Startgrollen
+	var sk = snd.find_key(st)
+	if sk != null:
+		p.volume_db += _sg(str(sk))
+		p.pitch_scale = _sp_(str(sk))
 	p.bus = "Start"
 	add_child(p)
 	p.play(from)
