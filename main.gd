@@ -15019,8 +15019,21 @@ func _rewarm() -> void:
 	warm_cover = null
 
 
+const WARM_MUTE = ["Game", "Stadium", "Talk", "Cabin", "Start", "Board", "Voice"]
+
+
+# Vorwärmen: alle Effekt-Kanäle stumm, bis aufgeräumt ist (sonst rutschten verzögerte Töne – Triebwerk,
+# Knalle, Schild – nach dem Aufbauen doch noch durch, John)
+func _warm_mute(on: bool) -> void:
+	for b in WARM_MUTE:
+		var bi = AudioServer.get_bus_index(b)
+		if bi >= 0:
+			AudioServer.set_bus_mute(bi, on)
+
+
 func _warm_step(delta: float) -> void:
 	if warm_cover == null:
+		_warm_mute(true)
 		warm_cover = CanvasLayer.new()
 		warm_cover.layer = 20
 		var r = ColorRect.new()
@@ -15107,6 +15120,7 @@ func _warm_step(delta: float) -> void:
 	warm_cover.queue_free()
 	warm_t = -1.0
 	_ld_hide()
+	get_tree().create_timer(0.4, true, false, true).timeout.connect(func(): _warm_mute(false))
 	if state == "menu":
 		_race_snap()
 
