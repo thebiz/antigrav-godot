@@ -946,10 +946,6 @@ uniform float shp=.6;
 uniform float grn=.035;
 uniform int vm=0;   // Cockpit-Sicht: 0 normal, 1 Infrarot, 2 Gitter
 uniform float bo=0.;   // EMP gegen dich: etwas dunkler, Bildstörungen
-uniform float ix=0.;   // Mega-EMP: die Welt klappt wie bei Inception nach oben (0…1)
-uniform float mg=0.;   // Mega-EMP: Manga-Knall – Tusche, Raster, Speedlines (0…1)
-uniform float mgt=0.;  // Mega-EMP: Zeit seit dem Knall (Ringe laufen nach außen)
-uniform vec2 mgc=vec2(.5,.45);   // Mega-EMP: Knallzentrum auf dem Bildschirm
 uniform float bst=0.;  // Boost: zusätzliche Bewegungsunschärfe
 uniform vec4 hr0=vec4(0.);uniform vec4 hr1=vec4(0.);uniform vec4 hr2=vec4(0.);   // Wärmebild: Bildbereiche der gegnerischen Schiffe
 uniform vec4 hr3=vec4(0.);   // Wärmebild: Bildbereich der eigenen Rakete (Düsen glühen weiß)
@@ -959,21 +955,6 @@ float hm(vec4 r,vec2 p){if(r.z<=r.x)return 0.;vec2 c=(r.xy+r.zw)*.5;vec2 h=max((
 float hg(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 void fragment(){
 	vec2 uv=SCREEN_UV;
-	// Mega-EMP „Inception“: oberhalb einer Faltlinie wird das Bild gespiegelt und nach oben gebogen –
-	// die Stadt klappt über den Kopf, dazu dreht sich alles leicht um die Bildmitte
-	if(ix>0.){
-		vec2 c=uv-vec2(.5,.55);c.x*=asp;
-		float rr=length(c);float an=ix*.32*(1.-smoothstep(.0,.8,rr));   // Strudel: innen stärker gedreht
-		c=mat2(vec2(cos(an),sin(an)),vec2(-sin(an),cos(an)))*c;c.x/=asp;uv=c+vec2(.5,.55);
-		// Faltlinie wandert von oben herein; darüber erscheint die Strecke gespiegelt als Decke, zum Rand hin gebogen
-		float f=mix(-.05,.44,ix);
-		if(uv.y<f){
-			float dy=f-uv.y;
-			uv.y=f+dy*(.9+.5*ix)+dy*dy*1.2*ix;
-			uv.x=.5+(uv.x-.5)*(1.-dy*.9*ix);
-		}
-		uv=clamp(uv,vec2(.001),vec2(.999));
-	}
 	// Gravitationsbombe: Bild wird zur Mitte gesogen, danach läuft eine Welle nach außen
 	// (alles Teure nur, wenn wirklich eine Bombe oder ein Glitch läuft – sonst spart das Handy die Rechnerei)
 	bool bomb=gs!=0.||gr>=0.;
@@ -1092,29 +1073,6 @@ void fragment(){
 		col+=(hg(floor(SCREEN_UV/px*.5)+floor(TIME*30.)*13.)-.5)*(.04*bo+.1*eb);
 		col=mix(col,vec3(dot(col,vec3(.299,.587,.114))),bo);   // ganz schwarz-weiß (John: deutlich zeigen)
 	}
-	// Mega-EMP Manga-Knall: Tusche (hartes Schwarz-Weiß), Rasterpunkte in den Mitteltönen, schwarze Speedlines
-	// zur Mitte, weiße Schockwellen-Ringe und ein gezackter Blitzstern
-	if(mg>0.){
-		float L=dot(col,vec3(.299,.587,.114));
-		vec2 pp=SCREEN_UV/px;
-		vec2 cell=fract(pp/7.)-.5;
-		float dotr=sqrt(clamp(1.-L*1.4,0.,1.))*.62;
-		float tone=step(dotr,length(cell));
-		float ink=L<.16?0.:(L>.55?1.:tone);
-		vec2 mc=SCREEN_UV-mgc;mc.x*=asp;float mr=length(mc);float man=atan(mc.y,mc.x);
-		float ln=floor(man*60.);float hl=h21(vec2(ln,9.1));
-		float sl=step(.45,hl)*smoothstep(.06+hl*.18,.5+hl*.3,mr);
-		ink*=1.-sl*smoothstep(.0,.3,fract(man*60.))*smoothstep(1.,.7,fract(man*60.));
-		float sp=.11+.05*sin(man*9.)+.035*sin(man*23.+1.);
-		float sr=sp*(.35+mgt*1.4)*(1.-smoothstep(.35,.8,mgt));
-		float star=1.-smoothstep(sr,sr+.006,mr);
-		float ring=0.;for(int i=0;i<3;i++){float rp=mgt*(.9+float(i)*.3)-float(i)*.1;ring+=smoothstep(.014,.0,abs(mr-rp))*step(0.,rp)*(1.-smoothstep(.5,.9,rp));}
-		vec3 mcol=vec3(ink);
-		mcol=mix(mcol,vec3(1.),clamp(ring,0.,1.));
-		mcol=mix(mcol,vec3(1.,.97,.9),star);
-		mcol=mix(mcol,vec3(1.),smoothstep(.12,0.,mgt));   // weißer Blitz im ersten Moment
-		col=mix(col,mcol,mg);
-	}
 	// Vignette bei Tempo
 	col*=1.-spd*.25*smoothstep(.3,.9,length(cd*vec2(asp,1.))*1.4);
 	COLOR=vec4(col,1.);
@@ -1124,73 +1082,9 @@ void fragment(){
 	cl.add_child(r)
 
 
-# ---------------------------------------------------------------- Mega-EMP-Show (John: „Wow-Moment“)
-# 0–0,9 s die Welt klappt hoch (Inception), dann Blitz + Manga-Knall mit Fast-Standbild, Schockwellen, zurück.
-# Läuft in Echtzeit (unabhängig von der Zeitlupe); die Zeitlupe setzt sie nur, wenn sonst nichts die Zeit steuert.
-var mx_t0 = -1.0
-var mx_ts = false
-const MX_KNALL = 0.9
-const MX_END = 2.6
-
-
-func _mega_emp_fx() -> void:
-	mx_t0 = 0.0
-	mx_ts = false
-	_snd("blackout", 4.0, 0.7)
-
-
-func _mx_update() -> void:
-	var pm = OS.get_environment("PMANGA")
-	if pm != "":
-		var pv = pm.split(",")
-		_sp(post, "ix", float(pv[0]))
-		_sp(post, "mg", float(pv[1]))
-		_sp(post, "mgt", float(pv[2]))
-		return
-	if mx_t0 < 0.0:
-		return
-	# Echtzeit (Zeitlupe herausgerechnet), Sprünge begrenzt
-	mx_t0 += minf(get_process_delta_time() / maxf(Engine.time_scale, 0.01), 0.1)
-	var t = mx_t0
-	var ixv = 0.0
-	var mgv = 0.0
-	if t < MX_KNALL:
-		var k = t / MX_KNALL
-		ixv = k * k * (3.0 - 2.0 * k)
-	else:
-		ixv = clampf(1.0 - (t - MX_KNALL) / 0.35, 0.0, 1.0)
-		mgv = 1.0 - smoothstep(MX_END - 0.5, MX_END, t)
-		if not mx_ts and t >= MX_KNALL:
-			mx_ts = true
-			if is_instance_valid(ships[0].node):
-				_boom_snd((ships[0].node as Node3D).global_position + (ships[0].node as Node3D).global_transform.basis.z * -6.0)
-			_vib(160, 1.0)
-			shake = maxf(shake, 0.8)
-	_sp(post, "ix", ixv)
-	_sp(post, "mg", mgv)
-	_sp(post, "mgt", maxf(0.0, t - MX_KNALL) * 0.9)
-	# Fast-Standbild während des Knalls – nur im normalen Rennen (Raketenkamera/Zeitlupen haben Vorrang)
-	var own_ts = state == "race" and mc.is_empty() and kc.is_empty()
-	if own_ts:
-		if t >= MX_KNALL and t < MX_END - 0.4:
-			Engine.time_scale = 0.12
-			_pss(0.6)
-		elif t >= MX_END - 0.4:
-			Engine.time_scale = lerpf(0.12, 1.0, clampf((t - (MX_END - 0.4)) / 0.4, 0.0, 1.0))
-			_pss(Engine.time_scale)
-	if t >= MX_END or (state != "race" and state != "lab"):   # im Live-Tuning (FX Lab) darf die Show auch laufen
-		mx_t0 = -1.0
-		_sp(post, "ix", 0.0)
-		_sp(post, "mg", 0.0)
-		if own_ts or state != "race":
-			Engine.time_scale = 1.0
-			AudioServer.playback_speed_scale = 1.0
-
-
 func _post_update(dt: float) -> void:
 	if post == null:
 		return
-	_mx_update()
 	var vp = get_viewport().get_visible_rect().size
 	_sp(post, "asp", vp.x / maxf(1.0, vp.y))
 	_sp(post, "shp", 0.9 if _noir() else 0.6)
@@ -12232,10 +12126,8 @@ func _fire_mega(g: Dictionary, w: String) -> void:
 			g.mshield = 8.0
 			_snd("shield")
 		"blk":
-			# MEGA-EMP: 10 s gestört – beim eigenen Mega-EMP die große Show (Welt klappt hoch, Manga-Knall)
+			# MEGA-EMP: 10 s gestört
 			_blackout(g, 10.0, true)
-			if g.idx == 0:
-				_mega_emp_fx()
 		"wand":
 			# zwei Barrieren hintereinander: bremsen deutlich, je 20 % Schaden (zusammen 40 %)
 			for dz in [20.0, 30.0]:
@@ -17970,8 +17862,6 @@ func _shot() -> void:
 							ships[q].z = ships[0].z + float(OS.get_environment("BLKNEAR")) + q * 4.0
 					if shot_n == 40:
 						_blackout(ships[1] if bf.begins_with("ai") else ships[0], 10.0 if bf.ends_with("mega") or bf.ends_with("sup") else 5.5, bf.ends_with("mega"))
-						if bf == "memega":
-							_mega_emp_fx()
 					if OS.get_environment("BLKSHOT") != "" and shot_n > 40 and shot_n % int(OS.get_environment("BLKSHOT")) == 0:
 						get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH").replace(".png", "_%03d.png" % shot_n))
 						print("DEM n=", shot_n, " ", demons.map(func(d): return [snappedf(d.t, 0.01), snappedf(d.dz, 0.1), snappedf(d.h, 0.1), snappedf(d.a, 0.01)]), " en=", ships.map(func(x): return snappedf(float(x.en), 0.01)))
