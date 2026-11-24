@@ -2163,14 +2163,13 @@ void fragment(){
 		mats["water"] = _shader_mat("""
 shader_type spatial;
 render_mode unshaded,cull_disabled,blend_mix,depth_draw_opaque,shadows_disabled;
-// See, sparsam (John: Frame-Einbruch am See): keine Rückprojektion ins Bildschirmbild mehr, die Stadtlichter
-// spiegeln sich als schimmernde Neonstreifen; Rauschen ohne Sinus, Wellenringe nur bei Gleitern auf dem Wasser
 uniform float z0=%f;
 uniform float z1=%f;
+uniform sampler2D scr : hint_screen_texture, filter_linear;
 uniform vec4 shp[4];          // Gleiter: Weltposition xyz, w = Stärke (0 = nicht auf dem Wasser)
 uniform vec4 shz[4];          // Gleiter für die Schneise: Seitenlage, Strecken-z, Stärke, Tempo
 varying vec3 wp;
-float hs(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
+float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
 float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hs(i),hs(i+vec2(1,0)),f.x),mix(hs(i+vec2(0,1)),hs(i+1.),f.x),f.y);}
 // Steigung einer Sinuswelle a*sin(k*(p·d) - s*t)
 vec2 wv(vec2 p,vec2 d,float k,float a,float s,float t,float lod){return d*(a*k*cos(dot(p,d)*k-t*s))*clamp(1.3-k*lod*1.6,0.,1.);}
@@ -2202,10 +2201,10 @@ void fragment(){
 	}
 	// Wellenringe rund um die Gleiter, nach hinten gezogen (Luftkissen drückt aufs Wasser)
 	for(int i=0;i<4;i++){
-		if(shp[i].w<=0.) continue;
+		if(shp[i].w<=0.) continue;   // kein Gleiter auf dem Wasser: Beitrag wäre 0
 		vec2 d=p-shp[i].xz;
 		float r=length(d*vec2(1.,.55))+.001;
-		if(r>6.) continue;
+		if(r>7.) continue;           // weiter weg: exp(-r·1,3) < 0,0001 – unsichtbar
 		g+=(d/r)*sin(r*5.-t*11.)*shp[i].w*exp(-r*1.3)*.1*clamp(1.-lod*4.,0.,1.);
 	}
 	vec3 nw=normalize((INV_VIEW_MATRIX*vec4(NORMAL,0.)).xyz);
@@ -2216,25 +2215,34 @@ void fragment(){
 	float fr=.03+.97*pow(1.-max(dot(n,v),0.),5.);
 	vec3 r=reflect(-v,n);
 	r.y=abs(r.y);
+	// Spiegelung: reflektierten Strahl ein Stück weit verfolgen und das Bild von dort nehmen (Stadt, Neon, Gleiter)
+	vec3 Q=wp+r*16.;
+	vec4 cq=PROJECTION_MATRIX*(VIEW_MATRIX*vec4(Q,1.));
+	vec4 cp=PROJECTION_MATRIX*(VIEW_MATRIX*vec4(wp,1.));
+	vec2 uq=cq.xy/cq.w*.5+.5;
+	vec2 up=cp.xy/cp.w*.5+.5;
+	if(abs(up.y-SCREEN_UV.y)>abs(1.-up.y-SCREEN_UV.y)){uq.y=1.-uq.y;}
 	vec3 sky=mix(vec3(.16,.06,.26),vec3(.02,.02,.07),clamp(r.y*2.2,0.,1.));
-	// Lichter der Stadt als schimmernde Streifen (Neon über nächtlichem Wasser): Richtung des gespiegelten Strahls in
-	// schmale Sektoren teilen, manche leuchten cyan, magenta oder orange; die Wellen verziehen sie
-	float az=atan(r.x,r.z)*52.;
-	float sid=floor(az);
-	float hz=hs(vec2(sid,3.7));
-	float lit=step(.58,hz)*smoothstep(.0,.35,fract(az))*smoothstep(1.,.65,fract(az));
-	float band=smoothstep(.015,.06,r.y)*smoothstep(.32,.12,r.y)*(.35+.65*vn(vec2(sid*1.7,r.y*22.)));
-	vec3 lc=hz>.93?vec3(1.,.55,.15):(hz>.84?vec3(1.,.2,.75):vec3(.2,.85,1.));
-	vec3 refl=sky*1.2+lc*lit*band*.75/max(fr*1.25,.05);
+	vec3 refl=sky;
+	if(cq.w>0.){
+		float eb=smoothstep(0.,.06,min(min(uq.x,1.-uq.x),min(uq.y,1.-uq.y)));
+		vec3 sc=texture(scr,clamp(uq,.001,.999)).rgb;
+		refl=mix(sky,sc*1.15+sky*.25,eb);
+	}
 	// Wasserkörper: tief dunkel, an Wellenkämmen etwas türkis durchscheinend
 	float crest=clamp(length(g)*1.6,0.,1.);
 	vec3 deep=mix(vec3(.0,.02,.045),vec3(.0,.09,.12),crest*.6);
 	vec3 c=mix(deep,refl,clamp(fr*1.25,0.,1.));
-	float fo=smoothstep(.45,.75,vn(p*5.5+vec2(t*1.5,0.)))*churn;   // aufgewühlter Schaum in der Schneise
-	c=mix(c,vec3(.55,.7,.8)*(.5+.5*fr),clamp(fo*.55,0.,1.));
+	if(churn>.001){
+		float fo=smoothstep(.45,.75,vn(p*5.5+vec2(t*1.5,0.)))*churn;   // aufgewühlter Schaum in der Schneise
+		c=mix(c,vec3(.55,.7,.8)*(.5+.5*fr),clamp(fo*.55,0.,1.));
+	}
 	// Glitzern: winzige Funken, wo die Kräuselwellen das Licht kippen
-	float sp=pow(vn(p*14.+vec2(t*1.3,-t))*vn(p*9.-t*.7),6.)*fr*5.*clamp(1.-lod*5.,0.,1.);
-	c+=vec3(.7,.85,1.)*sp;
+	float spk=fr*5.*clamp(1.-lod*5.,0.,1.);
+	if(spk>.001){
+		float sp=pow(vn(p*14.+vec2(t*1.3,-t))*vn(p*9.-t*.7),6.)*spk;
+		c+=vec3(.7,.85,1.)*sp;
+	}
 	// Bojenlicht spiegelt sich links Cyan, rechts Magenta
 	float x=UV.x;
 	float edge=exp(-pow((abs(x)-2.55)*2.2,2.))*(.6+.4*sin(UV.y*3.+t*2.));
@@ -16389,16 +16397,24 @@ func _go_back() -> void:
 # ---------------------------------------------------------------- Leistungstest: feste Szene, jeder Effekt einmal aus
 # Gleiche Stelle, gleiche Kamera – nur ein Schalter ändert sich je Abschnitt. So sieht man genau, was die Grafikkarte kostet.
 var bench = {}
-const BENCH = [["base", "Everything on (your settings)"], ["msaa2", "Edge smoothing MSAA 2×"], ["msaa4", "Edge smoothing MSAA 4×"], ["fxaa", "Edge smoothing FXAA"], ["res75", "Resolution 75 %"], ["fsr", "Resolution 75 % + FSR sharpening"],
-	["shadow", "Moon shadows off"], ["glow", "Glow off"], ["post", "Screen filter off"], ["haze", "Heat shimmer off"], ["nlight", "Neon reflections off"],
-	["lamps", "Track lamps off"], ["jets", "Plasma jets off"], ["city", "Holograms/signs/cars off"], ["sky", "Sky shader off"], ["wet", "Wet road off/on"], ["base2", "Everything on again"]]
+# Jeder Test wird direkt gegen eine frische „alles an“-Messung davor verglichen (gleiche Stelle): so verfälscht es nichts,
+# wenn das Handy während des Tests warm wird und heruntertaktet. „c“ = Stadtstück, „l“ = am See.
+const BENCH = [["res75", "Resolution 75 %", "c"], ["shadow", "Moon shadows off", "c"], ["glow", "Glow off", "c"], ["post", "Screen filter off", "c"],
+	["haze", "Heat shimmer off", "c"], ["nlight", "Neon reflections off", "c"], ["lamps", "Track lamps off", "c"], ["jets", "Plasma jets off", "c"],
+	["city", "Holograms/signs/cars off", "c"], ["sky", "Sky shader off", "c"], ["wet", "Wet road off/on", "c"],
+	["water", "LAKE: water shader simple", "l"], ["wwall", "LAKE: water walls off", "l"], ["res75", "LAKE: resolution 75 %", "l"],
+	["glow", "LAKE: glow off", "l"], ["wet", "LAKE: wet road off/on", "l"], ["haze", "LAKE: heat shimmer off", "l"]]
+const BENCH_Z = {"c": 300.0, "l": 458.0}
 
 
 func _bench_begin() -> void:
 	_start()
 	state = "bench"
 	hud.mid.text = ""
-	bench = {"i": -1, "t": 0.0, "res": [], "fx": JSON.parse_string(JSON.stringify(fx)), "nosh": false}
+	bench = {"i": -1, "t": 0.0, "res": [], "fx": JSON.parse_string(JSON.stringify(fx)), "nosh": false, "seq": []}
+	for e in BENCH:
+		bench.seq.append(["base", "base", e[2]])
+		bench.seq.append(e)
 	_bench_next()
 
 
@@ -16413,6 +16429,10 @@ func _bench_undo() -> void:
 	wenv.background_mode = Environment.BG_SKY
 	if post_rect != null:
 		post_rect.visible = true
+	for mk in ["water", "wwall"]:
+		if bench.has("sh_" + mk) and mats.has(mk):
+			(mats[mk] as ShaderMaterial).shader = bench["sh_" + mk]
+			bench.erase("sh_" + mk)
 
 
 func _bench_next() -> void:
@@ -16422,10 +16442,10 @@ func _bench_next() -> void:
 	bench.g = 0.0
 	bench.f = 0.0
 	bench.n = 0
-	if bench.i >= BENCH.size():
+	if bench.i >= bench.seq.size():
 		_bench_end()
 		return
-	var k: String = BENCH[bench.i][0]
+	var k: String = bench.seq[bench.i][0]
 	var vp = get_viewport()
 	match k:
 		"msaa2":
@@ -16466,14 +16486,21 @@ func _bench_next() -> void:
 		"wet":
 			fx.env.wet = 0.0 if float(fx.env.wet) > 0.01 else 1.0
 			_wet_apply()
+		"water", "wwall":
+			if mats.has(k):
+				bench["sh_" + k] = (mats[k] as ShaderMaterial).shader
+				var ssh = Shader.new()
+				ssh.code = "shader_type spatial;\nrender_mode unshaded,cull_disabled,blend_mix,depth_draw_opaque;\nvoid fragment(){ALBEDO=vec3(.0,.03,.06);ALPHA=1.;}" if k == "water" else "shader_type spatial;\nrender_mode unshaded;\nvoid fragment(){discard;}"
+				(mats[k] as ShaderMaterial).shader = ssh
 	hud.mid.add_theme_font_size_override("font_size", 40)
-	hud.mid.text = "PERFORMANCE TEST %d/%d\n%s" % [bench.i + 1, BENCH.size(), BENCH[bench.i][1]]
+	hud.mid.text = "PERFORMANCE TEST %d/%d\n%s" % [bench.i / 2 + 1, BENCH.size(), bench.seq[bench.i][1] if k != "base" else bench.seq[bench.i + 1][1]]
 
 
 func _bench_step(dt: float) -> void:
 	# feste Szene: offenes Stück mit Stadt, Hologramm und drei Gegnern vor dir
 	var g: Dictionary = ships[0]
-	g.z = 300.0
+	var bsc = "c" if bench.i < 0 or bench.i >= bench.seq.size() else str(bench.seq[bench.i][2])
+	g.z = float(BENCH_Z[bsc])
 	g.lat = 0.3
 	g.spd = base_spd
 	g.boost = 0.0
@@ -16490,15 +16517,15 @@ func _bench_step(dt: float) -> void:
 	_camera(dt)
 	_post_update(dt)
 	_resb_arm(dt)
-	if bench.i < 0 or bench.i >= BENCH.size():
+	if bench.i < 0 or bench.i >= bench.seq.size():
 		return
 	bench.t += dt
-	if bench.t > 0.8:
+	if bench.t > 0.7:
 		bench.g += gpu_ms
 		bench.f += get_process_delta_time() * 1000.0
 		bench.n += 1
-	if bench.t > 2.8:
-		bench.res.append([BENCH[bench.i][1], bench.g / maxf(1, bench.n), bench.f / maxf(1, bench.n)])
+	if bench.t > 2.2:
+		bench.res.append([bench.seq[bench.i][1], bench.g / maxf(1, bench.n), bench.f / maxf(1, bench.n), bench.seq[bench.i][0]])
 		_bench_next()
 
 
@@ -16507,10 +16534,15 @@ func _bench_end() -> void:
 	t += "Device: %s · %s · Godot %s\n" % [OS.get_model_name(), RenderingServer.get_video_adapter_name(), Engine.get_version_info().string]
 	t += "Settings: gfx %s · res %d %% · 3D scale %.2f · MSAA %s · fps cap %s · refresh %d Hz\n\n" % [["Low", "Medium", "High"][int(cfg.gfx)], int(float(cfg.res) * 100),
 		get_viewport().scaling_3d_scale, ["off", "2×", "4×", "8×"][clampi(int(get_viewport().msaa_3d), 0, 3)], "60" if int(cfg.cap) == 1 else "max", maxi(0, int(DisplayServer.screen_get_refresh_rate()))]
-	t += "GPU ms · frame ms · test\n"
-	var b0 = bench.res[0][1] if not bench.res.is_empty() else 0.0
+	t += "View: %s\n" % ["outside", "cockpit", "helmet"][clampi(int(cfg.get("view", 0)), 0, 2)]
+	t += "Each test vs. 'everything on' measured right before it (same spot)\n"
+	t += "GPU ms test · GPU ms before · saving · test\n"
+	var lb = 0.0
 	for r in bench.res:
-		t += "%5.1f · %5.1f · %s  (%+.1f)\n" % [r[1], r[2], r[0], r[1] - b0]
+		if r[3] == "base":
+			lb = r[1]
+			continue
+		t += "%5.1f · %5.1f · %+5.1f · %s\n" % [r[1], lb, lb - r[1], r[0]]
 	DisplayServer.clipboard_set(t)
 	bench.txt = t
 	hud.mid.add_theme_font_size_override("font_size", 22)
