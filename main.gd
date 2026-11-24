@@ -121,8 +121,8 @@ func _ready() -> void:
 		cfg.look = 1
 	if OS.get_cmdline_user_args().has("--jungle"):
 		cfg.look = 2
-	if OS.get_environment("TRK") != "":
-		cfg.trk = int(OS.get_environment("TRK"))   # nur zum Testen: 0 Classic, 1 Extreme
+	if _ev("TRK") != "":
+		cfg.trk = int(_ev("TRK"))   # nur zum Testen: 0 Classic, 1 Extreme
 	T.J = _jungle()   # eigene Streckenführung im Dschungel
 	T.X = int(cfg.get("trk", 1)) == 1 and not _jungle()   # Extreme: Korkenzieher-Röhre und See
 	T.S = pending_test or (OS.get_cmdline_user_args().has("--steertest") and OS.get_environment("AG_RELOADED") == "")
@@ -139,17 +139,17 @@ func _ready() -> void:
 		pending_free = false
 		free_ride = true
 		_start.call_deferred()
-	if OS.get_environment("SHOTAFTER") != "":
+	if _ev("SHOTAFTER") != "":
 		# Testbild nach N Sekunden (zum Prüfen am Rechner)
-		get_tree().create_timer(float(OS.get_environment("SHOTAFTER"))).timeout.connect(func():
-			get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
+		get_tree().create_timer(float(_ev("SHOTAFTER"))).timeout.connect(func():
+			get_viewport().get_texture().get_image().save_png(_ev("SHOTPATH"))
 			get_tree().quit())
 	if OS.get_cmdline_user_args().has("--settings"):
 		_show_settings.call_deferred(true)
-		if OS.get_environment("SHOTPATH") != "":
+		if _ev("SHOTPATH") != "":
 			get_tree().create_timer(4.0).timeout.connect(func():
 				var sc: ScrollContainer = ui.setp
-				if OS.get_environment("SCRTEST") != "":
+				if _ev("SCRTEST") != "":
 					var tv0 = cfg.tips
 					var steps = [[true, Vector2(360, 900)], [Vector2(360, 880)], [Vector2(360, 800)], [Vector2(360, 650)], [false, Vector2(360, 650)]]
 					for st in steps:
@@ -168,9 +168,9 @@ func _ready() -> void:
 						await get_tree().process_frame
 					await get_tree().create_timer(0.8).timeout
 					print("SCRTEST scroll=", sc.scroll_vertical, " cfg_changed=", cfg.tips != tv0, " speed=", cfg.speed)
-				sc.scroll_vertical = int(OS.get_environment("SCROLL").to_int())
+				sc.scroll_vertical = int(_ev("SCROLL").to_int())
 				await get_tree().create_timer(0.5).timeout
-				get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
+				get_viewport().get_texture().get_image().save_png(_ev("SHOTPATH"))
 				get_tree().quit())
 	if OS.get_cmdline_user_args().has("--live"):
 		cfg.live = 1
@@ -183,14 +183,14 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--lab"):
 		get_tree().create_timer(2.0).timeout.connect(func():
 			_lab_open()
-			if OS.get_environment("LABTAB") != "":
-				_lab_tab(OS.get_environment("LABTAB")))
+			if _ev("LABTAB") != "":
+				_lab_tab(_ev("LABTAB")))
 	if OS.get_cmdline_user_args().has("--toastdemo"):
 		get_tree().create_timer(2.5).timeout.connect(func():
 			_toast("Open " + _live_addr() + " in the PC browser (same Wi-Fi)")
 			await get_tree().create_timer(0.6).timeout
-			if OS.get_environment("SHOTPATH") != "":
-				get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
+			if _ev("SHOTPATH") != "":
+				get_viewport().get_texture().get_image().save_png(_ev("SHOTPATH"))
 				get_tree().quit())
 	if OS.get_cmdline_user_args().has("--namedemo"):
 		_name_entry.call_deferred([["lap", 31.42, 0], ["dmg", 2.4, 2]])
@@ -314,7 +314,7 @@ func _buses() -> void:
 		tlim.ceiling_db = -0.5
 		AudioServer.add_bus_effect(tki, tlim)
 	# (Summen-Begrenzer auf Master wieder entfernt: lauter Antrieb hat damit die Musik mit zusammengedrückt – dumpf und leise)
-	if OS.get_environment("MUSONLY") != "":
+	if _ev("MUSONLY") != "":
 		for nm2 in ["Game", "Voice", "Talk", "Stadium", "Cabin", "Board", "Start"]:
 			if AudioServer.get_bus_index(nm2) >= 0:
 				AudioServer.set_bus_mute(AudioServer.get_bus_index(nm2), true)
@@ -1099,14 +1099,14 @@ func _post_update(dt: float) -> void:
 		# normale Fahrt: dezentes Grundmaß (0,32); Boost, Speedpads und Turbo legen deutlich bis 1 drauf; wer ausgebremst wird, verliert es
 		var sv: float = g.spd / BASE_DEF
 		sp = clampf(clampf((sv - 0.35) / 0.65, 0.0, 1.0) * 0.32 + maxf(0.0, sv - 1.0) * 0.5 + float(g.boost) * 0.3 + (0.25 if float(g.get("turbo", 0.0)) > 0.0 else 0.0), 0.0, 1.0)
-	if OS.get_environment("SPDK") != "":
-		sp *= float(OS.get_environment("SPDK"))   # nur zum Testen: Tempo-Effekte stärker/schwächer/aus
-	if OS.get_environment("VMODE") != "":
-		cfg.vmode = int(OS.get_environment("VMODE"))   # nur zum Testen
+	if _ev("SPDK") != "":
+		sp *= float(_ev("SPDK"))   # nur zum Testen: Tempo-Effekte stärker/schwächer/aus
+	if _ev("VMODE") != "":
+		cfg.vmode = int(_ev("VMODE"))   # nur zum Testen
 	# Raketenkamera im Flug: Wärmebild (Gegner glüht, siehe _mc_mark); sonst Cockpit-Sicht wie eingestellt
-	_sp(post, "vm", (5 if OS.get_environment("HEATRAW") != "" else 3) if (not mc.is_empty() and mc.get("hold", 0.0) < 0.0 and not mc.has("ci") and state == "race") else (int(cfg.get("vmode", 0)) if _ck_on() else 0))
+	_sp(post, "vm", (5 if _ev("HEATRAW") != "" else 3) if (not mc.is_empty() and mc.get("hold", 0.0) < 0.0 and not mc.has("ci") and state == "race") else (int(cfg.get("vmode", 0)) if _ck_on() else 0))
 	# Blackout: flackert beim Ausgehen kurz, bleibt dunkel, kommt am Ende flackernd zurück (wie Neonröhren)
-	if OS.get_environment("BLKT") != "" and state == "race" and blk_t <= 0.0 and race_t > float(OS.get_environment("BLKT")) and race_t < float(OS.get_environment("BLKT")) + 0.1:
+	if _ev("BLKT") != "" and state == "race" and blk_t <= 0.0 and race_t > float(_ev("BLKT")) and race_t < float(_ev("BLKT")) + 0.1:
 		blk_t = 5.0
 		blk_d = 5.0
 	var bt = 0.0
@@ -1144,7 +1144,7 @@ func _post_update(dt: float) -> void:
 			hud.empl = el2
 		var on = blk_t > 0.0 and state in ["race", "count"]
 		(hud.empl as Label).visible = on and fposmod(Time.get_ticks_msec() / 1000.0, 0.6) < 0.38
-	_sp(post, "bo", blk_v if OS.get_environment("DEMNOBO") == "" else 0.0)
+	_sp(post, "bo", blk_v if _ev("DEMNOBO") == "" else 0.0)
 	if ck.has("body") and is_instance_valid(ck.body):
 		var dm = 1.0 - 0.3 * blk_v   # Cockpit etwas dunkler
 		(ck.body as CanvasItem).self_modulate = Color(dm, dm, dm)
@@ -1154,7 +1154,7 @@ func _post_update(dt: float) -> void:
 		post_spd += (sp - post_spd) * (1.0 - exp(-dt / 0.25))
 	else:
 		post_spd = 0.0   # sofort aus, sonst sähe man beim Schnitt auf eine andere Perspektive noch kurz die Linien
-	if OS.get_environment("SPDDBG") != "" and Engine.get_process_frames() % 20 == 0:
+	if _ev("SPDDBG") != "" and Engine.get_process_frames() % 20 == 0:
 		print("POSTSPD state=", state, " cam=", (RP_CAMS[rp.ci][0] if not rp.is_empty() else "-"), " post=", snappedf(post_spd, 0.01), " fov=", snappedf(cam.fov, 0.1))
 	# Einschlag-Kamera (Zeitlupe vor dem Opfer): ein Tick weniger Unschärfe (John: 5–10 %)
 	var ick = 0.9 if (not mc.is_empty() and mc.has("ci")) else 1.0
@@ -1343,8 +1343,8 @@ static var upd_done = false
 
 
 func _my_build() -> int:
-	if OS.get_environment("MYBUILD") != "":
-		return int(OS.get_environment("MYBUILD"))
+	if _ev("MYBUILD") != "":
+		return int(_ev("MYBUILD"))
 	var v = str(ProjectSettings.get_setting("application/config/version", "1.0"))
 	return int(v.get_slice(".", 1)) if v.contains(".") else 0
 
@@ -1357,12 +1357,12 @@ func _upd_check() -> void:
 	var h = HTTPRequest.new()
 	h.timeout = 12.0
 	add_child(h)
-	if OS.get_environment("UPDPROXY") != "":
-		var pp = OS.get_environment("UPDPROXY").split(":")
+	if _ev("UPDPROXY") != "":
+		var pp = _ev("UPDPROXY").split(":")
 		h.set_https_proxy(pp[0], int(pp[1]))
 	h.request_completed.connect(func(res, code, _hd, body):
 		h.queue_free()
-		if OS.get_environment("MYBUILD") != "":
+		if _ev("MYBUILD") != "":
 			print("UPD res=", res, " code=", code, " len=", body.size())
 		if res != HTTPRequest.RESULT_SUCCESS or code != 200:
 			return
@@ -1392,7 +1392,7 @@ func _upd_show() -> void:
 	var b: Button = ui.upd
 	b.visible = upd_url != "" and mine > 0 and upd_build > mine
 	b.text = "UPDATE  ·  Build %d  (you have %d)" % [upd_build, mine]
-	if OS.get_environment("MYBUILD") != "":
+	if _ev("MYBUILD") != "":
 		print("UPD show mine=", mine, " latest=", upd_build, " vis=", b.visible, " url=", upd_url)
 
 
@@ -1462,8 +1462,11 @@ func _neon_lights() -> void:
 	for i in range(nlights.size()):
 		var sd = -1.0 if i == 0 else 1.0
 		var al: Light3D = nlights[i]
-		al.visible = nk > 0.01 and tun_k < 0.5
-		al.light_energy = 2.5 * nk
+		var alv = nk > 0.01 and tun_k < 0.5
+		if al.visible != alv:
+			al.visible = alv
+		if al.light_energy != 2.5 * nk:
+			al.light_energy = 2.5 * nk
 		var pos: Vector3 = f.c + f.rr * (sd * (T.TW - 0.05)) + f.uu * 0.33
 		# Licht strahlt entlang -Z: zur Fahrbahnmitte hin
 		al.global_transform = Transform3D(Basis.looking_at(-f.rr * sd, f.uu), pos)
@@ -2542,8 +2545,10 @@ void fragment(){vec3 c=texture(tx,vec2(UV.y*2.,UV.x)).rgb;ALBEDO=mix(c,vec3(dot(
 		if not chunks.has(ci):
 			chunks[ci] = ArrayMesh.new()
 		var am: ArrayMesh = chunks[ci]
+		var nsurf = am.get_surface_count()
 		st.commit(am)
-		am.surface_set_material(am.get_surface_count() - 1, mats[key])
+		if am.get_surface_count() > nsurf:   # leere Teile (z. B. ohne Dreiecke in diesem Abschnitt) bekommen keine Fläche
+			am.surface_set_material(am.get_surface_count() - 1, mats[key])
 	sts.clear()
 	lap_meshes = chunks.values()
 	# drei Kopien der Runde: hinter dir, unter dir, vor dir – wandern mit
@@ -3360,7 +3365,7 @@ func _bsigns_make(blds: Array) -> void:
 		_tube_sign(Vector3(x, bot + hgt - lh * 0.5, zz), Basis(Vector3.UP.cross(zt).normalized(), Vector3.UP, zt), txt, c, lh, bsign_root, rng.randf() < 0.45)
 		last_z = zc
 		cnt += 1
-		if OS.get_environment("BSDBG") != "":
+		if _ev("BSDBG") != "":
 			print("BSIGN z=", snappedf(zz, 0.1), " lat=", snappedf(x - float(b[4]), 0.1), " txt=", txt, " bot=", snappedf(bot, 0.1), " trk_y=", snappedf(f.c.y, 0.1))
 
 
@@ -4069,8 +4074,8 @@ func _starter_live() -> void:
 		# echte Bewegung: in die Knie gehen, vorbeugen, nach den Schiffen greifen – dann zerfällt sie
 		var u = clampf(t_state / 0.6, 0.0, 1.0)
 		u = 1.0 - pow(1.0 - u, 2.0)
-		var a0 = float(OS.get_environment("STA0")) if OS.get_environment("STA0") != "" else ST_A0
-		var a1 = float(OS.get_environment("STA1")) if OS.get_environment("STA1") != "" else ST_A1
+		var a0 = float(_ev("STA0")) if _ev("STA0") != "" else ST_A0
+		var a1 = float(_ev("STA1")) if _ev("STA1") != "" else ST_A1
 		anim_t = lerpf(a0, a1, u)
 		grow = 1.0 + 0.15 * u
 		hkk = 1.0 - 0.55 * u   # kommt sie nah, wird sie durchsichtiger (sonst strahlt das Bild weiß aus)
@@ -4088,14 +4093,14 @@ func _starter_live() -> void:
 	else:
 		sks.reset_bone_poses()
 		_st_arms(starter, float(ps[2]), float(ps[1]), reach, reach)
-	if OS.get_environment("STDBG") != "" and state == "race" and Engine.get_process_frames() % 4 == 0:
+	if _ev("STDBG") != "" and state == "race" and Engine.get_process_frames() % 4 == 0:
 		var skh: Skeleton3D = starter.sk
 		var hdb = skh.find_bone("mixamorig_Head")
 		var tob = skh.find_bone("mixamorig_LeftToeBase")
 		var hw: Vector3 = skh.global_transform * skh.get_bone_global_pose(hdb).origin
 		var tw: Vector3 = skh.global_transform * skh.get_bone_global_pose(tob).origin if tob >= 0 else base
 		print("STLEAN t=", snappedf(t_state, 0.01), " head_toward_ships=", snappedf((hw - base).dot(-fw), 0.1), " head_h=", snappedf(hw.y - base.y, 0.1), " toes_toward_ships=", snappedf((tw - base).dot(-fw), 0.2))
-	if OS.get_environment("STDBG") != "" and Engine.get_process_frames() % 6 == 0:
+	if _ev("STDBG") != "" and Engine.get_process_frames() % 6 == 0:
 		var skd: Skeleton3D = starter.sk
 		var hy = []
 		for a in starter.arms:
@@ -4239,7 +4244,7 @@ func _city_live() -> void:
 				gx = maxf(gx, clampf(-h.swt / 0.4 + 0.5, 0.0, 1.0))
 			if h.swt >= 0.0 and h.swt < 0.45:
 				gx = maxf(gx, 1.0 - h.swt / 0.45)
-			if OS.get_environment("HOLODBG") != "":
+			if _ev("HOLODBG") != "":
 				gx = 0.0
 				_sp(mat, "fl", 0.0)
 			_sp(mat, "gx", gx)
@@ -4610,7 +4615,7 @@ func _crash_init() -> void:
 func _crash_site(o: Dictionary, bp: Vector3, f: Dictionary, rn: RandomNumberGenerator) -> void:
 	_crash_init()
 	var lat0: float = clampf(o.lat, -T.TW + 0.3, T.TW - 0.3)
-	if OS.get_environment("CSDBG") != "":
+	if _ev("CSDBG") != "":
 		print("CRASHSITE z=", o.z, " lz=", T.lz(o.z), " lat=", o.lat)
 	# Brandfleck auf der Fahrbahn, länglich in Fahrtrichtung
 	var sm = _shader_mat(SCORCH_CODE)
@@ -5146,7 +5151,7 @@ func _water_update(dt: float) -> void:
 		(mats["water"] as ShaderMaterial).set_shader_parameter("shz", sz)
 		if mats.has("wwall"):
 			(mats["wwall"] as ShaderMaterial).set_shader_parameter("src", sw)
-			if OS.get_environment("WWDBG") != "" and Engine.get_process_frames() % 20 == 0:
+			if _ev("WWDBG") != "" and Engine.get_process_frames() % 20 == 0:
 				print("WWDBG ", sw)
 	for i in range(ships.size()):
 		var o: Dictionary = ships[i]
@@ -5179,9 +5184,9 @@ func _water_update(dt: float) -> void:
 	if state == "race" and not g.out and lapn != whale_lap and lzg > float(T.WAT[0]) + 2.0 and lzg < float(T.WAT[0]) + 12.0 and whale.is_empty():
 		whale_lap = lapn
 		_whale_start(float(g.z) + 68.0, 13.0 if lapn % 2 == 0 else -13.0)
-	if OS.get_environment("WHALE") != "" and whale.is_empty() and Engine.get_process_frames() > int(OS.get_environment("WHALEF")) and whale_lap < 0:
+	if _ev("WHALE") != "" and whale.is_empty() and Engine.get_process_frames() > int(_ev("WHALEF")) and whale_lap < 0:
 		whale_lap = 0
-		_whale_start(float(OS.get_environment("WHALE").split(",")[0]), float(OS.get_environment("WHALE").split(",")[1]))
+		_whale_start(float(_ev("WHALE").split(",")[0]), float(_ev("WHALE").split(",")[1]))
 		print("WHALE start frame ", Engine.get_process_frames())
 	if not whale.is_empty():
 		_whale_tick(dt)
@@ -5201,14 +5206,14 @@ func _water_update(dt: float) -> void:
 				var ag = wake_t - float(q[3])
 				if ag > 0.15 and ag < 2.4 and (q[0] as Vector3).distance_to(gp) < 1.5:
 					btar = maxf(btar, 1.0 - ag / 3.0)
-	if OS.get_environment("BLIND") != "":
-		btar = float(OS.get_environment("BLIND"))
+	if _ev("BLIND") != "":
+		btar = float(_ev("BLIND"))
 	blind = move_toward(blind, btar, dt * (6.0 if btar > blind else 0.75))
 	if btar > 0.3:
 		wtar = maxf(wtar, 1.0)
 	wet = move_toward(wet, wtar, dt * (2.0 if wtar > wet else 0.45))
-	if OS.get_environment("WET") != "":
-		wet = float(OS.get_environment("WET"))
+	if _ev("WET") != "":
+		wet = float(_ev("WET"))
 	if hud.has("drops") and is_instance_valid(hud.drops):
 		hud.drops.visible = wet > 0.01 or blind > 0.01
 		if hud.drops.visible:
@@ -6422,7 +6427,7 @@ func _party_fig(nm: String, anim: String, pos: Vector3, look: Vector3, tint: Col
 		var m: MeshInstance3D = mi
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_party_planar(m)
-		if OS.get_environment("FIGNOCULL") != "":
+		if _ev("FIGNOCULL") != "":
 			var s0 = m.mesh.surface_get_material(0)
 			if s0 is StandardMaterial3D:
 				var m0 = (s0 as StandardMaterial3D).duplicate()
@@ -6534,7 +6539,7 @@ var race_ca: CameraAttributesPractical
 
 
 func _dof_race() -> void:
-	var want = state in ["race", "count", "replay", "kill"] and int(cfg.get("fblur", 1)) == 1 and party.is_empty() and OS.get_environment("NODOF") == ""
+	var want = state in ["race", "count", "replay", "kill"] and int(cfg.get("fblur", 1)) == 1 and party.is_empty() and _ev("NODOF") == ""
 	if race_ca == null:
 		race_ca = CameraAttributesPractical.new()
 		race_ca.dof_blur_far_enabled = true
@@ -6889,7 +6894,7 @@ func _party_live(dt: float) -> bool:
 			var k = float(fl.t) / 0.11
 			(fl.l as OmniLight3D).light_energy = float(fl.get("e", 7.0)) * k * k
 			(fl.q as MeshInstance3D).visible = k > 0.35
-	if OS.get_environment("NODOF") == "":
+	if _ev("NODOF") == "":
 		if dof_q == null or not is_instance_valid(dof_q):
 			_dof_on(true)
 			_dof_set(4.0, 0.45, 1.0, 0.016)
@@ -6935,14 +6940,14 @@ func _party_live(dt: float) -> bool:
 					var la = sk.find_bone("mixamorig_LeftArm")
 					var ra = sk.find_bone("mixamorig_RightArm")
 					var dsh = (sk.global_transform * sk.get_bone_global_rest(la).origin).distance_to(sk.global_transform * sk.get_bone_global_rest(ra).origin)
-					var wsc = dsh * float(OS.get_environment("WRS") if OS.get_environment("WRS") != "" else "1.3") / 97.0
+					var wsc = dsh * float(_ev("WRS") if _ev("WRS") != "" else "1.3") / 97.0
 					# zusätzlich nach vorn kippen: vorn hängt er tiefer auf der Brust, hinten liegt er im Nacken
-					var wtl = deg_to_rad(float(OS.get_environment("WRT") if OS.get_environment("WRT") != "" else "-8"))
+					var wtl = deg_to_rad(float(_ev("WRT") if _ev("WRT") != "" else "-8"))
 					var wbs: Basis = (Basis(wb0.x, wtl) * wb0).scaled(Vector3.ONE * wsc)
-					var back: Vector3 = np0 - up0 * dsh * float(OS.get_environment("WRD") if OS.get_environment("WRD") != "" else "0.0") - fw0 * dsh * float(OS.get_environment("WRB") if OS.get_environment("WRB") != "" else "0.3")
+					var back: Vector3 = np0 - up0 * dsh * float(_ev("WRD") if _ev("WRD") != "" else "0.0") - fw0 * dsh * float(_ev("WRB") if _ev("WRB") != "" else "0.3")
 					var want = Transform3D(wbs, back - wbs * Vector3(0, 66, -35))
 					party.wofs = gr.affine_inverse() * want
-					if OS.get_environment("WRDBG") != "":
+					if _ev("WRDBG") != "":
 						for lp in [Vector3(0, 66, -35), Vector3(0, 0, 35), Vector3(48, 33, 0), Vector3(0, 33, 0)]:
 							var wp: Vector3 = want * lp
 							print("WRDBG ", lp, " up=", snappedf((wp - np0).dot(up0) / dsh, 0.01), " fw=", snappedf((wp - np0).dot(fw0) / dsh, 0.01), " side=", snappedf((wp - np0).dot(wb0.x) / dsh, 0.01))
@@ -6951,7 +6956,7 @@ func _party_live(dt: float) -> bool:
 						print("WRDBG head up=", snappedf((sk.global_transform * sk.get_bone_global_rest(sk.find_bone("mixamorig_Head")).origin - np0).dot(up0) / dsh, 0.01), " spine2 up=", snappedf((gr.origin - np0).dot(up0) / dsh, 0.01), " ren fwd vs rr ", rb0.z)
 				var gp: Transform3D = sk.global_transform * sk.get_bone_global_pose(cb)
 				(party.wreath as Node3D).global_transform = gp * (party.wofs as Transform3D)
-				if OS.get_environment("WRDBG") != "" and not party.has("wrp"):
+				if _ev("WRDBG") != "" and not party.has("wrp"):
 					party.wrp = 1
 					for mi in (party.wreath as Node).find_children("*", "MeshInstance3D", true, false):
 						var ab: AABB = (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()
@@ -7011,7 +7016,7 @@ func _party_live(dt: float) -> bool:
 			fh += 0.5 * exp(-(st - 3.0) * 2.6) * sin((st - 3.0) * 8.0)
 	cam.fov *= zf
 	party.fh = fh
-	if OS.get_environment("PARTYTOP") != "":
+	if _ev("PARTYTOP") != "":
 		cam.global_position = c + f.uu * 7.0 + f.rr * 0.5
 		cam.look_at(c + f.rr * 0.5, f.fw)
 		cam.fov = 60.0
@@ -7024,7 +7029,7 @@ func _party_live(dt: float) -> bool:
 				if ch is Node3D and ch.get_child_count() > 0:
 					var gp: Vector3 = (ch as Node3D).global_position
 					print("PTOP ", ch.get_child(0).name, " px=", cam.unproject_position(gp), " lat=", snappedf((gp - c).dot(f.rr), 0.01), " dz=", snappedf((gp - c).dot(f.fw), 0.01))
-	if OS.get_environment("RENFACE") != "" and party.has("ren") and is_instance_valid(party.ren):
+	if _ev("RENFACE") != "" and party.has("ren") and is_instance_valid(party.ren):
 		# nur zum Testen: Nahaufnahme von Rens Gesicht (Kopf-Knochen), Abstand aus RENFACE
 		var rsk: Skeleton3D = (party.ren as Node).find_children("*", "Skeleton3D", true, false)[0]
 		var hb = rsk.find_bone("Head")
@@ -7038,14 +7043,14 @@ func _party_live(dt: float) -> bool:
 			print("RENFACE bone=", hb, " ", rsk.get_bone_name(maxi(hb, 0)), " names=", Array(range(mini(rsk.get_bone_count(), 70))).map(func(i): return rsk.get_bone_name(i)))
 		var hp: Vector3 = rsk.global_transform * rsk.get_bone_global_pose(hb).origin
 		var hg: Transform3D = rsk.global_transform * rsk.get_bone_global_pose(hb)
-		var rfa = OS.get_environment("RENFACE").split(",")
+		var rfa = _ev("RENFACE").split(",")
 		var ang = deg_to_rad(float(rfa[1])) if rfa.size() > 1 else 0.0
 		var fdir: Vector3 = (-f.rr * cos(ang) + f.fw * sin(ang)).normalized()
 		cam.global_position = hp + fdir * float(rfa[0]) + f.uu * 0.02
 		cam.look_at(hp + f.uu * 0.07 - f.uu * float(rfa[2] if rfa.size() > 2 else "0"), Vector3.UP)
 		cam.fov = 35.0
 		return true
-	if OS.get_environment("PARTYCAM") != "":
+	if _ev("PARTYCAM") != "":
 		cam.global_position = c - f.rr * 1.1 + f.fw * 0.05 + f.uu * 0.25
 		cam.look_at(c + f.uu * 0.3, Vector3.UP)
 		cam.fov = 40.0
@@ -7091,6 +7096,7 @@ func _props_make() -> void:
 		root.add_child(n)
 		add_child(root)
 		root.set_meta("keep", true)   # NICHT „rfx“: das räumt der Neustart weg (gelöschte Knoten → Absturz)
+		var glr = null
 		if k == "c":
 			# Leuchtstreifen am Kegel: oranges Glimmen
 			var gl = OmniLight3D.new()
@@ -7099,6 +7105,7 @@ func _props_make() -> void:
 			gl.omni_range = 1.2
 			gl.position = Vector3(0, hgt * 0.7, 0)
 			root.add_child(gl)
+			glr = gl
 			for mi in n.find_children("*", "MeshInstance3D", true, false):
 				var src = (mi as MeshInstance3D).mesh.surface_get_material(0)
 				if src is StandardMaterial3D:
@@ -7110,7 +7117,7 @@ func _props_make() -> void:
 					mm.emission_energy_multiplier = 0.9
 					(mi as MeshInstance3D).material_override = mm
 		var d = {"n": root, "k": k, "z": float(sp[0]), "lat": float(sp[1]), "h": 0.0, "vz": 0.0, "vl": 0.0, "vh": 0.0,
-			"rb": Basis(Vector3.UP, randf() * TAU), "av": Vector3.ZERO, "r": 0.2, "hg": hgt, "kt": 0.0, "rest": true}
+			"rb": Basis(Vector3.UP, randf() * TAU), "av": Vector3.ZERO, "r": 0.2, "hg": hgt, "kt": 0.0, "rest": true, "gl": glr}
 		props.append(d)
 		props0.append(d.duplicate())
 
@@ -7180,12 +7187,21 @@ func _props_update(dt: float) -> void:
 			zw += T.LAP
 		elif zw > gz + T.LAP * 0.5:
 			zw -= T.LAP
-		var f = T.frame(zw)
-		var B = Basis(-f.rr, f.uu, f.fw)
-		# umgekippt: um den halben Durchmesser anheben, sonst steckt es halb im Boden
-		var tilt_up: float = absf((d.rb as Basis).y.normalized().y)
-		var lift: float = float(d.r) * sqrt(maxf(0.0, 1.0 - tilt_up * tilt_up))
-		nd.global_transform = Transform3D(B * (d.rb as Basis), f.c + f.rr * d.lat + f.uu * (d.h + 0.005 + lift))
+		# liegt es still und hat die Runde nicht gewechselt, steht es schon richtig: nicht jedes Bild neu setzen
+		if not (d.rest and float(d.get("zwl", -1e9)) == zw):
+			d.zwl = zw if d.rest else -1e9
+			var f = T.frame(zw)
+			var B = Basis(-f.rr, f.uu, f.fw)
+			# umgekippt: um den halben Durchmesser anheben, sonst steckt es halb im Boden
+			var tilt_up: float = absf((d.rb as Basis).y.normalized().y)
+			var lift: float = float(d.r) * sqrt(maxf(0.0, 1.0 - tilt_up * tilt_up))
+			nd.global_transform = Transform3D(B * (d.rb as Basis), f.c + f.rr * d.lat + f.uu * (d.h + 0.005 + lift))
+		# Glimmlicht der Kegel nur in der Nähe (weiter weg ist der Lichtfleck winzig, kostet aber auf der ganzen Fahrbahn)
+		var gl = d.get("gl")
+		if gl != null:
+			var near = absf(zw - gz) < 55.0
+			if (gl as OmniLight3D).visible != near:
+				(gl as OmniLight3D).visible = near
 		# Zusammenstoß mit Schiffen
 		d.kt = maxf(0.0, float(d.kt) - dt)
 		if d.kt > 0.0 or not (state == "race" or state == "done") or party_on:
@@ -7217,7 +7233,7 @@ func _props_update(dt: float) -> void:
 					shake = maxf(shake, 0.25)
 				break
 	_shield_hits_update(dt)
-	if OS.get_environment("PROPDBG") != "" and Engine.get_process_frames() % 10 == 0:
+	if _ev("PROPDBG") != "" and Engine.get_process_frames() % 10 == 0:
 		var mv = []
 		for d in props:
 			if not d.rest or float(d.h) > 0.0:
@@ -9228,7 +9244,7 @@ func _pause_settings(open: bool) -> void:
 		if not ui.has("setp_par"):
 			ui.setp_par = sp.get_parent()
 		set_in_pause = true
-		if OS.get_environment("NOFWD") == "":
+		if _ev("NOFWD") == "":
 			_pause_fwd_make()
 		sp.reparent(paused_ui, false)
 		sp.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -9355,7 +9371,7 @@ func _start() -> void:
 	ui.root.visible = false
 	hud.layer.visible = true
 	if int(cfg.get("comic", 1)) == 1 and not free_ride and rpf.is_empty() and (shot_s in ["", "?"] or shot_s.contains("comic")):
-		_comic_start(OS.get_environment("CMKIND") if OS.get_environment("CMKIND") != "" else "start")
+		_comic_start(_ev("CMKIND") if _ev("CMKIND") != "" else "start")
 
 
 var rtouch = {}
@@ -10894,7 +10910,7 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 		ships[0].en = minf(1.0, ships[0].en + (before - o.en))
 	var nm = NAMES[o.idx]
 	if o.en <= 0.0:
-		if OS.get_environment("KCDBG") != "":
+		if _ev("KCDBG") != "":
 			print("KCDBG out idx=", o.idx, " src=", src, " kind=", kind, " state=", state, " kc=", kc.is_empty(), " kcp=", kc_pending.is_empty())
 		# Kill-Cam nur, wenn du einen Gegner ausgeschaltet hast (nicht beim Rempeln)
 		if o.idx != 0 and src == 0 and kind != "ram" and state == "race" and kc_pending.is_empty() and kc.is_empty() and not free_ride:
@@ -12220,7 +12236,7 @@ func _quake_step(q, dt: float) -> Variant:
 	q.n.global_transform = Transform3D(Basis(f.rr * dir, f.uu, f.fw * dir), f.c + f.uu * (qs * 1.6))
 	q.l.light_energy = 8.0 * qs * float(QX.glow)
 	q.qs = qs
-	if OS.get_environment("QDBG") != "" and Engine.get_process_frames() % 6 == 0:
+	if _ev("QDBG") != "" and Engine.get_process_frames() % 6 == 0:
 		print("QDBG z=", snappedf(q.z, 0.1), " qs=", snappedf(qs, 0.01), " pipe=", snappedf(T.pipe_k(q.z), 0.01), " gz=", snappedf(g.z, 0.1))
 	var sfx = "" if dir > 0.0 else "2"
 	_rset("qz" + sfx, q.z)
@@ -12774,7 +12790,7 @@ var live_ws = []   # Sekunden seit der letzten Anfrage vom PC (die Seite meldet 
 
 # PC hat die Regler-Seite offen: am Handy alles ausblenden, nur die Szene im Vollbild
 func _live_pc() -> bool:
-	return (live_srv != null and live_seen < 5.0) or OS.get_environment("LIVEPC") != ""
+	return (live_srv != null and live_seen < 5.0) or _ev("LIVEPC") != ""
 
 
 func _live_addr() -> String:
@@ -12790,7 +12806,7 @@ func _live_addr() -> String:
 
 
 func _live_poll(dt: float) -> void:
-	var on = int(cfg.get("live", 0)) == 1 or OS.get_environment("LIVEPC") != ""
+	var on = int(cfg.get("live", 0)) == 1 or _ev("LIVEPC") != ""
 	if not on:
 		if live_srv != null:
 			live_srv.stop()
@@ -13960,7 +13976,7 @@ func _weapons(dt: float, racing: bool) -> void:
 					_shot_boom(sh, o.z, sh.lat, -1)
 					dead = true
 					break
-		if dead and OS.get_environment("RKW") != "":
+		if dead and _ev("RKW") != "":
 			print("SHOTDEAD t=", snappedf(sh.t, 0.01), " z=", snappedf(sh.z, 0.1), " lat=", snappedf(sh.lat, 0.01), " hit=", hit.idx if hit != null else -1, " tg=", sh.tg.idx if sh.tg != null else -1, " mega=", sh.get("mega", false), " br=", sh.get("br", 1))
 		if dead:
 			_qf(sh.n)
@@ -14547,7 +14563,7 @@ func _replay(dt: float) -> void:
 				var dzz = ezz - float((kc.imp as Vector2).x)
 				dzz -= T.LAP * round(dzz / T.LAP)
 				if absf(dzz) < 30.0:
-					if OS.get_environment("KCDBG") != "":
+					if _ev("KCDBG") != "":
 						print("KCGUARD skip ", ev[0], " dz=", snappedf(dzz, 0.1), " t=", snappedf(float(F[rp.ei].t) - float(kc.t0), 0.02))
 					continue
 			match ev[0]:
@@ -15145,7 +15161,7 @@ func _kc_check() -> void:
 		kc_pending = {}
 		return
 	# Kill-Cam abgeschaltet (Standard): nur das K.o.-Comic, kein Replay
-	if int(cfg.get("kcam", 0)) != 1 and not kc_pending.get("force", false) and (not shot_s.contains("rkctest") or OS.get_environment("KCOFF") != ""):
+	if int(cfg.get("kcam", 0)) != 1 and not kc_pending.get("force", false) and (not shot_s.contains("rkctest") or _ev("KCOFF") != ""):
 		var vk: int = int(kc_pending.get("idx", -1))
 		kc_pending = {}
 		if int(cfg.get("comic", 1)) == 1 and vk >= 1 and vk <= 3:
@@ -15224,7 +15240,7 @@ func _kc_start() -> void:
 	kc = {"qd": qdir, "t0": t0, "end": t0 + 2.4, "victim": kc_pending.idx, "imp": dzl, "kind": kc_pending.kind, "saved": saved, "hidden": hidden, "ovl": ovl,
 		"before": get_children(), "fxs": fxs.duplicate(), "zaps": zaps.duplicate(), "top": hud.top.text, "side": 1.0 if randf() < 0.5 else -1.0,
 		"dpos": Vector3.ZERO, "dz": 0.0, "dlat": 0.0, "ir": imp, "passes": passes, "pass": 0, "kill": ships[kc_pending.idx].out}
-	if OS.get_environment("KCDBG") != "":
+	if _ev("KCDBG") != "":
 		print("KCDBG imp=", dzl, " lz=", wrapf(dzl.x, T.ZST, T.ZST + T.LAP), " tun=", T.in_tun(wrapf(dzl.x, T.ZST, T.ZST + T.LAP), 8.0))
 	kc_pending = {}
 	rp = {"t": F[i].t, "i": i, "ei": i, "ci": 0, "ct": 0.0, "sp": null, "sk": 1.0}
@@ -15386,23 +15402,23 @@ func _kc_end() -> void:
 
 # nur zum Testen: Bilder der Kill-Cam zu bestimmten Zeiten relativ zum Treffer (KCSHOT="-1.0,0.2", Pfad SHOTPATH)
 func _kc_shot(rel: float) -> void:
-	if OS.get_environment("KCSHOT") == "":
+	if _ev("KCSHOT") == "":
 		return
-	var ks = OS.get_environment("KCSHOT").split(",")
+	var ks = _ev("KCSHOT").split(",")
 	var kk = int(kc.get("sk", 0))
 	if kk < ks.size() and rel >= float(ks[kk]):
 		kc.sk = kk + 1
-		var kpath = OS.get_environment("SHOTPATH").replace(".png", "_%d.png" % kk)
-		if OS.get_environment("KCX") == "nofx":
+		var kpath = _ev("SHOTPATH").replace(".png", "_%d.png" % kk)
+		if _ev("KCX") == "nofx":
 			for nd in get_tree().root.find_children("*", "GPUParticles3D", true, false):
 				(nd as Node3D).visible = false
-		if OS.get_environment("KCX") == "noq":
+		if _ev("KCX") == "noq":
 			_rset("qs", 0.0)
 			_rset("qs2", 0.0)
-		if OS.get_environment("KCX") == "nolight":
+		if _ev("KCX") == "nolight":
 			for nd in get_tree().root.find_children("*", "OmniLight3D", true, false):
 				(nd as Node3D).visible = false
-		if OS.get_environment("KCNEAR") != "":
+		if _ev("KCNEAR") != "":
 			for nd in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
 				var gi: GeometryInstance3D = nd
 				if gi.is_visible_in_tree():
@@ -15545,21 +15561,21 @@ func _kc_cam_imp() -> bool:
 	kc.fill.global_position = I.lerp(ro, 0.35) + up * 0.6
 	_flash_fade(0.05)
 	# Test: Bilder bei Durchgang:Zeit (IMPSHOT="0:-0.8,1:0.0,2:0.2")
-	if OS.get_environment("IMPSHOT") != "":
-		var lst = OS.get_environment("IMPSHOT").split(",")
+	if _ev("IMPSHOT") != "":
+		var lst = _ev("IMPSHOT").split(",")
 		var kk = int(kc.get("isk", 0))
 		if kk < lst.size():
 			var pr = lst[kk].split(":")
 			if int(pr[0]) == int(kc.pass) and rel >= float(pr[1]):
 				kc.isk = kk + 1
-				var kpath = OS.get_environment("SHOTPATH").replace(".png", "_i%d.png" % kk)
+				var kpath = _ev("SHOTPATH").replace(".png", "_i%d.png" % kk)
 				get_tree().process_frame.connect(func(): get_viewport().get_texture().get_image().save_png(kpath), CONNECT_ONE_SHOT)
-	if OS.get_environment("KCDBG") != "" and int(kc.pass) == 1:
+	if _ev("KCDBG") != "" and int(kc.pass) == 1:
 		for w in rp.get("w", []):
 			var fw2 = T.sframe(float(w[0]), float(w[1]))
 			var wp: Vector3 = fw2.c + fw2.uu * 0.25
 			print("KCRK own=", w[2], " dz=", snappedf(float(w[0]) - vz, 0.1), " scr=", cam.unproject_position(wp), " inf=", cam.is_position_in_frustum(wp), " shipscr=", cam.unproject_position(V))
-	if OS.get_environment("KCDBG") != "":
+	if _ev("KCDBG") != "":
 		var nfb = 0
 		var nfk = 0
 		for e in fbs:
@@ -15638,7 +15654,7 @@ func _kc_cam() -> bool:
 				var qd: float = kc.get("qd", 1.0)
 				cam.global_position = fi.c + fi.rr * lat_c * 0.6 - fi.fw * (_kc_free_d(ip.x, -qd, 17.0) * qd) + up * 6.0
 				cam.look_at(I + fi.fw * (1.5 * qd), up)
-				if OS.get_environment("KCDBG") != "":
+				if _ev("KCDBG") != "":
 					print("KCI rel=", snappedf(rel, 0.01), " wavedir=", qd, " camfw·wavedir=", snappedf((-cam.global_transform.basis.z).dot(fi.fw * qd), 0.02))
 			else:
 				cam.global_position = fi.c + fi.rr * (lat_c * 0.55) + fi.fw * _kc_free_d(ip.x, 1.0, 14.0) + up * 4.4   # eher mittig: am Rand stehen Laternen
@@ -15702,7 +15718,7 @@ func _kc_cam() -> bool:
 		cam.fov = lerpf(55.0, 30.0, clampf((dist - 4.0) / 20.0, 0.0, 1.0))
 		kc.rk_dot = (-cam.global_transform.basis.z).dot((V - ro).normalized())
 		kc.rk_fly = dirv.dot((V - S).normalized())
-		if OS.get_environment("KCDBG") != "":
+		if _ev("KCDBG") != "":
 			print("KCR rel=", snappedf(rel, 0.01), " cam->victim=", snappedf(kc.rk_dot, 0.02), " rocketdir->victim=", snappedf(kc.rk_fly, 0.02), " dist=", snappedf(dist, 0.1), " fov=", snappedf(cam.fov, 1), " own=", rk[2] if (rk as Array).size() > 2 else -1)
 		_kc_shot(rel)
 		return true
@@ -15735,7 +15751,7 @@ func _kc_cam() -> bool:
 				ro = fq.c + fq.uu * 1.0 - fq.fw * (2.2 * qd) + fq.rr * (0.6 * sd)
 				var wf: Vector3 = fq.fw * qd
 				ta = V if (V - ro).normalized().dot(wf) > 0.2 else fq.c + wf * 6.0 + fq.uu * 0.3
-				if OS.get_environment("KCDBG") != "":
+				if _ev("KCDBG") != "":
 					print("KCQ rel=", snappedf(rel, 0.01), " wavedir=", qd, " camfw·wavedir=", snappedf((ta - ro).normalized().dot(wf), 0.02), " camfw·toVictim=", snappedf((ta - ro).normalized().dot((V - ro).normalized()), 0.02), " wave-victim=", snappedf(wrapf(z - qz, -T.LAP * 0.5, T.LAP * 0.5), 0.1))
 			"mine":
 				# flach neben der Mine, die vor dem Opfer liegt; der Gegner rast drüber
@@ -15780,7 +15796,7 @@ func _kc_cam() -> bool:
 	cam.look_at(ta, up)
 	cam.fov = 55.0
 	_kc_shot(rel)
-	if OS.get_environment("KCDBG") != "":
+	if _ev("KCDBG") != "":
 		var cf: Vector3 = -cam.global_transform.basis.z
 		print("KCV rel=", snappedf(rel, 0.01), " alive=", alive, " camfw·toVictim=", snappedf(cf.dot((V - ro).normalized()), 0.02), " camfw·trackfw=", snappedf(cf.dot(f.fw), 0.02), " camz-vz=", snappedf((ro - V).dot(f.fw), 0.1), " shots=", fr.get("w", []).size())
 	_flash_fade(0.05)
@@ -15890,8 +15906,8 @@ func _emb_draw(c: Control) -> void:
 
 
 func _board_page() -> int:
-	if OS.get_environment("BOARDPG") != "":   # Test: Seite fest einstellen
-		return int(OS.get_environment("BOARDPG"))
+	if _ev("BOARDPG") != "":   # Test: Seite fest einstellen
+		return int(_ev("BOARDPG"))
 	if board_man >= 0:
 		return board_man
 	var t = fmod(board_t, 17.0)
@@ -16937,23 +16953,23 @@ func _process(delta: float) -> void:
 		g.boost = maxf(g.boost, 1.5)
 	g.shield = maxf(0.0, g.shield - dt)
 	g.mshield = maxf(0.0, float(g.get("mshield", 0.0)) - dt)
-	if OS.get_environment("QFAKE") != "":
-		_rset("qz", float(OS.get_environment("QFAKE")))   # nur zum Testen: stehende Bebenwelle
+	if _ev("QFAKE") != "":
+		_rset("qz", float(_ev("QFAKE")))   # nur zum Testen: stehende Bebenwelle
 		_rset("qs", 1.3)
-	if OS.get_environment("PLAT") != "" and racing and T.pipe_k(g.z) > 0.5:
-		g.lat = float(OS.get_environment("PLAT"))   # nur zum Testen: Spieler auf feste Stelle der Röhre (Wand, Decke)
-	if OS.get_environment("SPDT") != "" and racing:
-		g.boost = float(OS.get_environment("SPDT"))   # nur zum Testen: fester Boost-Wert (Tempo-Effekte ansehen)
-	if OS.get_environment("BOT") != "" and Engine.get_process_frames() % 300 == 0:
+	if _ev("PLAT") != "" and racing and T.pipe_k(g.z) > 0.5:
+		g.lat = float(_ev("PLAT"))   # nur zum Testen: Spieler auf feste Stelle der Röhre (Wand, Decke)
+	if _ev("SPDT") != "" and racing:
+		g.boost = float(_ev("SPDT"))   # nur zum Testen: fester Boost-Wert (Tempo-Effekte ansehen)
+	if _ev("BOT") != "" and Engine.get_process_frames() % 300 == 0:
 		var outs = 0
 		for o in ships:
 			outs += 1 if o.out else 0
 		print("BOT f=", Engine.get_process_frames(), " state=", state, " t=", snappedf(race_t, 0.1), " z=", snappedf(g.z, 1.0), " out=", outs, " en=", snappedf(g.en, 0.01), " shots=", shots.size(), " debris=", debris.size(), " kids=", get_child_count())
-	if OS.get_environment("BOTK") != "" and racing:
+	if _ev("BOTK") != "" and racing:
 		for i in range(1, ships.size()):
-			ships[i].en = minf(ships[i].en, float(OS.get_environment("BOTK")))   # nur zum Testen: Gegner fast kaputt → viele K.o. kurz hintereinander
+			ships[i].en = minf(ships[i].en, float(_ev("BOTK")))   # nur zum Testen: Gegner fast kaputt → viele K.o. kurz hintereinander
 		g.en = 1.0
-	if OS.get_environment("BOT") != "" and racing and not g.out:
+	if _ev("BOT") != "" and racing and not g.out:
 		# nur zum Testen: Spieler fährt wie ein Gegner und schießt alles ab, was er aufsammelt
 		if not g.has("lane"):
 			g.lane = 0.0
@@ -17710,18 +17726,18 @@ func _shot() -> void:
 				shot_s = a
 	if shot_s == "":
 		return
-	if OS.get_environment("WNDT") != "" and state == "lab":
+	if _ev("WNDT") != "" and state == "lab":
 		var wi = [90, 102, 114, 126].find(shot_n)
 		if wi >= 0:
 			ships[0].en = 0.9 - 0.2 * wi
 			var pts = [[-0.3, -0.6, 0.1], [0.3, -0.5, 0.15], [-0.25, 0.2, 0.2], [0.2, -0.65, 0.0]]
 			var pp = pts[wi]
 			_impact(ships[0], pp[0], pp[1], pp[2], -pp[0] * 0.6, 1.0, 1.0, true)
-	if OS.get_environment("CMTAP") != "":
+	if _ev("CMTAP") != "":
 		# nur zum Testen: Daumen-Tipps während des Comics simulieren und mitschreiben, was der Comic macht
 		var fr_n = Engine.get_process_frames()
 		var vs: Vector2 = get_viewport().get_visible_rect().size
-		for ft in OS.get_environment("CMTAP").split(","):
+		for ft in _ev("CMTAP").split(","):
 			for ph in [0, 2]:
 				if fr_n == int(ft) + ph:
 					var te = InputEventScreenTouch.new()
@@ -17738,9 +17754,9 @@ func _shot() -> void:
 					Input.parse_input_event(me)
 		if fr_n % 10 == 0 and cm.has("t"):
 			print("CMT f=", fr_n, " t=", snappedf(cm.t, 0.01), " skip=", snappedf(cm.skip, 0.01), " fade=", snappedf(float(cm.get("fade", 1.0)), 0.01), " fingers=", fingers.size())
-		if OS.get_environment("CMSHOT") != "" and fr_n == int(OS.get_environment("CMSHOT")):
-			get_viewport().get_texture().get_image().save_png(OS.get_environment("CMSHOTP"))
-		if OS.get_environment("CMSKIP") != "" and fr_n == int(OS.get_environment("CMSKIP")) and cm.has("sb"):
+		if _ev("CMSHOT") != "" and fr_n == int(_ev("CMSHOT")):
+			get_viewport().get_texture().get_image().save_png(_ev("CMSHOTP"))
+		if _ev("CMSKIP") != "" and fr_n == int(_ev("CMSKIP")) and cm.has("sb"):
 			(cm.sb as Button).pressed.emit()
 	for a in [shot_s]:
 		if a.begins_with("--shot="):
@@ -17796,36 +17812,36 @@ func _shot() -> void:
 			if p.size() > 3 and p[3].begins_with("go"):
 				if shot_n == 3 and float(p[1]) > 0.0:
 					ships[0].z = float(p[1])
-					if OS.get_environment("MAGT") != "":   # Test: neben die nächste Waffensäule setzen (Magnet)
+					if _ev("MAGT") != "":   # Test: neben die nächste Waffensäule setzen (Magnet)
 						var mk = int(ceil((float(ships[0].z) - 17.0) / 35.0))
 						if posmod(mk, 2) != 0:
 							mk += 1
-						ships[0].lat = _wpx(mk) + float(OS.get_environment("MAGT"))
+						ships[0].lat = _wpx(mk) + float(_ev("MAGT"))
 						print("MAGT pad z=", _wzp(mk), " lat=", _wpx(mk))
-					if OS.get_environment("PLUMET") != "":   # Test: Gegner direkt vor dich setzen (Gischtfahne)
-						ships[1].z = ships[0].z + float(OS.get_environment("PLUMET"))
+					if _ev("PLUMET") != "":   # Test: Gegner direkt vor dich setzen (Gischtfahne)
+						ships[1].z = ships[0].z + float(_ev("PLUMET"))
 						ships[1].lat = ships[0].lat
 						ships[1].spd = ships[0].spd
-				if OS.get_environment("MCT") != "":   # Test: Gegner vor dich setzen und Lenkrakete feuern (Raketenkamera)
-					if shot_n == (int(OS.get_environment("MCN")) if OS.get_environment("MCN") != "" else 30):
-						ships[1].z = ships[0].z + float(OS.get_environment("MCT"))
-						ships[1].lat = ships[0].lat + float(OS.get_environment("MCL")) if OS.get_environment("MCL") != "" else ships[0].lat + 0.8
-						if OS.get_environment("MCEN") != "":
-							ships[1].en = float(OS.get_environment("MCEN"))
-						if OS.get_environment("MCAWAY") != "":
+				if _ev("MCT") != "":   # Test: Gegner vor dich setzen und Lenkrakete feuern (Raketenkamera)
+					if shot_n == (int(_ev("MCN")) if _ev("MCN") != "" else 30):
+						ships[1].z = ships[0].z + float(_ev("MCT"))
+						ships[1].lat = ships[0].lat + float(_ev("MCL")) if _ev("MCL") != "" else ships[0].lat + 0.8
+						if _ev("MCEN") != "":
+							ships[1].en = float(_ev("MCEN"))
+						if _ev("MCAWAY") != "":
 							for oi in range(2, ships.size()):
 								ships[oi].z = ships[0].z - 40.0 - 8.0 * oi
-						if OS.get_environment("MCB") != "":
-							ships[1].boost = float(OS.get_environment("MCB"))
-						if OS.get_environment("MCRAK") != "":
+						if _ev("MCB") != "":
+							ships[1].boost = float(_ev("MCB"))
+						if _ev("MCRAK") != "":
 							_fire_w(ships[0], "rak", false)
-						elif OS.get_environment("MCMEGA") != "":
+						elif _ev("MCMEGA") != "":
 							_fire_mega(ships[0], "lenk")
 						else:
 							_fire_w(ships[0], "lenk", false)
 					if shot_n % 4 == 0:
 						print("MC n=", shot_n, " ts=", snappedf(Engine.time_scale, 0.01), " ci=", snappedf(float(mc.get("ci", -1.0)), 0.01), " on=", not mc.is_empty(), " hold=", snappedf(float(mc.get("hold", -9.0)), 0.01), " camd=", snappedf(cam.global_position.distance_to((ships[0].node as Node3D).global_position), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " shots=", shots.size(), " spd=", snappedf(float(ships[0].spd), 0.1), "/", snappedf(float(ships[1].spd), 0.1), " dz=", snappedf(float(ships[1].z) - (float(shots[0].z) if shots.size() > 0 else 0.0), 0.1), " base=", base_spd)
-				if OS.get_environment("WNDT") != "":   # Test: Treffer am eigenen Schiff (Stoß, Wunden, Splitter)
+				if _ev("WNDT") != "":   # Test: Treffer am eigenen Schiff (Stoß, Wunden, Splitter)
 					var wn = [24, 34, 44, 54]
 					var wi = wn.find(shot_n)
 					if wi >= 0:
@@ -17837,17 +17853,17 @@ func _shot() -> void:
 						print("WNDT hit ", wi, " kl=", snappedf(float(ships[0].kl), 0.01), " yw=", snappedf(float(ships[0].get("yw", 0.0)), 0.01), " wnd=", ((ships[0].node as Node3D).get_meta("wnd", []) as Array).size())
 					if shot_n > 24 and shot_n % 3 == 0:
 						print("WNDT n=", shot_n, " lat=", snappedf(float(ships[0].lat), 0.01), " psi=", snappedf(float(ships[0].psi), 0.02), " roll=", snappedf(float(ships[0].roll), 0.02), " jy=", snappedf(float(ships[0].get("jy", 0.0)), 0.01))
-				if OS.get_environment("WALLT") != "":   # Test: eigene Wand, durchfahren, dann Rakete von hinten
+				if _ev("WALLT") != "":   # Test: eigene Wand, durchfahren, dann Rakete von hinten
 					if shot_n == 20:
 						_fire_w(ships[0], "wand", false)
-					if shot_n == int(OS.get_environment("WALLT")):
+					if shot_n == int(_ev("WALLT")):
 						ships[1].z = ships[0].z - 8.0
 						ships[1].lat = ships[0].lat
 						_add_shot(ships[1], false, true)
 						print("WALLT fire z=", ships[0].z, " wall=", walls[0].z if not walls.is_empty() else -1)
 					if shot_n % 5 == 0:
 						print("WALLT n=", shot_n, " pz=", snappedf(float(ships[0].z), 0.1), " shots=", shots.size(), " en=", snappedf(float(ships[0].en), 0.01))
-				if OS.get_environment("APC") != "":   # Test: Autopilot starten, dann per Waffenknopf abbrechen
+				if _ev("APC") != "":   # Test: Autopilot starten, dann per Waffenknopf abbrechen
 					if shot_n == 20:
 						ships[0].wpn = "auto"
 						_fire()
@@ -17855,32 +17871,32 @@ func _shot() -> void:
 						fire_req = true
 					if shot_n % 5 == 0 and shot_n <= 60:
 						print("APC n=", shot_n, " auto=", snappedf(float(ships[0].auto), 0.01), " hold=", ships[0].get("ahold", false))
-				if OS.get_environment("BLKFIRE") != "":   # Test: du feuerst Blackout
-					var bf = OS.get_environment("BLKFIRE")
-					if shot_n == 30 and OS.get_environment("BLKNEAR") != "":
+				if _ev("BLKFIRE") != "":   # Test: du feuerst Blackout
+					var bf = _ev("BLKFIRE")
+					if shot_n == 30 and _ev("BLKNEAR") != "":
 						for q in range(1, ships.size()):
-							ships[q].z = ships[0].z + float(OS.get_environment("BLKNEAR")) + q * 4.0
+							ships[q].z = ships[0].z + float(_ev("BLKNEAR")) + q * 4.0
 					if shot_n == 40:
 						_blackout(ships[1] if bf.begins_with("ai") else ships[0], 10.0 if bf.ends_with("mega") or bf.ends_with("sup") else 5.5, bf.ends_with("mega"))
-					if OS.get_environment("BLKSHOT") != "" and shot_n > 40 and shot_n % int(OS.get_environment("BLKSHOT")) == 0:
-						get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH").replace(".png", "_%03d.png" % shot_n))
+					if _ev("BLKSHOT") != "" and shot_n > 40 and shot_n % int(_ev("BLKSHOT")) == 0:
+						get_viewport().get_texture().get_image().save_png(_ev("SHOTPATH").replace(".png", "_%03d.png" % shot_n))
 						print("DEM n=", shot_n, " ", demons.map(func(d): return [snappedf(d.t, 0.01), snappedf(d.dz, 0.1), snappedf(d.h, 0.1), snappedf(d.a, 0.01)]), " en=", ships.map(func(x): return snappedf(float(x.en), 0.01)))
 					if shot_n % 10 == 0:
 						print("BLK n=", shot_n, " ", ships.map(func(x): return [snappedf(float(x.lat), 0.01), snappedf(float(x.get("blk", 0.0)), 0.1), snappedf(float(x.spd), 0.1)]))
-				if OS.get_environment("EXPT") != "":   # Test: Explosion vor dir, Bilder in Abständen (EXPS = alle n Bilder)
-					var e0 = int(OS.get_environment("EXPT"))
-					var ez = float(OS.get_environment("EXPZ")) if OS.get_environment("EXPZ") != "" else ships[0].z + float(OS.get_environment("EXPD"))
+				if _ev("EXPT") != "":   # Test: Explosion vor dir, Bilder in Abständen (EXPS = alle n Bilder)
+					var e0 = int(_ev("EXPT"))
+					var ez = float(_ev("EXPZ")) if _ev("EXPZ") != "" else ships[0].z + float(_ev("EXPD"))
 					if shot_n == e0:
-						if OS.get_environment("EXPGB") != "":
+						if _ev("EXPGB") != "":
 							_gbomb(ez, 0.0)
 						else:
-							_explode(ez, 0.0, OS.get_environment("EXPBIG") != "")
-					if shot_n > e0 and (shot_n - e0) % int(OS.get_environment("EXPS")) == 0 and shot_n - e0 <= 8 * int(OS.get_environment("EXPS")):
-						get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH").replace(".png", "_%d.png" % ((shot_n - e0) / int(OS.get_environment("EXPS")) - 1)))
+							_explode(ez, 0.0, _ev("EXPBIG") != "")
+					if shot_n > e0 and (shot_n - e0) % int(_ev("EXPS")) == 0 and shot_n - e0 <= 8 * int(_ev("EXPS")):
+						get_viewport().get_texture().get_image().save_png(_ev("SHOTPATH").replace(".png", "_%d.png" % ((shot_n - e0) / int(_ev("EXPS")) - 1)))
 						print("EXP n=", shot_n, " fbs=", fbs.size(), " smk=", smk.size(), " sc=", scorchs.size())
-				if OS.get_environment("MAGT") != "" and shot_n % 5 == 0:
+				if _ev("MAGT") != "" and shot_n % 5 == 0:
 					print("MAG z=", snappedf(float(ships[0].z), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " wpn=", ships[0].wpn)
-				if OS.get_environment("PLUMET") != "" and shot_n % 10 == 0:
+				if _ev("PLUMET") != "" and shot_n % 10 == 0:
 					print("PLUME z=", snappedf(float(ships[0].z), 0.1), " lat=", snappedf(float(ships[0].lat), 0.01), " ai z=", snappedf(float(ships[1].z), 0.1), " lat=", snappedf(float(ships[1].lat), 0.01), " blind=", snappedf(blind, 0.01))
 				return
 			if shot_s.contains("resbtest") and shot_n % 50 == 0 and hud.has("resb"):
@@ -17889,11 +17905,11 @@ func _shot() -> void:
 				state = "done"
 				t_state = 0.0
 				_show_resb()
-				if OS.get_environment("NAMET") != "":   # Test: Namenseingabe zeigen
+				if _ev("NAMET") != "":   # Test: Namenseingabe zeigen
 					_name_entry([["total", 64.64, 4], ["dmg", 2.35, 0]])
-				if OS.get_environment("SKIPVIEW") != "":   # Test: SKIP-Knopf dazu, um beide Randknöpfe zu sehen
+				if _ev("SKIPVIEW") != "":   # Test: SKIP-Knopf dazu, um beide Randknöpfe zu sehen
 					hud.layer.add_child(_skip_btn())
-			if OS.get_environment("SWT") != "" and shot_s.contains("resbtest") and shot_n >= 60 and shot_n <= 89 and shot_n % 5 < 2:
+			if _ev("SWT") != "" and shot_s.contains("resbtest") and shot_n >= 60 and shot_n <= 89 and shot_n % 5 < 2:
 				# Test: Wischen auf der Tafel (links, links, rechts, rechts, tippen)
 				var bc = (hud.board as Control).get_global_rect().get_center()
 				var k = (shot_n - 60) / 5
@@ -17910,14 +17926,14 @@ func _shot() -> void:
 				ships[1].z = ships[0].z + 7.0
 				ships[1].lat = ships[0].lat + 1.2
 				ships[1].spd = ships[0].spd
-			if shot_s.contains("srtest") and shot_n == int(OS.get_environment("SRN") if OS.get_environment("SRN") != "" else "45"):
-				if OS.get_environment("SRN") == "":
+			if shot_s.contains("srtest") and shot_n == int(_ev("SRN") if _ev("SRN") != "" else "45"):
+				if _ev("SRN") == "":
 					print("SR ret=", _soft_reset(), " props=", props.size(), " state=", state)
 					state = "race"
 				else:
 					_race_again()
 					print("SR again state=", state)
-			if OS.get_environment("SRN") != "" and shot_n == int(OS.get_environment("SRN")) + 200:
+			if _ev("SRN") != "" and shot_n == int(_ev("SRN")) + 200:
 				print("MUSIC valid=", is_instance_valid(music_p), " playing=", music_p.playing if is_instance_valid(music_p) else false, " k=", music_k, " f=", music_f)
 			if shot_s.contains("srtest") and shot_n == 50:
 				print("SR valid=", props.map(func(d): return is_instance_valid(d.n)))
@@ -17940,13 +17956,13 @@ func _shot() -> void:
 					ships[0].psi = 0.45
 				if shot_n > 41 and shot_n < 90:
 					print("SH n=", shot_n, " lat=", snappedf(ships[0].lat, 0.01), " h=", snappedf(ships[0].h, 0.01), " vpsi=", snappedf(ships[0].vpsi, 0.01), " en=", snappedf(ships[0].en, 0.01), " slow=", snappedf(ships[0].slow, 0.01), " hits=", shield_hits.size())
-			if shot_n == 41 and not blimp.is_empty() and OS.get_environment("BLIMPDBG") != "":
+			if shot_n == 41 and not blimp.is_empty() and _ev("BLIMPDBG") != "":
 				print("BLIMP pos=", (blimp.n as Node3D).global_position, " cam=", cam.global_position, " c=", blimp.c, " r=", blimp.rx, ",", blimp.rz)
 			if shot_s.contains("rkctest") and shot_n % 5 == 0:
 				print("RKC n=", shot_n, " state=", state, " kcp=", kc_pending, " out1=", ships[1].out, " en1=", ships[1].en, " shots=", shots.map(func(x): return [snappedf(x.z - ships[0].z, 0.1), x.lat]), " z1=", snappedf(ships[1].z - ships[0].z, 0.1), " prot=", _prot(ships[1]))
 			if shot_n == 41 and shot_s.contains("rkctest"):
-				ships[1].z = ships[0].z + float(OS.get_environment("RKD") if OS.get_environment("RKD") != "" else "14")
-				ships[1].lat = ships[0].lat + float(OS.get_environment("RKL") if OS.get_environment("RKL") != "" else "0")
+				ships[1].z = ships[0].z + float(_ev("RKD") if _ev("RKD") != "" else "14")
+				ships[1].lat = ships[0].lat + float(_ev("RKL") if _ev("RKL") != "" else "0")
 				ships[1].en = 0.05
 				ships[1].shield = 0.0
 				ships[2].z = ships[0].z - 30.0
@@ -17954,17 +17970,17 @@ func _shot() -> void:
 				ships[0].wpn = "lenk"
 				lk_tg = ships[1]
 				lk_k = 1.0
-				if OS.get_environment("RKQ") == "fwd":
+				if _ev("RKQ") == "fwd":
 					ships[0].wpn = "beben"
-				if OS.get_environment("RKW") != "":
+				if _ev("RKW") != "":
 					# nur zum Testen: Waffe und Stufe (z. B. „rak,sup“ oder „lenk,mega“)
-					var rw = OS.get_environment("RKW").split(",")
+					var rw = _ev("RKW").split(",")
 					ships[0].wpn = rw[0]
 					ships[0].sup = rw.size() > 1 and rw[1] != ""
 					ships[0].mega = rw.size() > 1 and rw[1] == "mega"
 					ships[1].en = 1.0
-				if OS.get_environment("RKQ") == "back":
-					ships[1].z = ships[0].z - float(OS.get_environment("RKD") if OS.get_environment("RKD") != "" else "14")
+				if _ev("RKQ") == "back":
+					ships[1].z = ships[0].z - float(_ev("RKD") if _ev("RKD") != "" else "14")
 					quake2 = _quake_make(ships[0].z - 3.0, -1.0, quake2)
 				else:
 					_fire()
@@ -17989,8 +18005,8 @@ func _shot() -> void:
 				ships[1].lat = ships[0].lat + 0.6
 				_pose_all(0.0)
 				ships[1].out = true
-				if OS.get_environment("DEBSPD") != "":
-					ships[1].spd = float(OS.get_environment("DEBSPD"))
+				if _ev("DEBSPD") != "":
+					ships[1].spd = float(_ev("DEBSPD"))
 					ships[1].z = 60.0
 					ships[1].lat = 0.0
 					_pose_all(0.0)
@@ -18005,7 +18021,7 @@ func _shot() -> void:
 					var c0: Node3D = debris[0].n
 					var m0: MeshInstance3D = c0.get_child(0)
 					print("DEB2 chunk=", c0.global_position, " piece=", m0.global_transform, " ship0=", (ships[0].node as Node3D).global_position, " cam=", cam.global_position, " vis=", m0.is_visible_in_tree(), " layers=", m0.layers)
-			if shot_s.contains("frz") and shot_n == int(OS.get_environment("KOF") if OS.get_environment("KOF") != "" else "60"):
+			if shot_s.contains("frz") and shot_n == int(_ev("KOF") if _ev("KOF") != "" else "60"):
 				Engine.time_scale = 0.0001   # Test: Trümmer einfrieren, damit die Aufnahme sie zeigt
 			if shot_s.contains("chgtest"):
 				if shot_n == 41:
@@ -18018,12 +18034,12 @@ func _shot() -> void:
 					print("CHG n=", shot_n, " z=", snappedf(ships[0].z, 0.1), " lat=", snappedf(ships[0].lat, 0.01), " en=", snappedf(ships[0].en, 0.001))
 			if shot_s.contains("autotest") and shot_n >= 41:
 				ships[0].auto = 3.0
-			if OS.get_environment("FIN2") != "" and shot_n == int(OS.get_environment("FIN2")):
+			if _ev("FIN2") != "" and shot_n == int(_ev("FIN2")):
 				print("FIN2 state=", state, " party=", party.is_empty())
 				state = "done"
 				t_state = 0.0
 				_fin_flow(1)
-			if OS.get_environment("PTDBG") != "" and shot_n % 100 == 0:
+			if _ev("PTDBG") != "" and shot_n % 100 == 0:
 				print("PT n=", shot_n, " state=", state, " fin=", fin.get("phase", -1), " pt=", fin.get("pt", -1), " party=", not party.is_empty())
 			if shot_n == 60 and shot_s.contains("finwin"):
 				state = "done"
@@ -18067,9 +18083,9 @@ func _shot() -> void:
 						_start()
 				if shot_n == 64:
 					print("AGAIN after kids=", get_child_count(), " fx=", fxs.size(), " mines=", mines.size(), " out2=", ships[2].out, " vis2=", (ships[2].node as Node3D).visible, " z=", ships[0].z, " en2=", ships[2].en, " state=", state, " race_t=", race_t)
-			if OS.get_environment("NOSE") != "" and shot_n == 41:
-				fx.steer.nosev = float(OS.get_environment("NOSE"))
-			if OS.get_environment("NOSE") != "" and shot_n == 53:
+			if _ev("NOSE") != "" and shot_n == 41:
+				fx.steer.nosev = float(_ev("NOSE"))
+			if _ev("NOSE") != "" and shot_n == 53:
 				var g0: Dictionary = ships[0]
 				var fz = T.frame(g0.z)
 				var fwn: Vector3 = (g0.node as Node3D).global_transform.basis.z
@@ -18094,12 +18110,12 @@ func _shot() -> void:
 				# Test: knapp neben einem Boost-Feld anfliegen – trifft die Lenkhilfe es?
 				var g = ships[0]
 				if shot_n == 40:
-					fx.steer.assist = float(OS.get_environment("ASSIST"))
+					fx.steer.assist = float(_ev("ASSIST"))
 					var k = int(ceil((g.z + 25.0) / 35.0))
 					while not _pad_ok(_bzp(k)):
 						k += 1
 					g.z = _bzp(k) - 22.0
-					g.lat = _bpx(k) + float(OS.get_environment("OFF"))
+					g.lat = _bpx(k) + float(_ev("OFF"))
 					g.psi = 0.0
 					g.vpsi = 0.0
 					set_meta("ak", k)
@@ -18121,7 +18137,7 @@ func _shot() -> void:
 					get_tree().quit())
 			if shot_n == 50 and shot_s.contains("pathtest"):
 				# Test: Pause → Restart/Menu von hier aus; danach muss die (neu geladene) Szene wieder laufen
-				var act = OS.get_environment("PATHACT")
+				var act = _ev("PATHACT")
 				var tree = get_tree()
 				var spath = p[0]
 				_pause(true)
@@ -18239,13 +18255,22 @@ func _tunnel(dt: float) -> void:
 	if not nohide:
 		k = 0.0
 	tun_k += (k - tun_k) * (1.0 - exp(-dt / 0.2))
-	wenv.ambient_light_energy = lerpf(0.35 * _newr("amb", 1.0), 0.02, tun_k)
-	wenv.fog_density = lerpf((0.03 if _jungle() else (0.012 if _noir() else 0.016)) * float(fx.env.fog), 0.0, tun_k)
+	# Umgebung nur bei echter Änderung setzen (jedes Setzen schickt die ganze Umgebung neu an den Renderer)
+	var ae = lerpf(0.35 * _newr("amb", 1.0), 0.02, tun_k)
+	if absf(wenv.ambient_light_energy - ae) > 0.0005:
+		wenv.ambient_light_energy = ae
+	var fd = lerpf((0.03 if _jungle() else (0.012 if _noir() else 0.016)) * float(fx.env.fog), 0.0, tun_k)
+	if absf(wenv.fog_density - fd) > 0.00002:
+		wenv.fog_density = fd
 	var fog_on = float(fx.env.fog) > 0.01
 	if wenv.fog_enabled != fog_on:
 		wenv.fog_enabled = fog_on
-	wenv.background_energy_multiplier = lerpf(1.0, 0.05, tun_k)
-	moon.light_energy = lerpf(0.45 * float(fx.env.moon) * _newr("moon", 1.0), 0.0, tun_k)
+	var be = lerpf(1.0, 0.05, tun_k)
+	if absf(wenv.background_energy_multiplier - be) > 0.0005:
+		wenv.background_energy_multiplier = be
+	var me = lerpf(0.45 * float(fx.env.moon) * _newr("moon", 1.0), 0.0, tun_k)
+	if absf(moon.light_energy - me) > 0.0005:
+		moon.light_energy = me
 	_lamps_cull()
 	_neon_lights()
 	_city_live()
@@ -18431,7 +18456,7 @@ var mc_log_t = 0.0
 
 func _mcl(msg: String) -> void:
 	mc_log.append("%6.2f  %s" % [race_t, msg])
-	if OS.get_environment("KCDBG") != "":
+	if _ev("KCDBG") != "":
 		print("MCLOG ", mc_log[mc_log.size() - 1])
 	if mc_log.size() > 400:
 		mc_log.pop_front()
@@ -18603,7 +18628,7 @@ var tmega_t = 0.0
 
 
 func _test_mega(dt: float) -> void:
-	if OS.get_environment("HEATALLON") != "" and state == "race" and not has_meta("hao"):
+	if _ev("HEATALLON") != "" and state == "race" and not has_meta("hao"):
 		set_meta("hao", true)
 		if heat_mat == null:
 			heat_mat = _shader_mat(HEAT_SH)
@@ -18627,7 +18652,7 @@ func _test_mega(dt: float) -> void:
 		g.sup = true
 		g.mega = true
 		tmega_t = 0.0
-		if OS.get_environment("KCDBG") != "":
+		if _ev("KCDBG") != "":
 			print("TMEGA given t=", snappedf(race_t, 0.01))
 
 
@@ -18660,7 +18685,7 @@ func _heat_on(o) -> void:
 			var tgt_m = it[1] if (hoff and o != null and (o.node as Node).is_ancestor_of(it[0])) else heat_mat
 			if (it[0] as MeshInstance3D).material_overlay != tgt_m:
 				(it[0] as MeshInstance3D).material_overlay = tgt_m
-		if OS.get_environment("KCDBG") != "" and Engine.get_process_frames() % 4 == 0 and o != null:
+		if _ev("KCDBG") != "" and Engine.get_process_frames() % 4 == 0 and o != null:
 			for mi in (o.node as Node3D).find_children("*", "MeshInstance3D", true, false):
 				var m3 := mi as MeshInstance3D
 				print("HT ", m3.name, " vis=", m3.is_visible_in_tree(), " ovr=", m3.material_override != null, " ovl=", m3.material_overlay == heat_mat, " aabb=", m3.get_aabb().size * m3.global_transform.basis.get_scale(), " gp=", m3.global_position)
@@ -18825,7 +18850,7 @@ func _mc_reticle(want: Vector2, wsz: float, on_target: bool) -> void:
 	(mc.ret as Control).queue_redraw()
 	if mc.has("retg") and is_instance_valid(mc.retg):
 		(mc.retg as Control).queue_redraw()
-	if OS.get_environment("KCDBG") != "":
+	if _ev("KCDBG") != "":
 		print("RET rp=", mc.rp, " rs=", snappedf(float(mc.rs), 0.1), " lk=", snappedf(float(mc.rlk), 0.01), " vis=", (mc.ret as Control).is_visible_in_tree(), " rect=", (mc.ret as Control).get_global_rect())
 
 
@@ -18961,7 +18986,7 @@ func _mc_mark(tg) -> void:
 	lb.position = Vector2(clampf(rp.x - rs * 0.5 - 16.0 - 300.0, 6.0, vp.x - 306.0), clampf(rp.y - 16.0, 0.0, vp.y - 70.0))
 	# leichtes Flimmern wie ein Radarschirm; beim Erkennen im Takt des Aufblinkens
 	lb.modulate.a = 1.0 if (int(Time.get_ticks_msec() / 220) % 2) == 0 else 0.15   # blinkt
-	if OS.get_environment("KCDBG") != "":
+	if _ev("KCDBG") != "":
 		print("MCMK t=", snappedf(race_t, 0.01), " nv=", (tg.node as Node3D).is_visible_in_tree(), " d=", snappedf(d, 0.1), " along=", snappedf(dt_m, 0.1), " in=", inside, " scr=", sp, " txt=", lb.text.replace("\n", " | "))
 
 
@@ -19074,13 +19099,13 @@ func _mc_lock(sh: Dictionary) -> void:
 		cd.position.x = lerpf(-cd.size.x - 20.0, 16.0, clampf(el / 0.12, 0.0, 1.0))   # fährt von links herein
 		var lk: Label = cd.get_meta("lk")
 		lk.modulate.a = 0.25 if mc.hoff else 1.0
-	if OS.get_environment("FRZSHOT") != "":
+	if _ev("FRZSHOT") != "":
 		for q in [[0.15, "a"], [0.45, "b"]]:
 			if el > q[0] and not mc.has("fs" + q[1]):
 				mc["fs" + q[1]] = true
-				var fpath = OS.get_environment("FRZSHOT") + q[1] + ".png"
+				var fpath = _ev("FRZSHOT") + q[1] + ".png"
 				RenderingServer.frame_post_draw.connect(func(): get_viewport().get_texture().get_image().save_png(fpath), CONNECT_ONE_SHOT)
-	if el >= (float(OS.get_environment("MCLOCKT")) if OS.get_environment("MCLOCKT") != "" else MC_LOCK_T):
+	if el >= (float(_ev("MCLOCKT")) if _ev("MCLOCKT") != "" else MC_LOCK_T):
 		mc.erase("frz")
 		mc.erase("hoff")
 		mc.frz_done = true
@@ -19234,49 +19259,49 @@ func _camera(dt: float) -> void:
 		return
 	if state == "done" and _party_live(dt):
 		return
-	if OS.get_environment("CLOSECAM") != "" and not ships.is_empty():
+	if _ev("CLOSECAM") != "" and not ships.is_empty():
 		# Test: Nahaufnahme des eigenen Schiffs schräg von hinten oben
 		var nd0: Node3D = ships[0].node
 		var bz = nd0.global_transform.basis
 		cam.global_position = nd0.global_position - bz.z * 1.1 + bz.y * 0.75 + bz.x * 0.55
-		var cc = OS.get_environment("CLOSECAM").split(",")
+		var cc = _ev("CLOSECAM").split(",")
 		if cc.size() == 3:   # Versatz in Schiffsachsen: seitlich, hoch, längs
 			cam.global_position = nd0.global_position + bz.x * float(cc[0]) + bz.y * float(cc[1]) + bz.z * float(cc[2])
 		cam.look_at(nd0.global_position + bz.y * 0.1, Vector3.UP)
 		cam.fov = 50.0
 		return
-	if OS.get_environment("BLIMPCAM") != "" and not blimp.is_empty():
+	if _ev("BLIMPCAM") != "" and not blimp.is_empty():
 		var bn: Node3D = blimp.n
-		var dd = float(OS.get_environment("BLIMPCAM"))
+		var dd = float(_ev("BLIMPCAM"))
 		cam.global_position = bn.global_position + bn.global_transform.basis.x * dd + Vector3.UP * (-dd * 0.35)
 		cam.look_at(bn.global_position, Vector3.UP)
 		cam.fov = 50.0
 		return
-	if OS.get_environment("BLIMPCAM") != "" and not blimp.is_empty():
+	if _ev("BLIMPCAM") != "" and not blimp.is_empty():
 		# nur zum Testen: seitlicher Blick auf den Zeppelin und seine Lichtkegel
 		var bp: Vector3 = (blimp.n as Node3D).global_position
-		var bo = OS.get_environment("BLIMPCAM").split(",")
+		var bo = _ev("BLIMPCAM").split(",")
 		cam.global_position = bp + Vector3(float(bo[0]), float(bo[1]), float(bo[2]))
 		cam.look_at(bp - Vector3(0, 14, 0), Vector3.UP)
 		cam.fov = 60.0
 		return
-	if OS.get_environment("CSAT") != "" and state == "race" and race_t > 1.0 and not has_meta("csat"):
+	if _ev("CSAT") != "" and state == "race" and race_t > 1.0 and not has_meta("csat"):
 		set_meta("csat", 1)
-		var ca = OS.get_environment("CSAT").split(",")
+		var ca = _ev("CSAT").split(",")
 		var rnc = RandomNumberGenerator.new()
 		rnc.seed = 7
 		var fo = {"z": float(ca[0]), "lat": float(ca[1]), "spd": 20.0}
 		var fcz = T.frame(fo.z)
 		_crash_site(fo, fcz.c + fcz.rr * fo.lat, fcz, rnc)
-	if OS.get_environment("CSDBG") != "" and Engine.get_process_frames() % 60 == 0:
+	if _ev("CSDBG") != "" and Engine.get_process_frames() % 60 == 0:
 		var nsm = 0
 		for d in debris:
 			if d.get("small", false):
 				nsm += 1
 		print("CSDBG f=", Engine.get_process_frames(), " debris=", debris.size(), " small=", nsm, " first=", (debris[0].z if not debris.is_empty() else -1), ",", (debris[0].lat if not debris.is_empty() else 0))
-	if OS.get_environment("VIEWCAM") != "":
+	if _ev("VIEWCAM") != "":
 		# nur zum Testen: freie Kamera „z,seitlich,Höhe,Drehung(Grad)“ – schaut längs der Strecke, gedreht um die Hochachse
-		var vp = OS.get_environment("VIEWCAM").split(",")
+		var vp = _ev("VIEWCAM").split(",")
 		var rel = vp[0].begins_with("s")   # „s…“ = relativ zum Spieler, Schiffe bleiben sichtbar
 		if rel:
 			vp[0] = str(float(ships[0].z) + float(vp[0].substr(1)))
@@ -19291,9 +19316,9 @@ func _camera(dt: float) -> void:
 			for o in ships:
 				(o.node as Node3D).visible = false
 		return
-	if OS.get_environment("TOPCAM") != "":
+	if _ev("TOPCAM") != "":
 		# nur zum Testen: Blick senkrecht von oben auf die Strecke
-		var tz = float(OS.get_environment("TOPCAM"))
+		var tz = float(_ev("TOPCAM"))
 		var tf = T.frame(tz)
 		cam.global_position = tf.c + Vector3.UP * 9.0
 		cam.look_at(tf.c, tf.fw)
@@ -19352,7 +19377,7 @@ func _camera(dt: float) -> void:
 		# Fliehkraft: beim Boost in den Sitz gedrückt (Blick weicht zurück), beim Aufsetzen ein Ruck nach unten
 		ro += -SF * 0.16 * float(ckh.push) - SU * 0.06 * float(ckh.lj)
 		ta += -SU * 0.6 * float(ckh.lj)
-	if OS.get_environment("DCDBG") != "":
+	if _ev("DCDBG") != "":
 		print("DC f=", Engine.get_process_frames(), " on=", not dcam.is_empty(), " ts=", Engine.time_scale, " shots=", shots.size(), " t=", (shots[0].t if shots.size() > 0 else -1), " drp=", (shots[0].get("drp", -1) if shots.size() > 0 else -1), " ckm=", ckm, " state=", state)
 	if not dcam.is_empty():
 		var dsh: Dictionary = dcam.sh
@@ -19368,10 +19393,10 @@ func _camera(dt: float) -> void:
 			var wv = smoothstep(0.0, 0.12, dt0) * (1.0 - smoothstep(dT - 0.3, dT, dt0))
 			ro = ro.lerp(cro, wv)
 			ta = ta.lerp(cta, wv)
-			if OS.get_environment("DCSHOT") != "" and dt0 >= float(OS.get_environment("DCSHOT")):
+			if _ev("DCSHOT") != "" and dt0 >= float(_ev("DCSHOT")):
 				cam.global_position = ro
 				cam.look_at(ta, uc)
-				get_viewport().get_texture().get_image().save_png(OS.get_environment("DCSHOT_P"))
+				get_viewport().get_texture().get_image().save_png(_ev("DCSHOT_P"))
 				get_tree().quit()
 	shake = maxf(0.0, shake - dt * 1.8)
 	_flash_fade(dt * 2.2)
@@ -19386,7 +19411,7 @@ func _camera(dt: float) -> void:
 		var ju = (sin(t3 * 83.0 + 0.7) + sin(t3 * 131.0 + 2.1)) * 0.5
 		ro += (f.rr * jr + f.uu * ju) * rum
 		ta += (f.rr * ju - f.uu * jr) * rum * 3.0
-	if OS.get_environment("SPDDBG") != "" and Engine.get_process_frames() % 20 == 0:
+	if _ev("SPDDBG") != "" and Engine.get_process_frames() % 20 == 0:
 		print("SPD state=", state, " spd=", snappedf(g.spd, 0.1), " boost=", snappedf(g.boost, 0.01), " post=", snappedf(post_spd, 0.01), " fov=", snappedf(52.0 * minf(1.42, 1.0 + 0.1 * minf(1.5, g.boost) + 0.3 * post_spd), 0.1), " shake_px~=", snappedf((ro - (S0 - fc * (2.6 + cam_d) + uc * (0.95 - 0.15 * cam_d) - f.uu * g.h * 0.5)).length() * 1000.0, 0.1), "mm")
 	cam.global_position = ro
 	cam.look_at(ta, uc)
@@ -19511,8 +19536,8 @@ func _radio_tick(dt: float) -> void:
 				_radio(i, "taunt" if sd > 0 else "whine", 0.7)
 			if sd != 0:
 				radio_side[i] = sd
-	if OS.get_environment("RADIO") != "" and radio.is_empty() and state == "race" and race_t > float(OS.get_environment("RADIOT") if OS.get_environment("RADIOT") != "" else "3.2") and radio_cd <= 0.0:
-		_radio(int(OS.get_environment("RADIO")), "taunt")   # nur zum Testen
+	if _ev("RADIO") != "" and radio.is_empty() and state == "race" and race_t > float(_ev("RADIOT") if _ev("RADIOT") != "" else "3.2") and radio_cd <= 0.0:
+		_radio(int(_ev("RADIO")), "taunt")   # nur zum Testen
 	var on = not radio.is_empty() and state == "race"
 	R.box.visible = on
 	if not on:
@@ -19912,19 +19937,19 @@ func _ck_update(dt: float) -> void:
 	# Lenken: Hände kippen um den Kern (bis 18°), dazu ein kleines Mitschwingen zur Seite
 	var tgt = clampf(float(g.roll) * CK_ROLLK, -1.0, 1.0)
 	ck_hud_tick(dt, g)
-	if OS.get_environment("CKEN") != "":
-		g.en = float(OS.get_environment("CKEN"))   # nur zum Testen: feste Energie (Schaden, Herzschlag)
-	if OS.get_environment("CKWARN") != "":
-		ckh.mis = OS.get_environment("CKWARN") == "mis"
-		ckh.mine = OS.get_environment("CKWARN") == "mine"
+	if _ev("CKEN") != "":
+		g.en = float(_ev("CKEN"))   # nur zum Testen: feste Energie (Schaden, Herzschlag)
+	if _ev("CKWARN") != "":
+		ckh.mis = _ev("CKWARN") == "mis"
+		ckh.mine = _ev("CKWARN") == "mine"
 		ckh.al = 1.0
 		ckh.mang = 2.4
-	if OS.get_environment("CKSCR") != "":
-		ckh.scr = int(OS.get_environment("CKSCR"))
-	if OS.get_environment("CKREFL") != "":
-		ckh.rf = float(OS.get_environment("CKREFL"))
-	if OS.get_environment("CKROT") != "":
-		tgt = float(OS.get_environment("CKROT"))   # nur zum Testen: fester Lenkausschlag der Hände
+	if _ev("CKSCR") != "":
+		ckh.scr = int(_ev("CKSCR"))
+	if _ev("CKREFL") != "":
+		ckh.rf = float(_ev("CKREFL"))
+	if _ev("CKROT") != "":
+		tgt = float(_ev("CKROT"))   # nur zum Testen: fester Lenkausschlag der Hände
 	ck_rot += (tgt - ck_rot) * (1.0 - exp(-dt / 0.08))
 	var jit = Vector2.ZERO
 	if shake > 0.0:
@@ -19980,13 +20005,13 @@ func _ck_update(dt: float) -> void:
 	ck.glow.size = Vector2(gs, gs)
 	ck.glow.position = CK_CORE * sc * CK_HS - Vector2(gs, gs) * 0.5
 	ck.glow.modulate.a = clampf(0.18 + 0.22 * pul * (0.4 + post_spd) + 0.45 * minf(1.0, float(g.boost)), 0.0, 0.9)
-	if OS.get_environment("CKDBG") != "" and Engine.get_process_frames() == 400:
+	if _ev("CKDBG") != "" and Engine.get_process_frames() == 400:
 		for k in hud.keys():
 			if hud[k] is Control and (hud[k] as Control).is_visible_in_tree():
 				var rr: Rect2 = (hud[k] as Control).get_global_rect()
 				if rr.end.y > vp.y * 0.6 and rr.size.y < vp.y * 0.6:
 					print("CKHUD ", k, " ", rr, " vp=", vp)
-	if OS.get_environment("CKDBG") != "" and Engine.get_process_frames() % 20 == 0:
+	if _ev("CKDBG") != "" and Engine.get_process_frames() % 20 == 0:
 		print("CKDBG state=", state, " roll=", snappedf(float(g.roll), 0.001), " rot=", snappedf(ck_rot, 0.01), " u=", snappedf(float(g.get("u", 0.0)), 0.01), " glow=", snappedf(ck.glow.modulate.a, 0.01), " fov=", snappedf(cam.fov, 0.1))
 
 
@@ -20716,7 +20741,7 @@ func _fin_flow(place: int, out := false) -> void:
 	fsb.pressed.connect(_fin_skip)
 	fsl.add_child(fsb)
 	fin.sl = fsl
-	if OS.get_environment("FINFLASH") != "":
+	if _ev("FINFLASH") != "":
 		# nur zum Testen: Rennende direkt nach einer Explosion, mit dem längsten Ergebnistext
 		hud.res.text = "1st  ·  LAST ONE STANDING\n0:40.41"
 		_flash(Color(1.0, 0.9, 0.8), 1.0)
@@ -20733,11 +20758,11 @@ func _fin_update(dt: float) -> void:
 	if fin.is_empty():
 		return
 	fin.t += dt
-	if OS.get_environment("FINT") != "" and fin.t >= float(OS.get_environment("FINT")):
-		get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH"))
+	if _ev("FINT") != "" and fin.t >= float(_ev("FINT")):
+		get_viewport().get_texture().get_image().save_png(_ev("SHOTPATH"))
 		get_tree().quit()
 	var fly_t = FLY_T
-	if OS.get_environment("FINSKIPT") != "" and fin.phase == 0 and fin.t >= float(OS.get_environment("FINSKIPT")) and not fin.get("fsk", false):
+	if _ev("FINSKIPT") != "" and fin.phase == 0 and fin.t >= float(_ev("FINSKIPT")) and not fin.get("fsk", false):
 		print("FINSKIP press t=", snappedf(fin.t, 0.01))
 		(fin.sl as CanvasLayer).get_child(0).emit_signal("pressed")
 	if fin.fly and fin.phase == 0 and fin.t >= 6.6 and not fin.has("lbl"):
@@ -20799,7 +20824,7 @@ func _fin_update(dt: float) -> void:
 				_comic_start("win" if fin.win else "lose", fin.who)
 	elif fin.phase == 5:
 		fin.pt = float(fin.pt) + dt
-		if OS.get_environment("FEETDBG") != "" and not party.is_empty() and int(fin.get("fdb", 0)) == 0 and float(fin.pt) > 1.0:
+		if _ev("FEETDBG") != "" and not party.is_empty() and int(fin.get("fdb", 0)) == 0 and float(fin.pt) > 1.0:
 			fin.fdb = 1
 			for fg in (party.n as Node3D).find_children("*", "Skeleton3D", true, false):
 				var skf: Skeleton3D = fg
@@ -20810,12 +20835,12 @@ func _fin_update(dt: float) -> void:
 						lo = minf(lo, (skf.global_transform * skf.get_bone_global_pose(bi).origin).y)
 				var fz = T.frame(float(party.z))
 				print("FEET ", skf.get_parent().get_parent().name if skf.get_parent() else "?", " lowest foot bone above road=", snappedf(lo - fz.c.y, 0.001))
-		if OS.get_environment("PARTYT") != "":
+		if _ev("PARTYT") != "":
 			# nur zum Testen: mehrere Bilder der Feier (Zeiten mit Komma), Pfad SHOTPATH + _n.png
-			var ts = OS.get_environment("PARTYT").split(",")
+			var ts = _ev("PARTYT").split(",")
 			var k = int(fin.get("pk", 0))
 			if k < ts.size() and fin.pt >= float(ts[k]):
-				get_viewport().get_texture().get_image().save_png(OS.get_environment("SHOTPATH").replace(".png", "_%d.png" % k))
+				get_viewport().get_texture().get_image().save_png(_ev("SHOTPATH").replace(".png", "_%d.png" % k))
 				fin.pk = k + 1
 				if k + 1 >= ts.size():
 					get_tree().quit()
@@ -21340,7 +21365,7 @@ func _stt_build() -> void:
 	stt.rowbox = rowbox
 	_stt_rows()
 	_stt_vals()
-	if OS.get_environment("STTOPEN") != "":
+	if _ev("STTOPEN") != "":
 		stt.open = true
 		pnl.visible = true
 
@@ -22178,7 +22203,7 @@ func _music_update(dt: float) -> void:
 			elif music_k == "music_race" and _own_song() != null:
 				music_cur = "own"
 				music_p.stream = _looped(_own_song())   # eigener Song: läuft als Hauptsong in Schleife
-				if OS.get_environment("MUSDBG") != "":
+				if _ev("MUSDBG") != "":
 					print("MUSIC own len=", music_p.stream.get_length())
 				music_p.play()
 			elif music_k == "music_race":
@@ -22190,7 +22215,7 @@ func _music_update(dt: float) -> void:
 					pool = [music_cur if snd.get(music_cur) != null else MUSIC_RACE[0]]
 				music_cur = pool[randi() % pool.size()]
 				music_p.stream = snd[music_cur]   # nicht in Schleife: am Ende kommt der nächste Song
-				if OS.get_environment("MUSDBG") != "":
+				if _ev("MUSDBG") != "":
 					print("MUSIC song=", music_cur, " len=", snd[music_cur].get_length(), " pool=", pool)
 				music_p.play()
 			else:
@@ -22249,10 +22274,10 @@ func _dg_start() -> void:
 		return
 	dg_init = true
 	DirAccess.make_dir_recursive_absolute(DG_DIR)
-	var testing = OS.get_cmdline_user_args().size() > 0 or OS.get_environment("SHOTPATH") != ""
+	var testing = OS.get_cmdline_user_args().size() > 0 or _ev("SHOTPATH") != ""
 	# letzter Lauf ohne sauberes Ende (stand auf „run“) = Absturz
 	var st = FileAccess.get_file_as_string(DG_DIR + "/state.txt").strip_edges()
-	if (st == "run" and not testing) or OS.get_environment("DGFAKE") != "":
+	if (st == "run" and not testing) or _ev("DGFAKE") != "":
 		var cp = FileAccess.get_file_as_string(DG_DIR + "/cp.txt").strip_edges()
 		var tr = FileAccess.get_file_as_string(DG_DIR + "/trail.txt")
 		dg_report = "AntiGrav 3D – Absturzbericht\nVersion: %s · Gerät: %s (%s) · %s\nLetzter Haltepunkt (Hauptschleife): %s\n\n--- Verlauf (älteste zuerst) ---\n%s" % [
@@ -22293,7 +22318,33 @@ func _bc(msg: String) -> void:
 
 
 # Haltepunkt: welcher Teil der Hauptschleife läuft gerade – sofort auf die Platte (überlebt einen Absturz)
+# Umgebungsvariablen (nur für Tests vom Rechner) einmal lesen statt jedes Bild neu beim System nachzufragen
+var _envc = {}
+func _ev(n: String) -> String:
+	if not _envc.has(n):
+		_envc[n] = OS.get_environment(n)
+	return _envc[n]
+
+
+var _pr_last = ""
+var _pr_t = 0
+var _pr_acc = {}
+var _pr_on = OS.get_environment("PROF") != ""
 func _cp(nm: String) -> void:
+	if _pr_on:
+		var now = Time.get_ticks_usec()
+		if _pr_last != "" and state == "race":
+			_pr_acc[_pr_last] = int(_pr_acc.get(_pr_last, 0)) + (now - _pr_t)
+		_pr_last = nm
+		_pr_t = now
+		if nm == "frame" and Engine.get_process_frames() % 300 == 0 and not _pr_acc.is_empty():
+			var ks = _pr_acc.keys()
+			ks.sort_custom(func(x, y): return _pr_acc[x] > _pr_acc[y])
+			var o = "PROF f=%d " % Engine.get_process_frames()
+			for k in ks.slice(0, 14):
+				o += "%s=%.2f " % [k, _pr_acc[k] / 300000.0]
+			print(o)
+			_pr_acc.clear()
 	if dg_cpf == null:
 		return
 	dg_cpf.seek(0)
@@ -22312,14 +22363,14 @@ func _dg_flush() -> void:
 
 
 func _dg_tick(delta: float) -> void:
-	if OS.get_environment("FTDBG") != "":
+	if _ev("FTDBG") != "":
 		# nur zum Testen: lange Bilder (Hänger) mit Zustand mitschreiben
 		var now = Time.get_ticks_usec()
 		var ft = (now - int(get_meta("ftl", now))) / 1000.0
 		set_meta("ftl", now)
-		if ft > float(OS.get_environment("FTDBG")):
+		if ft > float(_ev("FTDBG")):
 			print("FT %.0f ms state=%s t=%.2f warm=%.2f" % [ft, state, t_state, warm_t])
-	if OS.get_environment("PAUSESET") != "" and state == "race" and t_state > 1.5 and not has_meta("pst"):
+	if _ev("PAUSESET") != "" and state == "race" and t_state > 1.5 and not has_meta("pst"):
 		set_meta("pst", true)
 		_pause(true)
 		_pause_settings(true)
@@ -22370,11 +22421,11 @@ func _dg_tick(delta: float) -> void:
 			var hc = get_viewport().gui_get_hovered_control()
 			print("PTEST hovered=", hc, " ", hc.get_path() if hc != null else "", " btnproc=", tb.can_process(), " vis=", tb.is_visible_in_tree(), " rect=", tb.get_global_rect())
 			print("PTEST gfx=", cfg.gfx, " slider ", v0, " -> ", gsl.value)
-			get_viewport().get_texture().get_image().save_png(OS.get_environment("PAUSESET"))
+			get_viewport().get_texture().get_image().save_png(_ev("PAUSESET"))
 			_show_settings(false)
 			var tm2 = get_tree().create_timer(0.6, true)
 			tm2.timeout.connect(func():
-				get_viewport().get_texture().get_image().save_png(OS.get_environment("PAUSESET").replace(".png", "_b.png"))
+				get_viewport().get_texture().get_image().save_png(_ev("PAUSESET").replace(".png", "_b.png"))
 				get_tree().quit()))
 	if OS.get_environment("BENCHBTN") != "" and OS.get_environment("AG_RELOADED") == "" and not has_meta("bb") and Engine.get_process_frames() > 20:
 		# nur zum Testen: wie der Knopf „Performance test“ in den Einstellungen
@@ -22382,9 +22433,9 @@ func _dg_tick(delta: float) -> void:
 		print("BENCHBTN press state=", state, " warm_t=", warm_t)
 		bench_req = true
 		_reload()
-	if OS.get_environment("BENCHBTN") != "" and Engine.get_process_frames() % 30 == 0:
+	if _ev("BENCHBTN") != "" and Engine.get_process_frames() % 30 == 0:
 		print("BENCHST f=", Engine.get_process_frames(), " state=", state, " warm_t=", warm_t, " bench_req=", bench_req, " reloaded=", OS.get_environment("AG_RELOADED"), " step=", bench.get("i", -9), " msaa=", get_viewport().msaa_3d, " ssaa=", get_viewport().screen_space_aa)
-	if OS.get_environment("SETOPEN") != "":
+	if _ev("SETOPEN") != "":
 		# nur zum Testen: Einstellungen öffnen und ganz nach unten scrollen
 		var fn = Engine.get_process_frames()
 		if not has_meta("setopen") and Engine.get_process_frames() > 15:
@@ -22394,7 +22445,7 @@ func _dg_tick(delta: float) -> void:
 		if has_meta("setopen") and fn == int(get_meta("setopen")) + 10:
 			for sc in get_tree().root.find_children("*", "ScrollContainer", true, false):
 				if (sc as Control).is_visible_in_tree():
-					(sc as ScrollContainer).scroll_vertical = int(OS.get_environment("SETOPEN"))
+					(sc as ScrollContainer).scroll_vertical = int(_ev("SETOPEN"))
 	if str(state) != dg_state:
 		_bc("state %s -> %s" % [dg_state, state])
 		dg_state = str(state)
