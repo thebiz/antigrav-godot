@@ -2193,6 +2193,7 @@ void fragment(){
 		if(shz[i].z>0. && dz>-1. && dz<40.){
 			float w=.35+max(dz,0.)*.07;
 			float ac=(UV.x-shz[i].x)/w;
+			if(abs(ac)>2.4) continue;   // seitlich außerhalb der Schneise: Beitrag unsichtbar klein
 			float m=exp(-ac*ac*1.6)*exp(-max(dz,0.)/(7.+shz[i].w*6.))*smoothstep(-1.,.3,dz)*shz[i].z;
 			vec2 qq=p*3.2+vec2(t*2.1,-t*1.7);
 			g+=(vec2(vn(qq),vn(qq.yx*1.13+4.))-.5)*m*1.4;
@@ -5001,7 +5002,7 @@ func _spray_node() -> Node3D:
 	tl.color_initial_ramp = _sgrad([0.0, 0.5, 1.0], [Color(0.75, 0.95, 1.0), Color(1, 1, 1), Color(1.0, 0.8, 0.95)])   # Neonlicht färbt einzelne Tropfen
 	h.add_child(tl)
 	# ... und wolkige Wasserfetzen als Körper der Fontäne
-	var bd = _spray_part(46, 0.75, 0.5, puff, false)
+	var bd = _spray_part(26, 0.75, 0.55, puff, false)   # weniger, dafür dichtere Fetzen: gleicher Eindruck, halbe Überzeichnung
 	bd.direction = Vector3(0, 0.8, 0.6)
 	bd.spread = 12.0
 	bd.gravity = Vector3(0, -7.0, 0)
@@ -5018,7 +5019,7 @@ func _spray_node() -> Node3D:
 	bd.scale_amount_min = 0.6
 	bd.scale_amount_max = 1.2
 	bd.scale_amount_curve = _scurve([[0.0, 0.3], [0.4, 1.0], [1.0, 1.9]])
-	bd.color_ramp = _sgrad([0.0, 0.1, 0.5, 1.0], [Color(0.9, 0.97, 1.0, 0.0), Color(0.9, 0.97, 1.0, 0.45), Color(0.75, 0.88, 1.0, 0.22), Color(0.6, 0.75, 1.0, 0.0)])
+	bd.color_ramp = _sgrad([0.0, 0.1, 0.5, 1.0], [Color(0.9, 0.97, 1.0, 0.0), Color(0.9, 0.97, 1.0, 0.62), Color(0.75, 0.88, 1.0, 0.32), Color(0.6, 0.75, 1.0, 0.0)])
 	h.add_child(bd)
 	# Tropfenschleier links/rechts
 	var sides = []
@@ -5040,7 +5041,7 @@ func _spray_node() -> Node3D:
 		h.add_child(s2)
 		sides.append(s2)
 	# Sprühnebel
-	var ms = _spray_part(36, 1.6, 0.9, puff, false)
+	var ms = _spray_part(16, 1.6, 1.0, puff, false)
 	ms.position = Vector3(0, 0.15, 0.4)
 	ms.direction = Vector3(0, 1, 0.2)
 	ms.spread = 50.0
@@ -5058,10 +5059,10 @@ func _spray_node() -> Node3D:
 	ms.scale_amount_min = 0.7
 	ms.scale_amount_max = 1.3
 	ms.scale_amount_curve = _scurve([[0.0, 0.4], [1.0, 2.2]])
-	ms.color_ramp = _sgrad([0.0, 0.15, 1.0], [Color(0.8, 0.9, 1.0, 0.0), Color(0.75, 0.88, 1.0, 0.16), Color(0.55, 0.7, 1.0, 0.0)])
+	ms.color_ramp = _sgrad([0.0, 0.15, 1.0], [Color(0.8, 0.9, 1.0, 0.0), Color(0.75, 0.88, 1.0, 0.28), Color(0.55, 0.7, 1.0, 0.0)])
 	h.add_child(ms)
 	# Gischtfahne: dichte, weiße Wolkenbank, die lange hinter dem Gleiter über dem Wasser stehen bleibt und verweht
-	var pl = _spray_part(80, 3.0, 1.5, puff, false)
+	var pl = _spray_part(34, 3.0, 1.7, puff, false)   # Gischtfahne: weniger Wolken, jede kräftiger (kostete am See am meisten)
 	pl.position = Vector3(0, 0.25, 0.9)
 	pl.direction = Vector3(0, 0.6, 1.0)
 	pl.spread = 35.0
@@ -5079,7 +5080,7 @@ func _spray_node() -> Node3D:
 	pl.scale_amount_min = 0.8
 	pl.scale_amount_max = 1.3
 	pl.scale_amount_curve = _scurve([[0.0, 0.35], [0.25, 1.1], [1.0, 2.6]])
-	pl.color_ramp = _sgrad([0.0, 0.05, 0.35, 1.0], [Color(0.95, 0.98, 1.0, 0.0), Color(0.95, 0.98, 1.0, 0.62), Color(0.85, 0.92, 1.0, 0.4), Color(0.7, 0.8, 0.95, 0.0)])
+	pl.color_ramp = _sgrad([0.0, 0.05, 0.35, 1.0], [Color(0.95, 0.98, 1.0, 0.0), Color(0.95, 0.98, 1.0, 0.85), Color(0.85, 0.92, 1.0, 0.58), Color(0.7, 0.8, 0.95, 0.0)])
 	h.add_child(pl)
 	h.set_meta("parts", [tl, sides[0], sides[1], ms, bd, pl])
 	var shs = []
@@ -5119,7 +5120,7 @@ func _water_update(dt: float) -> void:
 		return
 	while wsp.size() < ships.size():
 		wsp.append(_spray_node())
-	var racing_w = state in ["race", "done", "replay", "count"]
+	var racing_w = state in ["race", "done", "replay", "count", "bench"]
 	wake_t += dt
 	if wake_gen != race_gen:   # neues Rennen: altes Kielwasser weg
 		wake_gen = race_gen
@@ -6546,7 +6547,7 @@ var race_ca: CameraAttributesPractical
 
 
 func _dof_race() -> void:
-	var want = state in ["race", "count", "replay", "kill"] and int(cfg.get("fblur", 1)) == 1 and party.is_empty() and _ev("NODOF") == ""
+	var want = (state in ["race", "count", "replay", "kill"] or (state == "bench" and not bool(bench.get("nodof", false)))) and int(cfg.get("fblur", 1)) == 1 and party.is_empty() and _ev("NODOF") == ""
 	if race_ca == null:
 		race_ca = CameraAttributesPractical.new()
 		race_ca.dof_blur_far_enabled = true
@@ -16402,7 +16403,8 @@ var bench = {}
 const BENCH = [["res75", "Resolution 75 %", "c"], ["shadow", "Moon shadows off", "c"], ["glow", "Glow off", "c"], ["post", "Screen filter off", "c"],
 	["haze", "Heat shimmer off", "c"], ["nlight", "Neon reflections off", "c"], ["lamps", "Track lamps off", "c"], ["jets", "Plasma jets off", "c"],
 	["city", "Holograms/signs/cars off", "c"], ["sky", "Sky shader off", "c"], ["wet", "Wet road off/on", "c"],
-	["water", "LAKE: water shader simple", "l"], ["wwall", "LAKE: water walls off", "l"], ["res75", "LAKE: resolution 75 %", "l"],
+	["dof", "Depth blur off", "c"], ["doflow", "Depth blur low quality", "c"],
+	["water", "LAKE: water shader simple", "l"], ["spray", "LAKE: spray off", "l"], ["wake", "LAKE: wake trails off", "l"], ["sheet", "LAKE: spray water sheets off", "l"], ["part", "LAKE: spray droplets/clouds off", "l"], ["drops", "LAKE: water drops on screen off", "l"], ["dof", "LAKE: depth blur off", "l"], ["wwall", "LAKE: water walls off", "l"], ["res75", "LAKE: resolution 75 %", "l"],
 	["glow", "LAKE: glow off", "l"], ["wet", "LAKE: wet road off/on", "l"], ["haze", "LAKE: heat shimmer off", "l"]]
 const BENCH_Z = {"c": 300.0, "l": 458.0}
 
@@ -16413,6 +16415,8 @@ func _bench_begin() -> void:
 	hud.mid.text = ""
 	bench = {"i": -1, "t": 0.0, "res": [], "fx": JSON.parse_string(JSON.stringify(fx)), "nosh": false, "seq": []}
 	for e in BENCH:
+		if _ev("BENCHONLY") != "" and not (e[0] + e[2]) in _ev("BENCHONLY").split(","):
+			continue
 		bench.seq.append(["base", "base", e[2]])
 		bench.seq.append(e)
 	_bench_next()
@@ -16421,6 +16425,15 @@ func _bench_begin() -> void:
 func _bench_undo() -> void:
 	fx = JSON.parse_string(JSON.stringify(bench.fx))
 	bench.nosh = false
+	bench.nodof = false
+	bench.nospray = false
+	bench.nowake = false
+	bench.nosheet = false
+	bench.nopart = false
+	bench.nodrops = false
+	if race_ca != null:
+		RenderingServer.camera_attributes_set_dof_blur_quality(int(ProjectSettings.get_setting("rendering/camera/depth_of_field/depth_of_field_bokeh_quality", 1)), bool(ProjectSettings.get_setting("rendering/camera/depth_of_field/depth_of_field_use_jitter", false)))
+		RenderingServer.camera_attributes_set_dof_blur_bokeh_shape(int(ProjectSettings.get_setting("rendering/camera/depth_of_field/depth_of_field_bokeh_shape", 1)))
 	_apply_cfg()
 	_env_apply()
 	_city_apply()
@@ -16486,6 +16499,21 @@ func _bench_next() -> void:
 		"wet":
 			fx.env.wet = 0.0 if float(fx.env.wet) > 0.01 else 1.0
 			_wet_apply()
+		"dof":
+			bench.nodof = true
+		"doflow":
+			RenderingServer.camera_attributes_set_dof_blur_quality(RenderingServer.DOF_BLUR_QUALITY_VERY_LOW, false)
+			RenderingServer.camera_attributes_set_dof_blur_bokeh_shape(RenderingServer.DOF_BOKEH_BOX)
+		"spray":
+			bench.nospray = true
+		"wake":
+			bench.nowake = true
+		"sheet":
+			bench.nosheet = true
+		"part":
+			bench.nopart = true
+		"drops":
+			bench.nodrops = true
 		"water", "wwall":
 			if mats.has(k):
 				bench["sh_" + k] = (mats[k] as ShaderMaterial).shader
@@ -16515,6 +16543,24 @@ func _bench_step(dt: float) -> void:
 	_tunnel(dt)
 	_pose_all(dt)
 	_camera(dt)
+	_dof_race()
+	_water_update(dt)   # am See wie im Rennen: Gischt, Schneise, Tropfen auf der Scheibe
+	for hn in wsp:
+		if is_instance_valid(hn):
+			(hn as Node3D).visible = not bool(bench.get("nospray", false))   # Gischt komplett (Tropfen, Wolken, Wasserschleier)
+			for q in (hn as Node).get_meta("sheets", []):
+				if is_instance_valid(q) and bool(bench.get("nosheet", false)):
+					q.visible = false
+			for q in (hn as Node).get_meta("parts", []):
+				if is_instance_valid(q) and bool(bench.get("nopart", false)):
+					q.visible = false
+				elif is_instance_valid(q):
+					q.visible = true
+	if bool(bench.get("nowake", false)):
+		for w in wake:
+			w.pts.clear()
+	if bool(bench.get("nodrops", false)) and hud.has("drops"):
+		hud.drops.visible = false
 	_post_update(dt)
 	_resb_arm(dt)
 	if bench.i < 0 or bench.i >= bench.seq.size():
