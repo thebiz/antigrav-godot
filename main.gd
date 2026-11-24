@@ -2163,13 +2163,14 @@ void fragment(){
 		mats["water"] = _shader_mat("""
 shader_type spatial;
 render_mode unshaded,cull_disabled,blend_mix,depth_draw_opaque,shadows_disabled;
+// See, sparsam (John: Frame-Einbruch am See): keine Rückprojektion ins Bildschirmbild mehr, die Stadtlichter
+// spiegeln sich als schimmernde Neonstreifen; Rauschen ohne Sinus, Wellenringe nur bei Gleitern auf dem Wasser
 uniform float z0=%f;
 uniform float z1=%f;
-uniform sampler2D scr : hint_screen_texture, filter_linear;
 uniform vec4 shp[4];          // Gleiter: Weltposition xyz, w = Stärke (0 = nicht auf dem Wasser)
 uniform vec4 shz[4];          // Gleiter für die Schneise: Seitenlage, Strecken-z, Stärke, Tempo
 varying vec3 wp;
-float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+float hs(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hs(i),hs(i+vec2(1,0)),f.x),mix(hs(i+vec2(0,1)),hs(i+1.),f.x),f.y);}
 // Steigung einer Sinuswelle a*sin(k*(p·d) - s*t)
 vec2 wv(vec2 p,vec2 d,float k,float a,float s,float t,float lod){return d*(a*k*cos(dot(p,d)*k-t*s))*clamp(1.3-k*lod*1.6,0.,1.);}
@@ -2201,8 +2202,10 @@ void fragment(){
 	}
 	// Wellenringe rund um die Gleiter, nach hinten gezogen (Luftkissen drückt aufs Wasser)
 	for(int i=0;i<4;i++){
+		if(shp[i].w<=0.) continue;
 		vec2 d=p-shp[i].xz;
 		float r=length(d*vec2(1.,.55))+.001;
+		if(r>6.) continue;
 		g+=(d/r)*sin(r*5.-t*11.)*shp[i].w*exp(-r*1.3)*.1*clamp(1.-lod*4.,0.,1.);
 	}
 	vec3 nw=normalize((INV_VIEW_MATRIX*vec4(NORMAL,0.)).xyz);
@@ -2213,20 +2216,16 @@ void fragment(){
 	float fr=.03+.97*pow(1.-max(dot(n,v),0.),5.);
 	vec3 r=reflect(-v,n);
 	r.y=abs(r.y);
-	// Spiegelung: reflektierten Strahl ein Stück weit verfolgen und das Bild von dort nehmen (Stadt, Neon, Gleiter)
-	vec3 Q=wp+r*16.;
-	vec4 cq=PROJECTION_MATRIX*(VIEW_MATRIX*vec4(Q,1.));
-	vec4 cp=PROJECTION_MATRIX*(VIEW_MATRIX*vec4(wp,1.));
-	vec2 uq=cq.xy/cq.w*.5+.5;
-	vec2 up=cp.xy/cp.w*.5+.5;
-	if(abs(up.y-SCREEN_UV.y)>abs(1.-up.y-SCREEN_UV.y)){uq.y=1.-uq.y;}
 	vec3 sky=mix(vec3(.16,.06,.26),vec3(.02,.02,.07),clamp(r.y*2.2,0.,1.));
-	vec3 refl=sky;
-	if(cq.w>0.){
-		float eb=smoothstep(0.,.06,min(min(uq.x,1.-uq.x),min(uq.y,1.-uq.y)));
-		vec3 sc=texture(scr,clamp(uq,.001,.999)).rgb;
-		refl=mix(sky,sc*1.15+sky*.25,eb);
-	}
+	// Lichter der Stadt als schimmernde Streifen (Neon über nächtlichem Wasser): Richtung des gespiegelten Strahls in
+	// schmale Sektoren teilen, manche leuchten cyan, magenta oder orange; die Wellen verziehen sie
+	float az=atan(r.x,r.z)*52.;
+	float sid=floor(az);
+	float hz=hs(vec2(sid,3.7));
+	float lit=step(.58,hz)*smoothstep(.0,.35,fract(az))*smoothstep(1.,.65,fract(az));
+	float band=smoothstep(.015,.06,r.y)*smoothstep(.32,.12,r.y)*(.35+.65*vn(vec2(sid*1.7,r.y*22.)));
+	vec3 lc=hz>.93?vec3(1.,.55,.15):(hz>.84?vec3(1.,.2,.75):vec3(.2,.85,1.));
+	vec3 refl=sky*1.2+lc*lit*band*.75/max(fr*1.25,.05);
 	// Wasserkörper: tief dunkel, an Wellenkämmen etwas türkis durchscheinend
 	float crest=clamp(length(g)*1.6,0.,1.);
 	vec3 deep=mix(vec3(.0,.02,.045),vec3(.0,.09,.12),crest*.6);
