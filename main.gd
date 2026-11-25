@@ -11892,10 +11892,7 @@ func _fire_w(g: Dictionary, w: String, sup: bool) -> void:
 			_add_shot(g, false, true, 1.0, false, sup)
 			if sup:
 				_braid(shots[shots.size() - 1], 2)
-			if g.idx == 0:
-				if int(cfg.get("mcam", 1)) == 1 and _drop_roll():
-					_drop_mark(shots[shots.size() - 1])   # Raketenkamera zeigt das Ausklinken von der Seite
-				_mc_start(shots[shots.size() - 1])
+			# Raketenkamera gibt es nur noch bei der Mega-Lenkrakete (John)
 		"mine":
 			_drop_mines(g, sup)
 		"orbs":
@@ -19675,7 +19672,7 @@ func _ed_step(dt: float) -> bool:
 	var ts = lerpf(0.22, 1.6, w * w) if sh.out else lerpf(0.35, 1.0, u)
 	if mc.is_empty() or ed.was == "impact" or ed.was == "cine":
 		Engine.time_scale = ts
-		_pss(clampf(ts, 0.5, 1.0))
+		_pss(1.0 if ed.was == "party" else clampf(ts, 0.5, 1.0))   # Siegesfeier: Musik und Töne laufen normal weiter, nur das Bild spielt mit der Zeit (John)
 	# Wischer in Bewegungsrichtung auf dem Bildschirm
 	var mv: Vector3 = (s.p1 as Vector3) - (s.p0 as Vector3)
 	var wv: Vector3 = (f.rr * mv.x * m + f.uu * mv.y + f.fw * mv.z)
