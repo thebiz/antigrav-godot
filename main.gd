@@ -947,6 +947,7 @@ uniform float grn=.035;
 uniform int vm=0;   // Cockpit-Sicht: 0 normal, 1 Infrarot, 2 Gitter
 uniform float bo=0.;   // EMP gegen dich: etwas dunkler, Bildstörungen
 uniform float bst=0.;  // Boost: zusätzliche Bewegungsunschärfe
+uniform vec2 wbv=vec2(0.);   // Schnitt-Kamera: Wischer beim Reinreißen/Rausreißen (Richtung·Länge auf dem Bildschirm)
 uniform vec4 hr0=vec4(0.);uniform vec4 hr1=vec4(0.);uniform vec4 hr2=vec4(0.);   // Wärmebild: Bildbereiche der gegnerischen Schiffe
 uniform vec4 hr3=vec4(0.);   // Wärmebild: Bildbereich der eigenen Rakete (Düsen glühen weiß)
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
@@ -996,6 +997,12 @@ void fragment(){
 	else{ca+=.004*spd*e;for(int i=0;i<6;i++){float f=1.-float(i)*.2*mb;vec2 q=vec2(.5,.47)+cd*f;
 		col+=vec3(texture(scr,q-cd*ca).r,texture(scr,q).g,texture(scr,q+cd*ca).b);}
 	col/=6.;}
+	// Wischer der Schnitt-Kamera (wie Bewegungsunschärfe beim schnellen Schwenk im Actionschnitt)
+	if(dot(wbv,wbv)>.000004){
+		float jw=hg(floor(SCREEN_UV/SCREEN_PIXEL_SIZE));vec3 cw=vec3(0.);
+		for(int i=0;i<8;i++){cw+=texture(scr,uv+wbv*((float(i)+jw)/8.-.5)).rgb;}
+		col=cw/8.;
+	}
 	// schwarzer Kern und leuchtender Ring der Bombe
 	if(bomb){
 		float gp=max(gs,0.);
@@ -6821,9 +6828,8 @@ func _party_end() -> void:
 	for c in party.conf:
 		if is_instance_valid(c):
 			_qf(c)
-	if party.has("rt") and mc.is_empty():   # Speed-Ramp der Feier abgebrochen: Zeit und Ton wieder normal
-		Engine.time_scale = 1.0
-		AudioServer.playback_speed_scale = 1.0
+	if not ed.is_empty() and ed.was == "party":   # Feier abgebrochen: Schnitt-Kamera beenden, Zeit und Ton normal
+		_ed_stop()
 	party = {}
 	party_on = false
 	_dof_on(false)
@@ -7007,31 +7013,19 @@ func _party_live(dt: float) -> bool:
 		cam.fov = 52.0
 	else:
 		var t2 = t - 4.7
-		# Speed-Ramp auf der Kamerafahrt (John): die ganze Szene schießt los, bremst weich bis fast Stillstand,
-		# hält kurz in Zeitlupe (Konfetti, Blitze, Musik) und zieht dann wieder an – gemessen in echten Sekunden
-		var rdtp = clampf(dt / maxf(0.03, Engine.time_scale), 0.0, 0.1)
-		party.rt = float(party.get("rt", 0.0)) + rdtp
-		var prt: float = party.rt
-		var pts = 1.0
-		if prt < 0.6:
-			pts = 1.7
-		elif prt < 1.25:
-			var kd = (prt - 0.6) / 0.65
-			pts = lerpf(1.7, 0.12, kd * kd * (3.0 - 2.0 * kd))
-		elif prt < 2.5:
-			pts = 0.12
-		elif prt < 3.1:
-			var ka = (prt - 2.5) / 0.6
-			pts = lerpf(0.12, 1.45, ka * ka * (3.0 - 2.0 * ka))
-		elif prt < 3.8:
-			pts = lerpf(1.45, 1.0, (prt - 3.1) / 0.7)
-		if prt < 3.9 or not party.has("rdone"):
-			Engine.time_scale = pts
-			_pss(clampf(pts, 0.5, 1.0))
-			if prt >= 3.8:
-				party.rdone = true
-				Engine.time_scale = 1.0
-				AudioServer.playback_speed_scale = 1.0
+		# Schnitt-Kamera wie im Auto-Edit (John): kurze Einstellungen nah und tief um dein Schiff, Speed-Ramps für die
+		# ganze Szene, zum Schluss ein Push-in; danach geht die Fahrt um Ren ganz normal weiter
+		if not party.has("edd"):
+			party.edd = true
+			_ed_start("party", func():
+				var gs: Dictionary = ships[0]
+				if not is_instance_valid(gs.node):
+					return null
+				return [(gs.node as Node3D).global_position, T.sframe(float(gs.z), float(gs.lat))], 0.75, 5, 0.55, true)
+		if not ed.is_empty() and ed.was == "party":
+			_ed_step(dt)
+			party.fh = 1.0
+			return true
 		var a: float = -0.75 + t2 * 0.14
 		var R = 2.3 - 0.5 * clampf(t2 / (PARTY_T - 4.7), 0.0, 1.0)
 		cam.global_position = c + (-f.rr * cos(a) + f.fw * sin(a)) * R + f.uu * (0.8 + 0.12 * sin(t2 * 0.4))
@@ -18871,6 +18865,8 @@ func _heat_off() -> void:
 
 
 func _mc_end() -> void:
+	if not ed.is_empty() and ed.was == "impact":
+		_ed_stop()
 	if mc.is_empty():
 		return
 	if mc.has("ret") and is_instance_valid(mc.ret):
@@ -19220,6 +19216,101 @@ func _mc_lock(sh: Dictionary) -> void:
 		mc.frz_done = true
 
 
+# ---------------------------------------------------------------- Schnitt-Kamera wie im Actionschnitt (John, Vorlage Auto-Edit)
+# Kurze Einstellungen nah und tief am Schiff, Weitwinkel, gekippter Horizont; jede Einstellung: Reinreißen (schnell,
+# verwischt) – Gleiten in Zeitlupe – Rausreißen und Schnitt. Die ganze Szene folgt der Tempokurve. Läuft in echten Sekunden.
+var ed = {}
+# Einstellungen: von/bis (x = rechts, y = oben, z = vorn, im Rahmen des Schiffs), Blickpunkt, Neigung (°), Brennweite, Dauer
+const ED_SHOTS = [
+	{"p0": Vector3(1.7, 0.22, 3.3), "p1": Vector3(-1.5, 0.3, 2.5), "l": Vector3(0, 0.15, 0.2), "roll": 13.0, "fov": 72.0},
+	{"p0": Vector3(1.9, 0.2, -2.9), "p1": Vector3(-1.3, 0.38, -2.3), "l": Vector3(0, 0.2, -0.4), "roll": -15.0, "fov": 70.0},
+	{"p0": Vector3(1.35, 0.14, 1.9), "p1": Vector3(1.15, 0.2, -1.9), "l": Vector3(0, 0.12, 0.0), "roll": 9.0, "fov": 78.0},
+	{"p0": Vector3(0.3, 1.7, -2.2), "p1": Vector3(-0.2, 1.25, 2.1), "l": Vector3(0, 0.0, 0.3), "roll": -6.0, "fov": 66.0},
+	{"p0": Vector3(-2.3, 0.12, 2.1), "p1": Vector3(-1.4, 0.5, 2.7), "l": Vector3(0, 0.2, 0.1), "roll": -11.0, "fov": 72.0}]
+
+
+# was: "party" (Siegesfeier) oder "impact" (nach dem Raketeneinschlag); tg: Funktion → [Mitte, Rahmen]
+func _ed_start(was: String, tg: Callable, sc: float, n: int, dur: float, final: bool) -> void:
+	var order = range(ED_SHOTS.size())
+	order.shuffle()
+	var sl = []
+	for i in range(mini(n, order.size())):
+		sl.append({"s": ED_SHOTS[order[i]], "dur": dur, "out": true, "mir": 1.0 if randf() < 0.5 else -1.0})
+	if final:
+		# Schluss: langsamer Push-in von vorn, ohne Rausreißen – die Szene kommt auf Normaltempo
+		sl.append({"s": {"p0": Vector3(0.9, 0.65, 4.8), "p1": Vector3(0.5, 0.45, 2.7), "l": Vector3(0, 0.2, 0), "roll": 0.0, "fov": 60.0}, "dur": 1.3, "out": false, "mir": 1.0})
+	ed = {"was": was, "tg": tg, "sc": sc, "sl": sl, "i": 0, "u": 0.0, "pp": Vector3.ZERO}
+
+
+func _ed_stop() -> void:
+	if ed.is_empty():
+		return
+	ed = {}
+	if post != null:
+		_sp(post, "wbv", Vector2.ZERO)
+	if mc.is_empty():
+		Engine.time_scale = 1.0
+		AudioServer.playback_speed_scale = 1.0
+
+
+# true = die Schnitt-Kamera hat die Kamera gesetzt
+func _ed_step(dt: float) -> bool:
+	if ed.is_empty():
+		return false
+	var rdt = clampf(dt / maxf(0.03, Engine.time_scale), 0.0, 0.1)
+	var sh: Dictionary = ed.sl[ed.i]
+	ed.u = float(ed.u) + rdt / float(sh.dur)
+	if float(ed.u) >= 1.0:
+		ed.i = int(ed.i) + 1
+		ed.u = 0.0
+		if int(ed.i) >= (ed.sl as Array).size():
+			_ed_stop()
+			return false
+		sh = ed.sl[ed.i]
+	var u: float = ed.u
+	var e: float
+	var v: float
+	if sh.out:
+		var k = 0.86   # schnell an den Enden, langsam in der Mitte
+		e = u + k * sin(TAU * u) / TAU
+		v = 1.0 + k * cos(TAU * u)
+	else:
+		e = 1.0 - (1.0 - u) * (1.0 - u)
+		v = 2.0 * (1.0 - u)
+	var r = (ed.tg as Callable).call()
+	if r == null:
+		_ed_stop()
+		return false
+	var c: Vector3 = r[0]
+	var f = r[1]
+	var s: Dictionary = sh.s
+	var m: float = sh.mir
+	var sc: float = ed.sc
+	var lp: Vector3 = (s.p0 as Vector3).lerp(s.p1 as Vector3, e)
+	var pos: Vector3 = c + (f.rr * lp.x * m + f.uu * lp.y + f.fw * lp.z) * sc
+	var la: Vector3 = s.l
+	var look: Vector3 = c + (f.rr * la.x * m + f.uu * la.y + f.fw * la.z) * sc
+	cam.global_position = pos
+	cam.look_at(look, f.uu)
+	cam.rotate_object_local(Vector3(0, 0, 1), deg_to_rad(float(s.roll) * m))
+	cam.fov = float(s.fov)
+	# Tempo der ganzen Szene: beim Reißen schnell, beim Gleiten Zeitlupe
+	var w = clampf((v - 1.0) / 0.86, 0.0, 1.0)
+	var ts = lerpf(0.22, 1.6, w * w) if sh.out else lerpf(0.35, 1.0, u)
+	if mc.is_empty() or ed.was == "impact":
+		Engine.time_scale = ts
+		_pss(clampf(ts, 0.5, 1.0))
+	# Wischer in Bewegungsrichtung auf dem Bildschirm
+	var mv: Vector3 = (s.p1 as Vector3) - (s.p0 as Vector3)
+	var wv: Vector3 = (f.rr * mv.x * m + f.uu * mv.y + f.fw * mv.z)
+	var b: Basis = cam.global_transform.basis
+	var d2 = Vector2(wv.dot(b.x), -wv.dot(b.y))
+	var wstr = clampf((v - 1.25) / 0.6, 0.0, 1.0) * 0.06
+	if post != null:
+		_sp(post, "wbv", d2.normalized() * wstr if d2.length() > 0.001 else Vector2.ZERO)
+	return true
+
+
 func _mc_cam(dt: float) -> bool:
 	if mc.is_empty():
 		if hud.has("mcl"):   # nach Neustart übrig gebliebene Anzeige wegräumen
@@ -19266,6 +19357,16 @@ func _mc_cam(dt: float) -> bool:
 		# kurz vor dem Einschlag; nach dem Knall einen Moment eingefroren, dann schießt die Zeit über Normaltempo hoch
 		# und pendelt sich wieder ein
 		var slo = 1.0
+		# nach dem Knall: Schnitt-Kamera mit kurzen Einstellungen um die Explosion (nicht in Röhre/Tunnel – zu eng)
+		if mc.hold >= 0.0 and not ed.is_empty() and ed.was == "impact":
+			mc.hold -= rdt0
+			if mc.hold <= 0.0:
+				_ed_stop()
+				_mc_end()
+				return false
+			if _ed_step(dt):
+				_mcl_tick()
+				return true
 		if mc.hold < 0.0:
 			var dle = 0.0   # Rakete schon eingeschlagen: im Fast-Stillstand bleiben (kein Ruck auf volles Tempo)
 			var ctt = mc.get("ctg")
@@ -19277,6 +19378,14 @@ func _mc_cam(dt: float) -> bool:
 			slo = lerpf(0.1, 1.0, kr * kr)
 		else:
 			var pi = 2.8 - float(mc.hold)   # echte Sekunden seit dem Einschlag
+			var ctx = mc.get("ctg")
+			if pi >= 0.45 and not mc.has("edgo") and ctx != null and is_instance_valid(ctx.node) and not (T.pipe_k(float(ctx.z)) > 0.05 or T.in_tun(T.lz(float(ctx.z)), 3.0)):
+				mc.edgo = true
+				var cref = ctx
+				_ed_start("impact", func():
+					if not is_instance_valid(cref.node):
+						return null
+					return [(cref.node as Node3D).global_position, T.sframe(float(cref.z), float(cref.lat))], 5.2, 3, 0.62, false)
 			if pi < 0.45:
 				slo = 0.06
 			elif pi < 1.05:
@@ -21944,6 +22053,7 @@ func _soft_reset() -> bool:
 		paused_ui.queue_free()
 	paused_ui = null
 	_hull_update(null, false, 0.0)
+	_ed_stop()
 	# Wärmebild der Mega-Raketenkamera abbauen: sonst bleibt der magentafarbene Kennüberzug auf den Gegnern
 	# (Neustart mitten in der Raketenkamera → pinke Schiffe, John)
 	_heat_off()
