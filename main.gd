@@ -133,6 +133,11 @@ func _ready() -> void:
 		_start.call_deferred()
 	if OS.get_cmdline_user_args().has("--bench"):
 		bench_req = true
+	var shot_arg = false
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--shot="):
+			shot_arg = true
+	cine_pending = not cine_done and (not shot_arg or _ev("CINE") != "") and int(cfg.get("intro", 1)) == 1
 	if OS.get_cmdline_user_args().has("--free") and OS.get_environment("AG_RELOADED") == "":
 		free_ride = true
 	if pending_free:
@@ -9546,6 +9551,10 @@ func _rp_freeze(on: bool) -> void:
 
 
 func _input(ev: InputEvent) -> void:
+	if not cine.is_empty() and ((ev is InputEventScreenTouch and ev.pressed) or (ev is InputEventMouseButton and ev.pressed)):
+		get_viewport().set_input_as_handled()
+		_cine_end()   # Intro überspringen
+		return
 	if ev is InputEventKey and ev.pressed and not ev.echo and (ev.keycode == KEY_BACK or ev.keycode == KEY_ESCAPE):
 		get_viewport().set_input_as_handled()
 		_go_back()
@@ -16934,6 +16943,19 @@ func _process(delta: float) -> void:
 		hud.layer.visible = true
 		hud.res.text = rpf.get("res", "")
 		_replay_start()
+	if state == "menu" and cine_pending and warm_t < 0.0 and menu_t > 0.3 and not bench_req and not free_ride:
+		_cine_start()
+	if state == "menu" and not cine.is_empty():
+		_cine_step(dt)
+		if not cine.is_empty():
+			_lap_pos(cam.global_position.z)
+			_tunnel(dt)
+			_pose_all(dt)
+			_sound_update(dt)
+			_post_update(dt)
+			if _ev("CINESHOT") == "":
+				_shot()
+			return
 	if state == "menu":
 		menu_t += dt
 		_lap_pos(g.z)
@@ -16947,7 +16969,8 @@ func _process(delta: float) -> void:
 		cam.fov = 52.0
 		_sound_update(dt)
 		_post_update(dt)
-		_shot()
+		if _ev("CINESHOT") == "":
+			_shot()
 		return
 	if state == "lab":
 		_lab_step(dt)
@@ -19216,6 +19239,359 @@ func _mc_lock(sh: Dictionary) -> void:
 		mc.frz_done = true
 
 
+# ---------------------------------------------------------------- Kino-Intro beim App-Start (John: „Sicario“-Gefühl)
+# ~15 s: Kamera liegt am Kurvenrand, Grollen, der Pulk donnert vorbei (Beben, Tropfen auf der Linse), Vega friert schräg
+# in der Kurve ein (Comic-Karte mit Spruch), Speed-Ramp auf die Schiffsspitze, zwei schnelle Schnitte auf dich,
+# dann rasen alle davon und die Plasmastrahlen schreiben den Titel. Tippen überspringt.
+var cine = {}
+var cine_pending = false
+static var cine_done = false   # nur einmal pro App-Start
+const CINE_V = 30.0          # Tempo des Pulks (m/s Spielzeit)
+const CINE_ARR = 2.7         # nach so vielen Sekunden ist die Spitze an der Kamera
+const CINE_LANE = [0.55, -0.9, 1.3, -1.6]   # Spuren: du, Vega (Spitze), Kato, Mira
+const CINE_GAP = [9.0, 0.0, 5.0, 14.0]      # Abstand hinter der Spitze
+
+
+# frei von Tunnel, Röhre und See zwischen z0 und z1?
+func _cine_clear(z0: float, z1: float) -> bool:
+	var z = z0
+	while z <= z1:
+		var lz = T.lz(z)
+		if T.in_tun(lz, 4.0) or T.in_water(lz, 8.0) or T.pipe_k(z) > 0.001:
+			return false
+		z += 5.0
+	return true
+
+
+# schärfste Kurve, vor der 90 m und hinter der 130 m frei sind (der Pulk braucht Anlauf und Auslauf)
+func _cine_find_curve() -> Array:
+	var best = -1.0
+	var bz = 60.0
+	var bs = 1.0
+	var z = 0.0
+	while z < T.LAP:
+		if _cine_clear(z - 90.0, z + 130.0):
+			var a: Vector3 = T.frame(z - 12.0).fw
+			var b: Vector3 = T.frame(z + 12.0).fw
+			var tn = a.angle_to(b)
+			if tn > best:
+				best = tn
+				bz = z
+				var sg = signf(a.cross(b).dot(T.frame(z).uu))
+				bs = -sg if sg != 0.0 else 1.0
+		z += 3.0
+	return [bz, bs]
+
+
+func _cine_start() -> void:
+	cine_pending = false
+	cine_done = true
+	var cv = _cine_find_curve()
+	var zc: float = cv[0]
+	var outs: float = cv[1]   # Außenseite der Kurve (Vorzeichen der Querlage)
+	var save = []
+	for o in ships:
+		save.append({"z": o.z, "lat": o.lat, "spd": o.spd, "psi": o.psi, "vpsi": o.vpsi, "u": o.get("u", 0.0), "boost": o.get("boost", 0.0), "vis": (o.node as Node3D).visible})
+	for i in range(ships.size()):
+		var o: Dictionary = ships[i]
+		o.z = zc - CINE_V * CINE_ARR - float(CINE_GAP[i % 4])
+		o.lat = float(CINE_LANE[i % 4]) * 0.75 - outs * 0.3
+		o.spd = 24.0
+		o.psi = 0.0
+		o.vpsi = 0.0
+		o.boost = 1.0 if i == 1 else 0.4
+		(o.node as Node3D).visible = true
+	var cl = CanvasLayer.new()
+	cl.layer = 25
+	add_child(cl)
+	var root = Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cl.add_child(root)
+	# Tropfen/Dreck auf der Linse: dieselbe Wirkung wie die nasse Scheibe im Rennen
+	var dirt = ColorRect.new()
+	dirt.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dirt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if hud.has("drops") and is_instance_valid(hud.drops):
+		dirt.material = (hud.drops.material as ShaderMaterial).duplicate()
+	dirt.visible = false
+	root.add_child(dirt)
+	# Comic-Karte für den Fahrer im Freeze
+	var card = Control.new()
+	card.position = Vector2(40, 900)
+	card.size = Vector2(640, 380)
+	card.modulate = Color(1, 1, 1, 0)
+	root.add_child(card)
+	var pic = TextureRect.new()
+	pic.texture = _cm_img("vega_0")
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	pic.size = Vector2(300, 380)
+	card.add_child(pic)
+	var frame = ReferenceRect.new()
+	frame.border_color = Color(0.66, 0.36, 1.0)
+	frame.border_width = 4.0
+	frame.editor_only = false
+	frame.size = Vector2(300, 380)
+	card.add_child(frame)
+	var nm = _lbl("VEGA", 64)
+	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	nm.add_theme_color_override("font_color", Color(0.78, 0.55, 1.0))
+	nm.position = Vector2(320, 70)
+	card.add_child(nm)
+	var sub = _lbl("THE CHAMPION", 26)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	sub.modulate = Color(1, 1, 1, 0.7)
+	sub.position = Vector2(324, 150)
+	card.add_child(sub)
+	var line = _lbl("„The crown stays\nwith me.“", 34)
+	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	line.position = Vector2(322, 210)
+	card.add_child(line)
+	# Titel: dieselbe Stelle und Größe wie im Menü, Buchstaben einzeln – die Plasmastrahlen schreiben sie
+	var tl = []
+	var word = "ANTIGRAV"
+	var fnt: Font = (ui.title[0] as Label).get_theme_font("font")
+	var fs = 96
+	var wtot = 0.0
+	for ch in word:
+		wtot += fnt.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var x0 = 360.0 - wtot * 0.5
+	for ch in word:
+		var w = fnt.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var l = _lbl(ch, fs)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		l.add_theme_color_override("font_color", Color(0.75, 0.95, 1.0))
+		l.position = Vector2(x0, 170)
+		l.modulate = Color(1, 1, 1, 0)
+		root.add_child(l)
+		tl.append([l, x0 + w * 0.5])
+		x0 += w
+	# vier Plasmastrahlen in den Farben der Fahrer
+	var jets = []
+	for jc in [Color(0.95, 0.15, 0.2), Color(0.66, 0.36, 1.0), Color(1.0, 0.5, 0.15), Color(0.2, 0.95, 1.0)]:
+		var j = ColorRect.new()
+		j.color = Color(jc.r * 2.2, jc.g * 2.2, jc.b * 2.2, 0.0)
+		j.size = Vector2(220, 10)
+		j.pivot_offset = Vector2(220, 5.0)
+		j.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var cm = CanvasItemMaterial.new()
+		cm.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+		j.material = cm
+		root.add_child(j)
+		jets.append(j)
+	var black = ColorRect.new()
+	black.color = Color(0, 0, 0, 1)
+	black.set_anchors_preset(Control.PRESET_FULL_RECT)
+	black.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(black)
+	var hint = _lbl("tap to skip", 20)
+	hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	hint.offset_top = -60
+	hint.modulate = Color(1, 1, 1, 0.35)
+	root.add_child(hint)
+	ui.root.visible = false
+	cine = {"tr": 0.0, "zc": zc, "outs": outs, "save": save, "cl": cl, "dirt": dirt, "card": card, "tl": tl, "jets": jets, "black": black,
+		"passed": {}, "ev": {}, "wet": 0.0, "fog": 0.0, "sh": 0.0, "oa": 0.0}
+
+
+func _cine_end() -> void:
+	if cine.is_empty():
+		return
+	if not ed.is_empty() and ed.was == "cine":
+		ed = {}
+		if post != null:
+			_sp(post, "wbv", Vector2.ZERO)
+	var sv: Array = cine.save
+	for i in range(mini(sv.size(), ships.size())):
+		var o: Dictionary = ships[i]
+		var d: Dictionary = sv[i]
+		o.z = d.z
+		o.lat = d.lat
+		o.spd = d.spd
+		o.psi = d.psi
+		o.vpsi = d.vpsi
+		o.u = d.u
+		o.boost = d.boost
+		(o.node as Node3D).visible = d.vis
+	if is_instance_valid(cine.cl):
+		(cine.cl as Node).queue_free()
+	cine = {}
+	Engine.time_scale = 1.0
+	AudioServer.playback_speed_scale = 1.0
+	ui.root.visible = true
+	menu_t = 0.0
+	if _ev("CINESHOT") != "":
+		get_tree().create_timer(1.0).timeout.connect(func():
+			get_viewport().get_texture().get_image().save_png("/home/claude/work/cmp/cine_menu.png")
+			get_tree().quit())
+
+
+# einmalige Ereignisse auf der Zeitachse
+func _cine_once(k: String, at: float) -> bool:
+	if float(cine.tr) >= at and not (cine.ev as Dictionary).has(k):
+		cine.ev[k] = true
+		return true
+	return false
+
+
+func _cine_step(dt: float) -> void:
+	var ts0 = maxf(0.03, Engine.time_scale)
+	var rdt = clampf(dt / ts0, 0.0, 0.1)
+	cine.tr = float(cine.tr) + rdt
+	var tr: float = cine.tr
+	var zc: float = cine.zc
+	var outs: float = cine.outs
+	# Pulk fährt mit Spielzeit (Zeitlupe bremst ihn mit)
+	for i in range(ships.size()):
+		var o: Dictionary = ships[i]
+		o.z = float(o.z) + CINE_V * dt
+		o.lat = float(CINE_LANE[i % 4]) * 0.75 - outs * 0.3 + 0.2 * sin(float(o.z) * 0.05 + i)
+		o.spd = 24.0
+		o.u = -outs * 0.7 if absf(float(o.z) - zc) < 80.0 else 0.0
+		o.vpsi = 0.06 * sin(float(o.z) * 0.05 + i)
+	var lead: Dictionary = ships[1 if ships.size() > 1 else 0]
+	# --- Tempo der ganzen Szene
+	var ts = 1.0
+	if tr >= 4.0 and tr < 4.35:
+		ts = lerpf(1.0, 0.035, smoothstep(4.0, 4.35, tr))
+	elif tr >= 4.35 and tr < 7.6:
+		ts = 0.035
+	elif tr >= 7.6 and tr < 9.0:
+		var ku = clampf((tr - 7.6) / 0.35, 0.0, 1.0)
+		ts = lerpf(0.035, 1.8, ku * ku * (3.0 - 2.0 * ku)) if tr < 7.95 else lerpf(1.8, 1.0, (tr - 7.95) / 1.05)
+	if ed.is_empty() or ed.was != "cine":
+		Engine.time_scale = ts
+		_pss(clampf(ts * 1.4, 0.5, 1.0))
+	# --- Schwarzblende rein/raus
+	var bl = 1.0 - smoothstep(0.0, 0.7, tr)
+	if tr > 14.0:
+		bl = 0.0
+	(cine.black as ColorRect).color.a = bl
+	# --- Kamera
+	var f0 = T.sframe(zc, outs * (T.TW - 0.35))
+	var shk = 0.0
+	if tr < 4.35:
+		# 1+2: Kamera liegt am Kurvenrand, schaut dem Pulk entgegen und dreht mit, wenn er vorbeidonnert
+		var cp: Vector3 = f0.c + f0.uu * 0.3
+		var dl = zc - float(lead.z)
+		var tgt: Vector3 = (lead.node as Node3D).global_position if dl < 60.0 else (T.frame(zc - 60.0).c + T.frame(zc - 60.0).uu * 0.6)
+		if dl < 60.0:
+			var lk = smoothstep(60.0, 8.0, dl)
+			tgt = tgt.lerp(T.frame(zc - 60.0).c + T.frame(zc - 60.0).uu * 0.6, 1.0 - lk)
+		shk = smoothstep(80.0, 3.0, absf(dl)) * 0.09 + smoothstep(0.0, 2.6, tr) * 0.012
+		cam.global_position = cp
+		cam.look_at(tgt, f0.uu)
+		cam.rotate_object_local(Vector3(0, 0, 1), deg_to_rad(-7.0 * outs))
+		cam.fov = 74.0
+		if _cine_once("rumble", 0.25):
+			_snd("start", 2.0)
+	elif tr < 7.6:
+		# 3: Freeze – Vega schräg in der Kurve, die Kamera schleicht in Echtzeit um sie herum
+		cine.oa = float(cine.oa) + rdt
+		var P: Vector3 = (lead.node as Node3D).global_position
+		var fl = T.sframe(float(lead.z), float(lead.lat))
+		var a = lerpf(-0.9, 0.5, float(cine.oa) / 3.2) * outs
+		var cp2: Vector3 = P + fl.fw * cos(a) * 2.9 + fl.rr * sin(a) * 2.9 + fl.uu * (0.35 + 0.15 * float(cine.oa) / 3.2)
+		cam.global_position = cp2
+		cam.look_at(P + fl.uu * 0.15, fl.uu)
+		cam.rotate_object_local(Vector3(0, 0, 1), deg_to_rad(9.0 * outs))
+		cam.fov = 62.0
+		if _cine_once("bass", 4.3):
+			_snd("ko_boom", 2.0, 0.7)
+		if _cine_once("line", 5.0):
+			_snd("cv_vega_start", 2.0)
+		var ca = smoothstep(4.9, 5.2, tr) * (1.0 - smoothstep(7.2, 7.5, tr))
+		(cine.card as Control).modulate.a = ca
+		(cine.card as Control).position.x = 40.0 + (1.0 - smoothstep(4.9, 5.3, tr)) * -120.0
+	elif tr < 9.0:
+		(cine.card as Control).modulate.a = 0.0
+		# 4: Speed-Ramp – Kamera vorn an der Schiffsspitze von Vega, die Welt schießt los
+		var P2: Vector3 = (lead.node as Node3D).global_position
+		var fl2 = T.sframe(float(lead.z), float(lead.lat))
+		var up2: Vector3 = (lead.node as Node3D).global_transform.basis.y.normalized()
+		cam.global_position = P2 + fl2.fw * 1.0 + up2 * 0.42
+		var fa = T.sframe(float(lead.z) + 25.0, float(lead.lat))
+		cam.look_at(fa.c + fa.uu * 0.5, up2)
+		cam.fov = 82.0
+		shk = 0.02
+		if _cine_once("whoosh", 7.6):
+			_snd("cm_whoosh", 3.0)
+			_snd("boost", 0.0)
+	elif tr < 10.5:
+		# 5: zwei schnelle Schnitte auf dich (Ren)
+		if _cine_once("edit", 9.0):
+			_ed_start("cine", func():
+				var gs: Dictionary = ships[0]
+				if not is_instance_valid(gs.node):
+					return null
+				return [(gs.node as Node3D).global_position, T.sframe(float(gs.z), float(gs.lat))], 0.8, 2, 0.7, false)
+		if not _ed_step(dt):
+			pass
+	else:
+		if not ed.is_empty() and ed.was == "cine":
+			_ed_stop()
+		# 6: Abgang – Kamera tief hinter dem Pulk, alle rasen davon, die Plasmastrahlen schreiben den Titel
+		if _cine_once("regroup", 10.5):
+			for i in range(ships.size()):   # nach dem Schnitt: Pulk zurück an den Kurveneingang, vor ihm liegt freie Strecke
+				ships[i].z = zc - 15.0 - float(CINE_GAP[i % 4])
+		var zb = float(ships[0].z) - 10.0 - (tr - 10.5) * 6.0
+		var fb = T.sframe(zb, 0.0)
+		cam.global_position = fb.c + fb.uu * 0.9
+		var fa2 = T.sframe(zb + 60.0, 0.0)
+		cam.look_at(fa2.c + fa2.uu * 2.2, fb.uu)
+		cam.fov = 66.0
+		var tk = clampf((tr - 11.0) / 2.0, 0.0, 1.0)
+		var jj = 0
+		for j in cine.jets:
+			var jk = clampf(tk * 1.25 - jj * 0.08, 0.0, 1.0)
+			var jx = lerpf(-160.0, 880.0, jk)
+			var jy = 170.0 + 22.0 + jj * 17.0 + sin(jk * 9.0 + jj) * 10.0
+			(j as ColorRect).position = Vector2(jx - 220.0, jy)
+			(j as ColorRect).color.a = 0.9 * (1.0 - smoothstep(0.85, 1.0, jk)) * (1.0 if jk > 0.001 else 0.0)
+			jj += 1
+		var lead_x = lerpf(-160.0, 880.0, tk * 1.25)
+		for e in cine.tl:
+			var lb: Label = e[0]
+			var on = smoothstep(float(e[1]) - 20.0, float(e[1]) + 40.0, lead_x)
+			lb.modulate = Color(1.0 + 2.0 * (1.0 - on) * on * 4.0, 1.0 + 1.5 * (1.0 - on) * on * 4.0, 1.0 + 2.5 * (1.0 - on) * on * 4.0, on)
+		if _cine_once("riser", 11.0):
+			_snd("ignite", 2.0)
+		if _cine_once("stamp", 13.2):
+			_snd("cm_stamp", 1.0)
+	# --- Kamerawackeln (Boden bebt)
+	cine.sh = lerpf(float(cine.sh), shk, 1.0 - exp(-rdt * 10.0))
+	if float(cine.sh) > 0.001:
+		var tt = Time.get_ticks_msec() / 1000.0
+		cam.global_position += Vector3(sin(tt * 61.0), sin(tt * 47.0 + 1.3), sin(tt * 53.0 + 2.1)) * float(cine.sh)
+		cam.rotate_object_local(Vector3(0, 0, 1), sin(tt * 37.0) * float(cine.sh) * 0.25)
+	# --- Vorbeiflug: Ton, Beben, Dreck auf der Linse
+	if tr < 4.4:
+		for i in range(ships.size()):
+			var o2: Dictionary = ships[i]
+			if float(o2.z) > zc - 2.0 and not (cine.passed as Dictionary).has(i):
+				cine.passed[i] = true
+				_snd("pass", 3.0, randf_range(0.9, 1.1), (o2.node as Node3D).global_position)
+				_vib(60, 0.6)
+				cine.wet = minf(1.0, float(cine.wet) + 0.45)
+				cine.fog = minf(0.3, float(cine.fog) + 0.12)
+	cine.wet = move_toward(float(cine.wet), 0.0, rdt * (0.05 if tr < 9.0 else 0.6))
+	cine.fog = move_toward(float(cine.fog), 0.0, rdt * 1.2)
+	var dr: ColorRect = cine.dirt
+	dr.visible = float(cine.wet) > 0.01 or float(cine.fog) > 0.01
+	if dr.visible and dr.material != null:
+		_sp(dr.material, "wet", float(cine.wet))
+		_sp(dr.material, "fog", float(cine.fog))
+	if _ev("CINESHOT") != "":
+		# nur zum Testen: Bilder zu festen Zeitpunkten, danach beenden
+		for st in _ev("CINESHOT").split(","):
+			if _cine_once("shot" + st, float(st)):
+				get_viewport().get_texture().get_image().save_png("/home/claude/work/cmp/cine_%s.png" % st)
+				print("CINE t=", st, " ts=", Engine.time_scale, " zc=", zc, " outs=", outs, " lead=", lead.z)
+	if tr > 14.6:
+		_cine_end()
+
+
 # ---------------------------------------------------------------- Schnitt-Kamera wie im Actionschnitt (John, Vorlage Auto-Edit)
 # Kurze Einstellungen nah und tief am Schiff, Weitwinkel, gekippter Horizont; jede Einstellung: Reinreißen (schnell,
 # verwischt) – Gleiten in Zeitlupe – Rausreißen und Schnitt. Die ganze Szene folgt der Tempokurve. Läuft in echten Sekunden.
@@ -19297,7 +19673,7 @@ func _ed_step(dt: float) -> bool:
 	# Tempo der ganzen Szene: beim Reißen schnell, beim Gleiten Zeitlupe
 	var w = clampf((v - 1.0) / 0.86, 0.0, 1.0)
 	var ts = lerpf(0.22, 1.6, w * w) if sh.out else lerpf(0.35, 1.0, u)
-	if mc.is_empty() or ed.was == "impact":
+	if mc.is_empty() or ed.was == "impact" or ed.was == "cine":
 		Engine.time_scale = ts
 		_pss(clampf(ts, 0.5, 1.0))
 	# Wischer in Bewegungsrichtung auf dem Bildschirm
