@@ -57,7 +57,7 @@ var bld_mm: MultiMesh
 var cam: Camera3D
 var ships: Array = []  # Zustand je Gleiter (Dictionary), [0] = du
 var state = "menu"
-var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1, "tmega": 0, "fblur": 1, "osong": "", "osongn": "", "duck": 0.5}
+var cfg = {"pads": 0, "ship": 0, "speed": 1.0, "gfx": 2, "glow": 0.5, "neon": 0.8, "vol": 0.9, "ai": 1.05, "look": 0, "res": 0.85, "fps": 1, "fpsv": 0, "cap": 0, "perf": 0, "pname": "", "tips": 1, "tseen": "", "live": 0, "comic": 1, "hud": 2, "ctrl": 1, "music": 0.6, "voice": 1.0, "vib": 1, "kcam": 0, "mcam": 1, "view": 0, "vmode": 0, "trk": 1, "tmega": 0, "fblur": 1, "osong": "", "osongn": "", "duck": 0.5}
 var neon_mats = []  # [Material, Grundhelligkeit]
 var snd = {}
 var loops = {}
@@ -1404,6 +1404,9 @@ func _load_cfg() -> void:
 			cfg[k] = c.get_value("s", k, cfg[k])
 	cfg.ship = clampi(int(cfg.ship), 0, SHIPS.size() - 1)
 	cfg.gfx = clampi(int(cfg.gfx), 0, 2)
+	if int(cfg.get("fpsv", 0)) == 0:   # FPS-Anzeige einmalig einschalten (John), danach gilt der Schalter in den Einstellungen
+		cfg.fps = 1
+		cfg.fpsv = 1
 
 
 func _save_cfg() -> void:
@@ -6818,6 +6821,9 @@ func _party_end() -> void:
 	for c in party.conf:
 		if is_instance_valid(c):
 			_qf(c)
+	if party.has("rt") and mc.is_empty():   # Speed-Ramp der Feier abgebrochen: Zeit und Ton wieder normal
+		Engine.time_scale = 1.0
+		AudioServer.playback_speed_scale = 1.0
 	party = {}
 	party_on = false
 	_dof_on(false)
@@ -7001,6 +7007,31 @@ func _party_live(dt: float) -> bool:
 		cam.fov = 52.0
 	else:
 		var t2 = t - 4.7
+		# Speed-Ramp auf der Kamerafahrt (John): die ganze Szene schießt los, bremst weich bis fast Stillstand,
+		# hält kurz in Zeitlupe (Konfetti, Blitze, Musik) und zieht dann wieder an – gemessen in echten Sekunden
+		var rdtp = clampf(dt / maxf(0.03, Engine.time_scale), 0.0, 0.1)
+		party.rt = float(party.get("rt", 0.0)) + rdtp
+		var prt: float = party.rt
+		var pts = 1.0
+		if prt < 0.6:
+			pts = 1.7
+		elif prt < 1.25:
+			var kd = (prt - 0.6) / 0.65
+			pts = lerpf(1.7, 0.12, kd * kd * (3.0 - 2.0 * kd))
+		elif prt < 2.5:
+			pts = 0.12
+		elif prt < 3.1:
+			var ka = (prt - 2.5) / 0.6
+			pts = lerpf(0.12, 1.45, ka * ka * (3.0 - 2.0 * ka))
+		elif prt < 3.8:
+			pts = lerpf(1.45, 1.0, (prt - 3.1) / 0.7)
+		if prt < 3.9 or not party.has("rdone"):
+			Engine.time_scale = pts
+			_pss(clampf(pts, 0.5, 1.0))
+			if prt >= 3.8:
+				party.rdone = true
+				Engine.time_scale = 1.0
+				AudioServer.playback_speed_scale = 1.0
 		var a: float = -0.75 + t2 * 0.14
 		var R = 2.3 - 0.5 * clampf(t2 / (PARTY_T - 4.7), 0.0, 1.0)
 		cam.global_position = c + (-f.rr * cos(a) + f.fw * sin(a)) * R + f.uu * (0.8 + 0.12 * sin(t2 * 0.4))
@@ -9141,10 +9172,11 @@ func _menu() -> void:
 	var fl = CanvasLayer.new()
 	fl.layer = 9
 	add_child(fl)
-	ui.fps = _lbl("", 20)
-	ui.fps.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	ui.fps.position = Vector2(24, 24)
-	ui.fps.modulate = Color(1, 1, 1, 0.55)
+	ui.fps = _lbl("", 17)
+	ui.fps.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ui.fps.position = Vector2(0, 2)   # ganz oben, mittig über allem
+	ui.fps.size = Vector2(720, 22)
+	ui.fps.modulate = Color(1, 1, 1, 0.7)
 	ui.fps.visible = false
 	fl.add_child(ui.fps)
 	hud.layer.visible = false
@@ -16034,7 +16066,7 @@ func _measure(delta: float) -> void:
 	fps_t -= delta
 	if fps_t <= 0.0:
 		fps_t = 0.5
-		ui.fps.text = "%d fps · gpu %.1f · cpu %.1f ms" % [Engine.get_frames_per_second(), gpu_ms, cpu_ms]
+		ui.fps.text = "%d fps · GPU %.1f ms" % [Engine.get_frames_per_second(), gpu_ms]
 
 
 func _pev(k: String) -> void:
@@ -19230,8 +19262,28 @@ func _mc_cam(dt: float) -> bool:
 	if mc.has("ci"):
 		var rdt0 = dt / maxf(0.05, Engine.time_scale)
 		mc.ci = float(mc.ci) + rdt0   # echte Sekunden seit dem Schnitt
-		# vor dem Einschlag Zeitlupe, nach dem Einschlag gegen Ende sanft zurück auf Normaltempo
-		var slo = 0.3 if mc.hold < 0.0 else lerpf(0.3, 1.0, clampf((0.8 - float(mc.hold)) / 0.8, 0.0, 1.0))
+		# Speed-Ramp wie im Actionfilm (John): beim Schnitt volles Tempo, dann weich abbremsen bis fast Stillstand
+		# kurz vor dem Einschlag; nach dem Knall einen Moment eingefroren, dann schießt die Zeit über Normaltempo hoch
+		# und pendelt sich wieder ein
+		var slo = 1.0
+		if mc.hold < 0.0:
+			var dle = 0.0   # Rakete schon eingeschlagen: im Fast-Stillstand bleiben (kein Ruck auf volles Tempo)
+			var ctt = mc.get("ctg")
+			if shots.has(sh) and ctt != null:
+				dle = fposmod(float(ctt.z) - float(sh.z), T.LAP)
+			if not mc.has("dcut") and dle > 0.0:
+				mc.dcut = maxf(dle, 6.0)   # Abstand beim Schnitt = volles Tempo
+			var kr = smoothstep(1.0, float(mc.get("dcut", 6.0)), dle)
+			slo = lerpf(0.1, 1.0, kr * kr)
+		else:
+			var pi = 2.8 - float(mc.hold)   # echte Sekunden seit dem Einschlag
+			if pi < 0.45:
+				slo = 0.06
+			elif pi < 1.05:
+				var ku = (pi - 0.45) / 0.6
+				slo = lerpf(0.06, 1.35, ku * ku * (3.0 - 2.0 * ku))
+			else:
+				slo = lerpf(1.35, 1.0, clampf((pi - 1.05) / 0.9, 0.0, 1.0))
 		Engine.time_scale = slo
 		_pss(clampf(slo * 1.5, 0.5, 1.0))
 		var ct = mc.get("ctg")
