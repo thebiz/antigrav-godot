@@ -2116,12 +2116,15 @@ uniform float pr=%f;
 uniform float z0=%f;
 uniform float z1=%f;
 uniform float nf=0.;   // Einschlag-Wiederholung: Ringe und Leuchtbahnen nahe der Kamera ausblenden
+uniform vec3 rp=vec3(0.,-9999.,0.);uniform float rt=99.;   // Rettungskapsel bricht durch das Energiefeld oben
+varying vec3 wp;
 // Bebenwelle (wie auf der Fahrbahn): läuft als glühender Ring durch die Röhre und hebt die Wand rundum an
 uniform float qz=-1000.;uniform float qs=0.;uniform float qz2=-1000.;uniform float qs2=0.;uniform vec3 qc=vec3(1.,.42,.08);uniform float qg=1.;
 varying float qh;
 float qw(float d,float s){return s*(1.6*exp(-pow(abs(d/2.6),2.))-.5*exp(-pow(abs((d+6.)/2.6),2.))+.22*exp(-pow(abs((d+12.)/2.4),2.)));}
 float quake(float z){return qw(z-qz,qs)+qw(qz2-z,qs2);}
-void vertex(){float wz=(MODEL_MATRIX*vec4(VERTEX,1.)).z;qh=quake(wz);VERTEX+=NORMAL*qh;}
+void vertex(){wp=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;float wz=wp.z;qh=quake(wz);VERTEX+=NORMAL*qh;}
+float hd(vec2 p){p=abs(p);return max(dot(p,vec2(.5,.8660254)),p.x);}
 void fragment(){
 	float x=UV.x,z=UV.y;
 	float ang=x/pr;                 // Winkel um die Röhre, 0 = Boden
@@ -2144,8 +2147,28 @@ void fragment(){
 	c+=vec3(.3,.9,1.)*chev*1.2;
 	float cr=max(qh,0.)/max(max(qs,qs2),.01);
 	c+=qc*pow(cr,1.5)*1.8*step(.01,qs+qs2)*qg;
+	float al=min(1.,mix(.88,.55,1.-bot)+cr*.5*step(.01,qs+qs2));     // oben durchscheinend: man sieht die Stadt durch die Decke
+	// Notluke ganz oben: Wabenfeld; reißt auf, wenn eine Rettungskapsel durchschießt
+	float dt0=(3.14159-abs(ang))*pr;
+	float band=smoothstep(.46,.3,dt0);
+	if(band>0.){
+		vec2 qh2=vec2(dt0*sign(ang),z)*4.5;vec2 r=vec2(1.,1.7320508),h=r*.5;
+		vec2 a=mod(qh2,r)-h,b=mod(qh2-h,r)-h;vec2 g=dot(a,a)<dot(b,b)?a:b;
+		float rnd=fract(sin(dot(qh2-g,vec2(12.9898,78.233)))*43758.5453);
+		float sh=.5+.5*sin(TIME*2.2+rnd*6.283+z*.6);
+		float e=smoothstep(.38,.48,hd(g));
+		c=mix(c,vec3(.2,.75,1.)*(e*(.5+.7*sh)+.06),band);
+		al=mix(al,.25+e*.6,band);
+		float d=distance(wp,rp);
+		float op=rt<1.3?sin(clamp(rt/1.3,0.,1.)*3.14159):0.;
+		float hole=.75*op;
+		float rim=exp(-pow((d-hole)/.07,2.))*op*3.;
+		float wave=exp(-pow((d-rt*4.)/.18,2.))*max(0.,1.-rt/1.1)*2.2;
+		c+=vec3(.75,.95,1.)*(rim+wave)*band;
+		al=max(al*step(hole,d),min(1.,(rim+wave)*band));
+	}
 	ALBEDO=c;
-	ALPHA=min(1.,mix(.88,.55,1.-bot)+cr*.5*step(.01,qs+qs2));     // oben durchscheinend: man sieht die Stadt durch die Decke
+	ALPHA=al;
 }""" % [T.PR, pz0, pz1])
 		# Ränder der Halbröhre an den Enden (wo noch keine geschlossene Röhre ist)
 		for side in [-1.0, 1.0]:
@@ -2421,6 +2444,12 @@ void fragment(){
 						ub *= sg
 						v0 = absf(-am + 2.0 * am * i / na) / am
 						v1 = absf(-am + 2.0 * am * (i + 1) / na) / am
+					if i == na / 2 - 1 or i == na / 2:
+						# Notluke: in der Deckenmitte ein Energiefeld statt Blech (dort schießen Rettungskapseln durch)
+						var e0 = R * (-am + 2.0 * am * i / na)
+						var e1 = R * (-am + 2.0 * am * (i + 1) / na)
+						_quad(_st("efield"), pr[i][0], ring[i][0], ring[i + 1][0], pr[i + 1][0], ring[i][1], Vector2(e0, z2 - 1.0), Vector2(e0, z2), Vector2(e1, z2), Vector2(e1, z2 - 1.0))
+						continue
 					_quad(_st("tube"), pr[i][0], ring[i][0], ring[i + 1][0], pr[i + 1][0], ring[i][1], Vector2(ua, v0), Vector2(ub, v0), Vector2(ub, v1), Vector2(ua, v1))
 			pr = ring
 			z2 += 1.0
@@ -2431,7 +2460,10 @@ void fragment(){
 			zt += 2.86   # weniger Ringe, damit man die Tunnelwände sieht
 			ti += 1
 		if not _jungle():
-			_strip("tlight", tu[0], tu[1], -0.06, 0.06, 0.4 + R - 0.04, 0.4 + R - 0.04)
+			# Lichtleisten jetzt links und rechts der Notluke
+			var ea = 2.0 * am / na
+			for sd in [-1.0, 1.0]:
+				_strip("tlight", tu[0], tu[1], sd * R * sin(ea * 1.02), sd * R * sin(ea * 1.12), 0.4 + R * cos(ea * 1.02) - 0.03, 0.4 + R * cos(ea * 1.12) - 0.03)
 	# Materialien zusammenstellen
 	mats["road"] = _shader_mat(_nz("""
 shader_type spatial;
@@ -2515,6 +2547,7 @@ void fragment(){
 	mats["postL"] = _neon(CY, 2.2)
 	mats["postR"] = _neon(MG, 2.2)
 	mats["tlight"] = _neon(Color(0.9, 0.95, 1.0), 4.0)
+	mats["efield"] = _shader_mat(EF_SHADER)
 	mats["board0"] = _neon(Color(0.8, 0.8, 0.85) if _noir() else Color(0.1, 0.4, 1.0), 2.2)
 	mats["board1"] = _neon(OR if _noir() else Color(1.0, 0.2, 0.5), 2.2)
 	mats["board2"] = _neon(Color(0.35, 0.35, 0.37) if _noir() else Color(1.0, 0.7, 0.1), 2.2)
@@ -9506,6 +9539,7 @@ func _rp_rebuild_fx() -> void:
 		_qf(e.l)
 	zaps.clear()
 	fxs.clear()
+	_ej_clear()
 	var F = rec
 	var j = rp.i
 	fx_gen += 1
@@ -10972,6 +11006,7 @@ func _dmg(o: Dictionary, a: float, src := -1, kind := "", sup := false) -> void:
 		o.out = true
 		o.outT = race_t
 		_explode(o.z, o.lat, true)
+		_eject(o, o.z, o.lat)   # Rettungskapsel: der Fahrer kommt heil raus
 		_shatter(o)
 		(o.node as Node3D).visible = false
 		if (o.node as Node3D).has_meta("eng"):
@@ -14506,6 +14541,7 @@ func _replay_start() -> void:
 		_qf(e.l)
 	zaps.clear()
 	_bwaves_clear()
+	_ej_clear()
 	if quake != null:
 		_qf(quake.n)
 		quake = null
@@ -14636,6 +14672,8 @@ func _replay(dt: float) -> void:
 					_snd(ev[1], ev[2])
 				"shat":
 					_shatter(ships[ev[1]], ev[2])
+				"ej":
+					_eject(ships[ev[1]], ev[2], ev[3], true)
 	rp_ev = false
 	_debris_update(dt)
 	if rp.t > F[F.size() - 1].t + 0.4:
@@ -15181,6 +15219,7 @@ func _warm_step(delta: float) -> void:
 		_qf(e.l)
 	zaps.clear()
 	fxs.clear()
+	_ej_clear()
 	shots.clear()
 	mines.clear()
 	g2.shield = 0.0
@@ -16935,6 +16974,7 @@ func _process(delta: float) -> void:
 	_measure(delta)
 	rdt_g = clampf(delta / maxf(0.01, Engine.time_scale), 0.0, 0.1)
 	_live_poll(dt)
+	_ej_update(dt)
 	_seq_tick(clampf(delta / maxf(0.01, Engine.time_scale), 0.0, 0.25))
 	_duck(delta / maxf(0.01, Engine.time_scale))
 	_perf(delta)
@@ -19255,6 +19295,393 @@ func _mc_lock(sh: Dictionary) -> void:
 		mc.frz_done = true
 
 
+# ================================================================ Rettungskapsel (John)
+# Wird ein Schiff zerstört, sprengt sich das Cockpit als Kapsel ab: Neonring in der Fahrerfarbe, leuchtender Schweif,
+# senkrecht nach oben – im Glasdom sieht man den Helm, dem Fahrer geht es gut. Im Tunnel und in der Röhre fliegt sie erst
+# unter die Notluke in der Decke und dann durch das Energiefeld (es reißt kurz auf und schließt sich wieder).
+# Beim eigenen Schiff fährt die Kamera mit nach oben, Blick senkrecht nach unten auf Wrack und Strecke.
+const EF_SHADER = """
+shader_type spatial;
+render_mode unshaded,cull_disabled,blend_add,depth_draw_never,shadows_disabled;
+// Energiefeld (Notluke in der Tunneldecke): Waben, leichtes Flimmern; rp/rt = Durchbruch einer Rettungskapsel
+uniform vec3 rp=vec3(0.,-9999.,0.);
+uniform float rt=99.;
+varying vec3 wp;
+void vertex(){wp=(MODEL_MATRIX*vec4(VERTEX,1.)).xyz;}
+float hd(vec2 p){p=abs(p);return max(dot(p,vec2(.5,.8660254)),p.x);}
+void fragment(){
+	vec2 q=UV*vec2(4.5,4.5);
+	vec2 r=vec2(1.,1.7320508),h=r*.5;
+	vec2 a=mod(q,r)-h,b=mod(q-h,r)-h;
+	vec2 g=dot(a,a)<dot(b,b)?a:b;
+	vec2 id=q-g;
+	float e=smoothstep(.38,.48,hd(g));
+	float rnd=fract(sin(dot(id,vec2(12.9898,78.233)))*43758.5453);
+	float sh=.5+.5*sin(TIME*2.2+rnd*6.283+UV.y*.6);
+	float side=smoothstep(.44,.3,abs(UV.x));
+	vec3 c=vec3(.2,.75,1.)*(e*(.35+.55*sh)+.04+.05*sh*sh)*side;
+	float d=distance(wp,rp);
+	float op=rt<1.3?sin(clamp(rt/1.3,0.,1.)*3.14159):0.;
+	float hole=.75*op;
+	float rim=exp(-pow((d-hole)/.07,2.))*op*3.;
+	float wave=exp(-pow((d-rt*4.)/.18,2.))*max(0.,1.-rt/1.1)*2.2;
+	c*=step(hole,d);
+	c+=vec3(.75,.95,1.)*(rim+wave)*side+vec3(.4,.8,1.)*exp(-d*1.2)*op*.8;
+	ALBEDO=c;
+}
+"""
+var ejs = []
+var ej_cam = {}
+var ef_rip = {}   # Energiefeld: {"p": Durchbruchstelle, "t": Sekunden seither}
+const EJ_CAM_T = 3.0
+
+
+# Höhe über dem Startpunkt: harter Schuss, dann fast still in der Luft
+func _ej_h(t: float, H := 28.0) -> float:
+	var u = clampf(t / 1.8, 0.0, 1.0)
+	return H * (1.0 - pow(1.0 - u, 2.5)) + maxf(0.0, t - 1.8) * 0.5
+
+
+# Punkte der Flugbahn an der Stelle z: S = Start (Spur des Schiffs), A = unter der Luke, C = in der Luke, U = Richtung nach oben
+func _ej_pts(k: String, z: float, lat: float) -> Array:
+	var f = T.frame(z)
+	var sf = T.sframe(z, lat)
+	var S: Vector3 = sf.c + sf.uu * 0.3
+	if k == "pipe":
+		var cen: Vector3 = f.c + f.uu * T.PR
+		return [S, cen + f.uu * (T.PR - 0.9), cen + f.uu * T.PR, f.uu]
+	if k == "tun":
+		var R = T.TW + 0.25
+		return [S, f.c + f.uu * (0.4 + R - 0.9), f.c + f.uu * (0.4 + R), f.uu]
+	return [S, S, S, Vector3.UP]
+
+
+# Flugbahn: Gegner-Kapseln behalten etwas Schwung nach vorn (so sieht man sie vor sich aufsteigen), deine schießt senkrecht hoch
+func _ej_pos(e: Dictionary, t: float) -> Vector3:
+	var zz = float(e.z0) + float(e.v0) * (1.0 - exp(-t * 0.6)) / 0.6
+	var q = _ej_pts(e.k, zz, float(e.lat0))
+	if e.k == "out":
+		return (q[0] as Vector3) + Vector3.UP * _ej_h(t, float(e.H))
+	if t < 0.32:
+		var u = t / 0.32
+		return (q[0] as Vector3).lerp(q[1], u * u * (3.0 - 2.0 * u))
+	return (q[1] as Vector3) + (q[3] as Vector3) * _ej_h(t - 0.32, float(e.H))
+
+
+func _eject(o: Dictionary, z: float, lat: float, from_rp := false) -> void:
+	if warm or (state == "kill" and not rp_ev and not from_rp):
+		return
+	if not from_rp:
+		_rev(["ej", int(o.idx), z, lat])
+	var col: Color = CHARS[int(o.idx) % CHARS.size()][2]
+	var f = T.frame(z)
+	var sf = T.sframe(z, lat)
+	var S: Vector3 = sf.c + sf.uu * 0.3
+	var U = Vector3.UP
+	var A = S
+	var C = S
+	var kind = "out"
+	if T.pipe_full(z):
+		var cen: Vector3 = f.c + f.uu * T.PR
+		U = f.uu
+		A = cen + U * (T.PR - 0.9)
+		C = cen + U * T.PR
+		kind = "pipe"
+	elif T.in_tun(T.lz(z), 0.0):
+		var R = T.TW + 0.25
+		U = f.uu
+		A = f.c + U * (0.4 + R - 0.9)
+		C = f.c + U * (0.4 + R)
+		kind = "tun"
+	var own = int(o.idx) == 0 and not from_rp and state != "replay" and state != "kill"
+	# Kapsel: dunkler Körper mit Leuchtband, Glasdom, Helm in der Fahrerfarbe, Düse unten
+	var n = Node3D.new()
+	add_child(n)
+	var body = MeshInstance3D.new()
+	var bm = SphereMesh.new()
+	bm.radius = 0.26
+	bm.height = 0.42
+	bm.radial_segments = 16
+	bm.rings = 8
+	body.mesh = bm
+	body.scale = Vector3(1.0, 0.8, 1.35)
+	var bmat = StandardMaterial3D.new()
+	bmat.albedo_color = Color(0.22, 0.23, 0.27)
+	bmat.metallic = 0.6
+	bmat.roughness = 0.3
+	bmat.emission_enabled = true
+	bmat.emission = col * 0.25
+	body.material_override = bmat
+	n.add_child(body)
+	var band = MeshInstance3D.new()
+	var tm = TorusMesh.new()
+	tm.inner_radius = 0.258
+	tm.outer_radius = 0.278
+	tm.rings = 20
+	tm.ring_segments = 6
+	band.mesh = tm
+	band.scale = Vector3(1.0, 1.0, 1.35)
+	band.material_override = _glow_mat(col, 6.0)
+	n.add_child(band)
+	var helm = MeshInstance3D.new()
+	var hm = SphereMesh.new()
+	hm.radius = 0.09
+	hm.height = 0.18
+	helm.mesh = hm
+	helm.position = Vector3(0, 0.17, 0.05)
+	helm.material_override = _glow_mat(col.lerp(Color(1, 1, 1), 0.25), 2.4)
+	n.add_child(helm)
+	var visor = MeshInstance3D.new()
+	var vm = BoxMesh.new()
+	vm.size = Vector3(0.12, 0.035, 0.03)
+	visor.mesh = vm
+	visor.position = Vector3(0, 0.18, -0.03)
+	visor.material_override = _glow_mat(Color(0.6, 0.95, 1.0), 3.0)
+	n.add_child(visor)
+	var dome = MeshInstance3D.new()
+	var dm = SphereMesh.new()
+	dm.radius = 0.2
+	dm.height = 0.2
+	dm.is_hemisphere = true
+	dome.mesh = dm
+	dome.position = Vector3(0, 0.1, 0.03)
+	var gm = StandardMaterial3D.new()
+	gm.albedo_color = Color(0.55, 0.85, 1.0, 0.22)
+	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gm.metallic = 0.2
+	gm.roughness = 0.05
+	gm.emission_enabled = true
+	gm.emission = Color(0.3, 0.6, 1.0)
+	gm.emission_energy_multiplier = 0.3
+	dome.material_override = gm
+	n.add_child(dome)
+	var jet = MeshInstance3D.new()
+	var jm = SphereMesh.new()
+	jm.radius = 0.07
+	jm.height = 0.14
+	jet.mesh = jm
+	jet.position = Vector3(0, -0.22, 0)
+	jet.material_override = _glow_mat(Color(1.0, 0.85, 0.6).lerp(col, 0.35), 5.0)
+	n.add_child(jet)
+	for c in n.get_children():
+		(c as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Schweif als leuchtendes Band (zum Betrachter gedreht)
+	var tr = MeshInstance3D.new()
+	tr.mesh = ImmediateMesh.new()
+	var tmat = StandardMaterial3D.new()
+	tmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	tmat.vertex_color_use_as_albedo = true
+	tmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	tmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	tmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	tmat.no_depth_test = false
+	tr.material_override = tmat
+	tr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(tr)
+	# Absprengen: Neonring in der Fahrerfarbe läuft vom Wrack weg
+	var ring = _glow_node(TorusMesh.new(), col, 7.0, 0.95)
+	(ring.mesh as TorusMesh).inner_radius = 0.92
+	(ring.mesh as TorusMesh).outer_radius = 1.0
+	(ring.mesh as TorusMesh).rings = 40
+	(ring.mesh as TorusMesh).ring_segments = 6
+	var rb = Basis.looking_at(f.fw, U) if absf(f.fw.dot(U)) < 0.95 else Basis()
+	ring.global_transform = Transform3D(rb, S)
+	ring.scale = Vector3.ONE * 0.4
+	# Antigrav-Ringe unter der Kapsel, wenn sie langsam sinkt (Gegner)
+	var ag = []
+	for i in range(2):
+		var gr = _glow_node(TorusMesh.new(), col, 5.0, 0.0)
+		(gr.mesh as TorusMesh).inner_radius = 0.36
+		(gr.mesh as TorusMesh).outer_radius = 0.4
+		gr.visible = false
+		ag.append(gr)
+	var e = {"n": n, "body": [body, band, helm, visor, dome, jet], "tr": tr, "ring": ring, "ag": ag, "S": S, "A": A, "C": C, "U": U, "k": kind,
+		"z0": z, "lat0": lat, "v0": 0.0 if own else float(o.get("spd", 0.0)) * 1.25, "H": 28.0 if own else 7.0, "t": 0.0, "col": col, "own": own, "pts": [], "rip": false, "fw": f.fw, "side": f.rr * (1.0 if randf() < 0.5 else -1.0), "W": S}
+	n.global_position = S
+	ejs.append(e)
+	_snd("ignite", 2.0, 1.35, null if own else S)
+	get_tree().create_timer(0.08).timeout.connect(func(): _snd("cm_whoosh", 0.0, 1.2, null if own else S))
+	_burst(S, fxr.spark, 30, 0.7, 4.0, 12.0, 40.0, -U * 6.0, 0.6, 0.5, 1.0,
+		_ramp([[0.0, Color(col.r * 6.0, col.g * 6.0, col.b * 6.0, 1)], [1.0, Color(col.r, col.g, col.b, 0)]]), null, true, false, 0.2)
+	if own:
+		if not mc.is_empty():
+			_mc_end()
+		if not ed.is_empty():
+			_ed_stop()
+		ej_cam = {"e": e, "t": 0.0}
+		for c in e.body:
+			(c as Node3D).visible = false   # die Kamera sitzt in der Kapsel
+
+
+func _ej_clear() -> void:
+	for e in ejs:
+		for k in ["n", "tr", "ring"]:
+			if e[k] != null and is_instance_valid(e[k]):
+				(e[k] as Node).queue_free()
+		for gr in e.ag:
+			if is_instance_valid(gr):
+				(gr as Node).queue_free()
+	ejs.clear()
+	ej_cam = {}
+	ef_rip = {}
+	_ef_set()
+
+
+# Energiefeld der Tunneldecke und der Röhre: Durchbruchstelle und Alter an die Shader
+func _ef_set() -> void:
+	for k in ["efield", "pipe"]:
+		if mats.has(k) and mats[k] is ShaderMaterial:
+			(mats[k] as ShaderMaterial).set_shader_parameter("rp", ef_rip.get("p", Vector3(0, -9999, 0)))
+			(mats[k] as ShaderMaterial).set_shader_parameter("rt", float(ef_rip.get("t", 99.0)))
+
+
+func _ej_update(dt: float) -> void:
+	if _ev("EJT") != "" and state == "race" and race_t > float(_ev("EJT").get_slice(",", 1)) and not has_meta("ejt"):
+		# nur zum Testen: Schiff (0 = du) zerstören
+		set_meta("ejt", 1)
+		var vi = int(_ev("EJT").get_slice(",", 0))
+		if vi != 0:
+			ships[vi].z = ships[0].z + 9.0
+			ships[vi].lat = ships[0].lat + 0.5
+		ships[vi].shield = 0.0
+		ships[vi].en = 0.01
+		_dmg(ships[vi], 1.0, 1 if vi == 0 else 0, "rak")
+	if _ev("EJSHOT") != "" and not ejs.is_empty():
+		var et = float(ejs[0].t)
+		var lst = _ev("EJSHOT").split(",")
+		for st in lst:
+			if et >= float(st) and not has_meta("ejs" + st.replace(".", "_")):
+				set_meta("ejs" + st.replace(".", "_"), 1)
+				get_viewport().get_texture().get_image().save_png("/home/claude/work/cmp/ej_%s.png" % st)
+		if et > float(lst[lst.size() - 1]) + 0.05:
+			get_tree().quit()
+	if not ef_rip.is_empty():
+		ef_rip.t = float(ef_rip.t) + dt
+		if float(ef_rip.t) > 2.0:
+			ef_rip = {}
+		_ef_set()
+	if ejs.is_empty():
+		return
+	var cp: Vector3 = cam.global_position
+	for e in ejs.duplicate():
+		e.t = float(e.t) + dt
+		var t: float = e.t
+		if not is_instance_valid(e.n):
+			ejs.erase(e)
+			continue
+		var n: Node3D = e.n
+		var p = _ej_pos(e, t)
+		var down = 0.0
+		if not e.own and t > 1.7:
+			# Gegner: am höchsten Punkt gehen die Antigrav-Ringe an, die Kapsel sinkt langsam seitlich weg
+			down = t - 1.7
+			p += (e.side as Vector3) * down * 1.4 - Vector3.UP * down * 1.6
+		var pv: Vector3 = n.global_position
+		n.global_position = p
+		# Lage: Dom zeigt nach hinten oben (man sieht den Helm), leichtes Pendeln
+		var up: Vector3 = (e.U as Vector3)
+		var fwd: Vector3 = (e.fw as Vector3)
+		var bz = Basis.looking_at(fwd.lerp(-up, 0.35).normalized(), up.lerp(-fwd, 0.55).normalized()) if absf(fwd.dot(up)) < 0.98 else Basis()
+		n.global_transform.basis = bz.rotated(up, sin(t * 3.0) * 0.25 * minf(1.0, t))
+		# Absprengring
+		var ring = e.ring
+		if ring != null and is_instance_valid(ring):
+			var ru = t / 0.5
+			if ru >= 1.0:
+				ring.queue_free()
+				e.ring = null
+			else:
+				ring.scale = Vector3.ONE * lerpf(0.4, 3.2, 1.0 - pow(1.0 - ru, 3.0))
+				(ring.material_override as StandardMaterial3D).albedo_color.a = 1.0 - ru
+		# Durch das Energiefeld
+		if e.k != "out" and not e.rip and t > 0.32 and _ej_h(t - 0.32, float(e.H)) >= 0.9:
+			e.rip = true
+			var cz = float(e.z0) + float(e.v0) * (1.0 - exp(-t * 0.6)) / 0.6
+			e.C = _ej_pts(e.k, cz, float(e.lat0))[2]
+			ef_rip = {"p": e.C, "t": 0.0}
+			_ef_set()
+			_burst(e.C, fxr.spark, 44, 0.8, 3.0, 10.0, 160.0, Vector3(0, -9, 0), 0.5, 0.5, 1.1,
+				_ramp([[0.0, Color(5, 8, 10, 1)], [0.5, Color(1.2, 3, 5, 1)], [1.0, Color(0.2, 0.6, 1, 0)]]), null, true, false, 0.35)
+			_snd("zap", 0.0, 0.75, null if e.own else e.C)
+		# Antigrav-Ringe
+		for i in range(e.ag.size()):
+			var gr: MeshInstance3D = e.ag[i]
+			gr.visible = down > 0.0
+			if down > 0.0:
+				var ph = fmod(t * 1.6 + i * 0.5, 1.0)
+				gr.global_transform = Transform3D(Basis().scaled(Vector3.ONE * (1.0 + ph * 1.6)), p - Vector3.UP * (0.3 + ph * 0.9))
+				(gr.material_override as StandardMaterial3D).albedo_color.a = (1.0 - ph) * 0.8 * clampf(down * 3.0, 0.0, 1.0)
+		# Schweif
+		var pts: Array = e.pts
+		if pts.is_empty() or pv.distance_to(p) > 0.05:
+			pts.append([p - n.global_transform.basis.y * 0.2, t])
+		while not pts.is_empty() and t - float(pts[0][1]) > 0.9:
+			pts.pop_front()
+		var im: ImmediateMesh = (e.tr as MeshInstance3D).mesh
+		im.clear_surfaces()
+		if pts.size() >= 2 and not e.own:   # eigene Kapsel: Kamera schaut den Schweif entlang, der wäre nur ein Fleck
+			im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+			var col: Color = e.col
+			for i in range(pts.size()):
+				var a: Vector3 = pts[i][0]
+				var b: Vector3 = pts[mini(i + 1, pts.size() - 1)][0]
+				var d = (b - a) if i + 1 < pts.size() else (a - (pts[i - 1][0] as Vector3))
+				var sd = d.cross(cp - a)
+				sd = sd.normalized() if sd.length() > 0.0001 else Vector3.RIGHT
+				var age = clampf((t - float(pts[i][1])) / 0.9, 0.0, 1.0)
+				var w = minf(0.16 * (1.0 - age) + 0.02, a.distance_to(cp) * 0.015)   # dicht an der Kamera nicht als Fleck übers Bild
+				var cc = Color(col.r * 3.0 + 0.6, col.g * 3.0 + 0.6, col.b * 3.0 + 0.6, (1.0 - age) * 0.9)
+				im.surface_set_color(cc)
+				im.surface_add_vertex(a + sd * w)
+				im.surface_set_color(cc)
+				im.surface_add_vertex(a - sd * w)
+			im.surface_end()
+		# Gegner-Kapseln verschwinden nach ein paar Sekunden
+		var life = 5.0 if not e.own else 6.0
+		if t > life - 0.6:
+			n.scale = Vector3.ONE * maxf(0.01, (life - t) / 0.6)
+		if t > life:
+			for k in ["n", "tr", "ring"]:
+				if e[k] != null and is_instance_valid(e[k]):
+					(e[k] as Node).queue_free()
+			for gr in e.ag:
+				if is_instance_valid(gr):
+					(gr as Node).queue_free()
+			ejs.erase(e)
+
+
+# Kamera in der eigenen Kapsel: senkrecht nach unten, das Wrack wird kleiner, die Strecke läuft im Bild nach oben
+func _ej_cam_step() -> bool:
+	if ej_cam.is_empty() and _ev("EJVIEW") != "" and not ejs.is_empty() and is_instance_valid(ejs[0].n):
+		# nur zum Testen: Kapsel von schräg hinten ansehen
+		var qp: Vector3 = (ejs[0].n as Node3D).global_position
+		var dv = float(_ev("EJVIEW"))
+		cam.global_position = qp - (ejs[0].fw as Vector3) * dv + (ejs[0].side as Vector3) * dv * 0.5 + Vector3.UP * dv * 0.4
+		cam.look_at(qp, Vector3.UP)
+		cam.fov = 50.0
+		return true
+	if ej_cam.is_empty():
+		return false
+	var e: Dictionary = ej_cam.e
+	ej_cam.t = float(e.t)
+	if float(ej_cam.t) > EJ_CAM_T + 0.6 or not is_instance_valid(e.n) or state == "menu":
+		ej_cam = {}
+		return false
+	var p: Vector3 = (e.n as Node3D).global_position
+	var U: Vector3 = e.U
+	var dw: Vector3 = (e.W as Vector3) - p
+	var dl = dw.length()
+	var look: Vector3 = (-U).lerp(dw / maxf(0.001, dl), clampf((dl - 0.8) / 3.0, 0.0, 0.85)).normalized()
+	cam.global_position = p + U * 0.05
+	var upv: Vector3 = (e.fw as Vector3)
+	if absf(upv.dot(look)) > 0.97:
+		upv = (e.side as Vector3)
+	cam.look_at(p + look * 10.0, upv)
+	cam.rotate_object_local(Vector3(0, 0, 1), float(ej_cam.t) * 0.12)
+	cam.fov = 80.0
+	return true
+
+
 # ================================================================ Schnitt-Editor (John)
 # Tempokurven, Schnitte, Ereignisse und eigene Musik für Intro, Siegerehrung und Kill-Cam – eingestellt am PC im Browser
 # (Live-Seite → „Schnitt-Editor“), gespeichert am Handy in user://cut.json, die Musik in user://cut/<Szene>.<mp3|ogg|wav>.
@@ -20340,6 +20767,8 @@ func _camera(dt: float) -> void:
 	if state == "replay" and _rp_cam(dt):
 		return
 	if state == "kill" and _kc_cam():
+		return
+	if _ej_cam_step():
 		return
 	if _mc_cam(dt):
 		return
@@ -21897,7 +22326,7 @@ func _fin_update(dt: float) -> void:
 		create_tween().tween_property(l, "modulate:a", 1.0, 0.4)
 		fin.lbl = cl
 	if fin.phase == 0:
-		var wait = fly_t if fin.fly else 1.2
+		var wait = fly_t if fin.fly else (EJ_CAM_T if not ej_cam.is_empty() else 1.2)   # eigene Kapsel: Fahrt nach oben abwarten
 		if fin.t >= wait or fin.get("fsk", false):
 			if fin.has("lbl") and is_instance_valid(fin.lbl):
 				_qf(fin.lbl)
@@ -22908,6 +23337,7 @@ func _soft_reset() -> bool:
 	paused_ui = null
 	_hull_update(null, false, 0.0)
 	_ed_stop()
+	_ej_clear()
 	# Wärmebild der Mega-Raketenkamera abbauen: sonst bleibt der magentafarbene Kennüberzug auf den Gegnern
 	# (Neustart mitten in der Raketenkamera → pinke Schiffe, John)
 	_heat_off()
