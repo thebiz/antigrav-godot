@@ -138,6 +138,7 @@ func _ready() -> void:
 		if a.begins_with("--shot="):
 			shot_arg = true
 	cine_pending = not cine_done and (not shot_arg or _ev("CINE") != "") and int(cfg.get("intro", 1)) == 1
+	_cut_load()
 	if OS.get_cmdline_user_args().has("--free") and OS.get_environment("AG_RELOADED") == "":
 		free_ride = true
 	if pending_free:
@@ -6600,6 +6601,7 @@ func _party_start() -> void:
 	_dg_flush()
 	_party_end()
 	party_on = true
+	_seq_begin("party")
 	var g: Dictionary = ships[0]
 	var lap = int(floor((g.z - 20.0) / T.LAP))
 	var zl = T.ZST + PARTY_Z
@@ -6835,6 +6837,10 @@ func _party_end() -> void:
 			_qf(c)
 	if not ed.is_empty() and ed.was == "party":   # Feier abgebrochen: Schnitt-Kamera beenden, Zeit und Ton normal
 		_ed_stop()
+	_seq_end("party")
+	if mc.is_empty():
+		Engine.time_scale = 1.0
+		AudioServer.playback_speed_scale = 1.0
 	party = {}
 	party_on = false
 	_dof_on(false)
@@ -6900,6 +6906,11 @@ func _party_live(dt: float) -> bool:
 	if party.is_empty():
 		return false
 	var t: float = fin.get("pt", 0.0)
+	# Zeiten aus dem Schnitt-Editor: zweite Einstellung, Beginn der Schnitt-Kamera, Ende
+	var P1 = _cut_m("party", "c1")
+	var pcuts: Array = cut.party.cuts
+	var E0 = maxf(P1 + 0.2, float(pcuts[0]) if not pcuts.is_empty() else _cut_m("party", "push"))
+	var PE = maxf(E0 + 0.5, _cut_m("party", "end"))
 	# Blitzlichtgewitter
 	if party.has("fls"):
 		var rdtf = clampf(dt / maxf(0.05, Engine.time_scale), 0.0, 0.1)
@@ -7002,14 +7013,14 @@ func _party_live(dt: float) -> bool:
 	var c: Vector3 = party.c
 	var f = T.frame(float(party.z))
 	var zs = float(party.z)
-	if t < 2.1:
-		var u = t / 2.1
+	if t < P1:
+		var u = t / P1
 		var d = lerpf(0.95, 0.62, u * (2.0 - u))
 		cam.global_position = c - f.rr * d + f.fw * (0.2 - 0.1 * u) + f.uu * (0.36 - 0.04 * u)
 		cam.look_at(c + f.uu * (0.34 - 0.02 * u) + f.fw * 0.03, Vector3.UP)
 		cam.fov = 42.0
-	elif t < 4.7:
-		var u = (t - 2.1) / 2.6
+	elif t < E0:
+		var u = (t - P1) / (E0 - P1)
 		var e = u * u * (3.0 - 2.0 * u) * 0.6 + u * 0.4
 		var dz = lerpf(-1.7, 1.5, e)
 		var ff = T.frame(zs + dz)
@@ -7017,7 +7028,7 @@ func _party_live(dt: float) -> bool:
 		cam.look_at(cam.global_position + ff.fw * 1.0 + ff.rr * 0.75 - ff.uu * 0.2, Vector3.UP)
 		cam.fov = 52.0
 	else:
-		var t2 = t - 4.7
+		var t2 = t - E0
 		# Schnitt-Kamera wie im Auto-Edit (John): kurze Einstellungen nah und tief um dein Schiff, Speed-Ramps für die
 		# ganze Szene, zum Schluss ein Push-in; danach geht die Fahrt um Ren ganz normal weiter
 		if not party.has("edd"):
@@ -7026,26 +7037,26 @@ func _party_live(dt: float) -> bool:
 				var gs: Dictionary = ships[0]
 				if not is_instance_valid(gs.node):
 					return null
-				return [(gs.node as Node3D).global_position, T.sframe(float(gs.z), float(gs.lat))], 0.75, 5, 0.55, true)
+				return [(gs.node as Node3D).global_position, T.sframe(float(gs.z), float(gs.lat))], 0.75, 0, 0.0, true, "party")
 		if not ed.is_empty() and ed.was == "party":
 			_ed_step(dt)
 			party.fh = 1.0
 			return true
 		var a: float = -0.75 + t2 * 0.14
-		var R = 2.3 - 0.5 * clampf(t2 / (PARTY_T - 4.7), 0.0, 1.0)
+		var R = 2.3 - 0.5 * clampf(t2 / (PE - E0), 0.0, 1.0)
 		cam.global_position = c + (-f.rr * cos(a) + f.fw * sin(a)) * R + f.uu * (0.8 + 0.12 * sin(t2 * 0.4))
 		cam.look_at(c + f.rr * 0.7 + f.uu * 0.25, Vector3.UP)
 		cam.fov = 55.0
 	# wie ein echter Kameramann (John): nach jedem Schnitt sucht die Schärfe kurz (pumpt um Ren herum und sitzt dann),
 	# der Zoom setzt leicht weit an und zieht weich nach, innerhalb der Einstellung schleicht er langsam heran;
 	# im langen Kreis wird einmal mit kleinem Zoom-Ruck nachgeführt (mit leichtem Überschwingen) und neu scharfgestellt
-	var cut = 0.0 if t < 2.1 else (2.1 if t < 4.7 else 4.7)
-	var st = t - cut
-	var dur = 2.1 if t < 2.1 else (2.6 if t < 4.7 else PARTY_T - 4.7)
+	var cutp = 0.0 if t < P1 else (P1 if t < E0 else E0)
+	var st = t - cutp
+	var dur = P1 if t < P1 else (E0 - P1 if t < E0 else PE - E0)
 	# stärker (John): Zoom setzt weiter an und schnellt heran, die Schärfe pumpt deutlicher
 	var zf = (1.0 + 0.13 * exp(-st * 2.6) * cos(st * 3.6)) * (1.0 - 0.07 * smoothstep(0.0, dur, st))
 	var fh = 1.0 + 0.85 * exp(-st * 2.4) * cos(st * 7.0)
-	if t >= 4.7:
+	if t >= E0:
 		# Crash-Zoom auf dich: schneller, kräftiger Ruck mit Überschwingen
 		var rz = clampf((st - 3.0) / 0.5, 0.0, 1.0)
 		var xb = rz - 1.0
@@ -12990,6 +13001,9 @@ func _live_send(c: StreamPeerTCP, ctype: String, body: String) -> void:
 
 
 func _live_answer(c: StreamPeerTCP, path: String, body := PackedByteArray()) -> void:
+	if path.begins_with("/cut"):
+		_cut_answer(c, path, body)
+		return
 	if path.begins_with("/snd/"):
 		var qs = {}
 		var qi2 = path.find("?")
@@ -13244,7 +13258,7 @@ main{padding:12px 16px;max-width:900px}
 #pre button:hover{border-color:#ef6a2e}
 </style></head><body><header><h1>ANTIGRAV · LIVE TUNING</h1><div id="tabs"></div>
 <div id="bar"><label><input type="checkbox" id="pv"> Vorschau am Handy</label>
-<button id="fire">Auslösen</button><button id="bs">Super</button><button id="bm">Mega</button><button id="drive">Weiterfahren (Free ride)</button></div>
+<button id="fire">Auslösen</button><button id="bs">Super</button><button id="bm">Mega</button><button id="drive">Weiterfahren (Free ride)</button><a href="/cut" target="_blank" style="background:#5ee8ff;color:#07080d;border-radius:8px;padding:7px 12px;text-decoration:none;font-weight:600">✂ Schnitt-Editor</a></div>
 <div id="bar"><button id="bkdl">Sicherung herunterladen</button><button id="bkul">Sicherung laden …</button><button id="bkrs">Browser-Sicherung zurückspielen</button><span id="bkst" style="font-size:12px;color:#6c7a96"></span><input type="file" id="bkf" accept=".json,application/json" style="display:none"></div>
 <div id="st">verbinde …</div></header><main id="m"></main>
 <script>
@@ -16919,7 +16933,9 @@ func _process(delta: float) -> void:
 	_cp("frame")
 	_dg_tick(delta)
 	_measure(delta)
+	rdt_g = clampf(delta / maxf(0.01, Engine.time_scale), 0.0, 0.1)
 	_live_poll(dt)
+	_seq_tick(clampf(delta / maxf(0.01, Engine.time_scale), 0.0, 0.25))
 	_duck(delta / maxf(0.01, Engine.time_scale))
 	_perf(delta)
 	var g: Dictionary = ships[0]
@@ -17842,6 +17858,8 @@ var shot_s = "?"   # Testbild-Auftrag von der Kommandozeile (einmal gelesen)
 
 
 func _shot() -> void:
+	if _ev("NOSHOT") != "":
+		return   # nur zum Testen: Live-Steuerung ohne Bildreihe
 	if shot_s == "?":
 		shot_s = ""
 		for a in (OS.get_cmdline_user_args() if OS.get_environment("AG_RELOADED") == "" else []):
@@ -18885,6 +18903,7 @@ func _heat_off() -> void:
 
 
 func _mc_end() -> void:
+	_seq_end("kill")
 	if not ed.is_empty() and ed.was == "impact":
 		_ed_stop()
 	if mc.is_empty():
@@ -19236,6 +19255,398 @@ func _mc_lock(sh: Dictionary) -> void:
 		mc.frz_done = true
 
 
+# ================================================================ Schnitt-Editor (John)
+# Tempokurven, Schnitte, Ereignisse und eigene Musik für Intro, Siegerehrung und Kill-Cam – eingestellt am PC im Browser
+# (Live-Seite → „Schnitt-Editor“), gespeichert am Handy in user://cut.json, die Musik in user://cut/<Szene>.<mp3|ogg|wav>.
+# Alle Zeiten in echten Sekunden ab Beginn der Szene (Kill-Cam: ab dem Einschlag). Tempo 1 = normal, 0,1 = Zeitlupe.
+const CUT_PATH = "user://cut.json"
+const CUT_SEQS = ["intro", "party", "kill"]
+var cut = {}
+var seqc = {}            # laufende Szene: {"s": Name, "t": echte Sekunden, "ms": Musik gestartet}
+var seq_p: AudioStreamPlayer = null
+var seq_db = 0.0
+var seq_duck = 0.0
+var seq_fade = -1.0
+var cut_mus = {}
+var rdt_g = 0.0          # echte Sekunden dieses Bildes, unabhängig von der Zeitlupe
+var cut_demo = ""        # Vorschau vom PC wartet auf das Rennen (Siegerehrung / Kill-Cam)
+var cut_demo_t = 0.0
+
+
+# eine Einstellung der Schnitt-Kamera: reinreißen (schnell) – gleiten (Zeitlupe) – rausreißen
+func _cut_shot_keys(k: Array, a: float, b: float) -> void:
+	var d = b - a
+	k.append([snappedf(a, 0.001), 1.6])
+	k.append([snappedf(a + d * 0.25, 0.001), 0.22])
+	k.append([snappedf(a + d * 0.75, 0.001), 0.22])
+	k.append([snappedf(b, 0.001), 1.6])
+
+
+func _cut_def(s: String) -> Dictionary:
+	var k = []
+	var cuts = []
+	match s:
+		"intro":
+			cuts = [9.0, 9.75]
+			k = [[0.0, 1.0], [4.0, 1.0], [4.35, 0.035], [7.6, 0.035], [7.95, 1.8], [8.98, 1.0]]
+			_cut_shot_keys(k, 9.0, 9.75)
+			_cut_shot_keys(k, 9.75, 10.5)
+			k.append([10.5, 1.0])
+			return {"ts": k, "cuts": cuts, "moff": 0.0, "mdb": 0.0, "slow": 1, "ui": {},
+				"m": {"rumble": 0.25, "arr": 2.7, "bass": 4.3, "frz": 4.35, "line": 5.0, "ramp": 7.6, "dep": 10.5,
+					"title": 11.0, "tend": 13.0, "stamp": 13.2, "end": 14.6}}
+		"party":
+			var e0 = 4.7
+			for i in range(5):
+				cuts.append(snappedf(e0 + i * 0.55, 0.001))
+			var push = e0 + 5 * 0.55
+			k = [[0.0, 1.0], [e0 - 0.02, 1.0]]
+			for i in range(5):
+				_cut_shot_keys(k, cuts[i], cuts[i] + 0.55)
+			k.append([snappedf(push, 0.001), 0.35])
+			k.append([snappedf(push + 1.3, 0.001), 1.0])
+			return {"ts": k, "cuts": cuts, "moff": 0.0, "mdb": 0.0, "slow": 0, "ui": {},
+				"m": {"c1": 2.1, "push": snappedf(push, 0.001), "pend": snappedf(push + 1.3, 0.001), "end": PARTY_T}}
+		_:
+			cuts = [0.45, 1.07, 1.69]
+			k = [[0.0, 0.06], [0.43, 0.06]]
+			_cut_shot_keys(k, 0.45, 1.07)
+			_cut_shot_keys(k, 1.07, 1.69)
+			_cut_shot_keys(k, 1.69, 2.31)
+			k.append([2.8, 1.0])
+			return {"ts": k, "cuts": cuts, "moff": 0.0, "mdb": 0.0, "slow": 1, "ui": {}, "m": {"eend": 2.31, "end": 2.8}}
+
+
+# Daten vom PC prüfen und in Ordnung bringen (fehlende Werte aus dem Standard)
+func _cut_clean(s: String, d) -> Dictionary:
+	var df = _cut_def(s)
+	if not (d is Dictionary):
+		return df
+	var o = {"ts": [], "cuts": [], "m": {}, "moff": clampf(float(d.get("moff", 0.0)), -120.0, 1200.0),
+		"mdb": clampf(float(d.get("mdb", 0.0)), -30.0, 12.0), "slow": 1 if int(d.get("slow", df.slow)) == 1 else 0,
+		"ui": d.ui if d.get("ui") is Dictionary else {}, "mname": str(d.get("mname", ""))}
+	var raw = []
+	if d.get("ts") is Array:
+		for kv in d.ts:
+			if kv is Array and kv.size() >= 2:
+				raw.append([clampf(float(kv[0]), 0.0, 180.0), clampf(float(kv[1]), 0.02, 3.0), raw.size()])
+	raw.sort_custom(func(a, b): return a[0] < b[0] or (a[0] == b[0] and a[2] < b[2]))   # gleiche Zeit: Reihenfolge bleibt (Sprung)
+	for kv in raw:
+		o.ts.append([kv[0], kv[1]])
+	if o.ts.is_empty():
+		o.ts = df.ts
+	if d.get("cuts") is Array:
+		for c in d.cuts:
+			o.cuts.append(clampf(float(c), 0.0, 180.0))
+		o.cuts.sort()
+	else:
+		o.cuts = df.cuts
+	var dm = d.m if d.get("m") is Dictionary else {}
+	for mk in df.m:
+		o.m[mk] = clampf(float(dm.get(mk, df.m[mk])), 0.0, 180.0)
+	return o
+
+
+func _cut_load() -> void:
+	var d = {}
+	if FileAccess.file_exists(CUT_PATH):
+		var j = JSON.parse_string(FileAccess.get_file_as_string(CUT_PATH))
+		if j is Dictionary:
+			d = j
+	for s in CUT_SEQS:
+		cut[s] = _cut_clean(s, d.get(s))
+
+
+func _cut_save() -> void:
+	var f = FileAccess.open(CUT_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(cut))
+		f.close()
+
+
+# Tempo zur Zeit t: zwischen zwei Punkten weich (S-Kurve), im Verhältnis gerechnet – so wie der Editor sie zeichnet
+func _cut_ts(s: String, t: float) -> float:
+	var k: Array = cut[s].ts
+	if k.is_empty():
+		return 1.0
+	if t <= float(k[0][0]):
+		return float(k[0][1])
+	for i in range(k.size() - 1):
+		var a: Array = k[i]
+		var b: Array = k[i + 1]
+		if t < float(b[0]):
+			var u = clampf((t - float(a[0])) / maxf(0.0001, float(b[0]) - float(a[0])), 0.0, 1.0)
+			u = u * u * (3.0 - 2.0 * u)
+			return exp(lerpf(log(float(a[1])), log(float(b[1])), u))
+	return float(k[k.size() - 1][1])
+
+
+# Spielzeit, die zwischen a und b (echte Sekunden) vergeht
+func _cut_int(s: String, a: float, b: float, n := 64) -> float:
+	if b <= a:
+		return 0.0
+	var h = (b - a) / n
+	var sm = 0.0
+	for i in range(n):
+		sm += _cut_ts(s, a + (i + 0.5) * h)
+	return sm * h
+
+
+func _cut_m(s: String, k: String) -> float:
+	return float(cut[s].m.get(k, 0.0))
+
+
+# wo die Schnitt-Kamera in der Szene aufhört
+func _cut_eend(s: String) -> float:
+	match s:
+		"intro":
+			return _cut_m(s, "dep")
+		"party":
+			return _cut_m(s, "push")
+	return _cut_m(s, "eend")
+
+
+func _cut_mus_file(s: String) -> String:
+	for e in ["mp3", "ogg", "wav"]:
+		var pth = "user://cut/%s.%s" % [s, e]
+		if FileAccess.file_exists(pth):
+			return pth
+	return ""
+
+
+func _cut_stream(s: String) -> AudioStream:
+	if cut_mus.has(s):
+		return cut_mus[s]
+	var pth = _cut_mus_file(s)
+	var st: AudioStream = null
+	if pth != "":
+		var b = FileAccess.get_file_as_bytes(pth)
+		match pth.get_extension():
+			"mp3":
+				st = AudioStreamMP3.load_from_buffer(b)
+			"ogg":
+				st = AudioStreamOggVorbis.load_from_buffer(b)
+			"wav":
+				st = AudioStreamWAV.load_from_buffer(b)
+	cut_mus[s] = st
+	return st
+
+
+func _cut_upload(s: String, nm: String, body: PackedByteArray) -> String:
+	if not s in CUT_SEQS:
+		return "unbekannte Szene"
+	var ext = nm.get_extension().to_lower()
+	if body.size() > 4:
+		var h4 = body.slice(0, 4).get_string_from_ascii()
+		if h4 == "OggS":
+			ext = "ogg"
+		elif h4 == "RIFF":
+			ext = "wav"
+		elif h4.begins_with("ID3") or (body[0] == 0xFF and (body[1] & 0xE0) == 0xE0):
+			ext = "mp3"
+	if not ext in ["mp3", "ogg", "wav"]:
+		return "Format nicht unterstützt – bitte mp3, ogg oder wav"
+	DirAccess.make_dir_recursive_absolute("user://cut")
+	for e in ["mp3", "ogg", "wav"]:
+		var old = "user://cut/%s.%s" % [s, e]
+		if FileAccess.file_exists(old):
+			DirAccess.remove_absolute(old)
+	var pth = "user://cut/%s.%s" % [s, ext]
+	var f = FileAccess.open(pth, FileAccess.WRITE)
+	if f == null:
+		return "Speichern fehlgeschlagen"
+	f.store_buffer(body)
+	f.close()
+	cut_mus.erase(s)
+	if _cut_stream(s) == null:
+		DirAccess.remove_absolute(pth)
+		cut_mus.erase(s)
+		return "Datei nicht lesbar"
+	cut[s].mname = nm
+	_cut_save()
+	return "ok"
+
+
+func _cut_mus_del(s: String) -> void:
+	for e in ["mp3", "ogg", "wav"]:
+		var old = "user://cut/%s.%s" % [s, e]
+		if FileAccess.file_exists(old):
+			DirAccess.remove_absolute(old)
+	cut_mus.erase(s)
+	cut[s].mname = ""
+	_cut_save()
+
+
+# Szene beginnt: Uhr auf 0, eigene Musik (falls geladen) startet passend dazu
+func _seq_begin(s: String) -> void:
+	if seq_p != null and seq_p.playing:
+		seq_p.stop()
+	seq_fade = -1.0
+	seqc = {"s": s, "t": 0.0, "ms": false}
+
+
+func _seq_end(s := "") -> void:
+	if seqc.is_empty() or (s != "" and seqc.s != s):
+		return
+	seqc = {}
+	if seq_p != null and seq_p.playing:
+		seq_fade = 0.8
+
+
+func _seq_tick(rdt: float) -> void:
+	if seq_p == null:
+		seq_p = AudioStreamPlayer.new()
+		seq_p.bus = "Music"
+		seq_p.process_mode = Node.PROCESS_MODE_ALWAYS
+		add_child(seq_p)
+	if not seqc.is_empty():
+		# Uhr der Szene: echte Sekunden; läuft eigene Musik, gibt der Song den Takt vor (auch wenn ein Bild hängt)
+		seqc.t = float(seqc.t) + rdt
+		if seqc.ms and seq_p.playing and seq_fade < 0.0 and seq_p.stream == cut_mus.get(seqc.s):
+			var tt = seq_p.get_playback_position() + AudioServer.get_time_since_last_mix() - float(cut[seqc.s].moff)
+			if absf(tt - float(seqc.t)) < 1.5:
+				seqc.t = tt
+	if not seqc.is_empty() and not seqc.ms:
+		var C: Dictionary = cut[seqc.s]
+		var st = _cut_stream(seqc.s)
+		var tm = float(seqc.t) + float(C.moff)   # Stelle im Song
+		if st == null:
+			seqc.ms = true
+		elif tm >= 0.0:
+			seqc.ms = true
+			seq_db = float(C.mdb)
+			seq_p.stream = st
+			seq_p.volume_db = seq_db
+			seq_p.play(tm)
+	if seq_p.playing:
+		# die Musik bleibt im Takt: Zeitlupe verlangsamt nur Bild und Geräusche, nie den Song
+		seq_p.pitch_scale = 1.0 / maxf(0.05, AudioServer.playback_speed_scale)
+		if seq_fade >= 0.0:
+			seq_fade -= rdt
+			seq_p.volume_db = seq_db + linear_to_db(maxf(0.0005, seq_fade / 0.8))
+			if seq_fade <= 0.0:
+				seq_p.stop()
+				seq_fade = -1.0
+	seq_duck = move_toward(seq_duck, 1.0 if seq_p.playing and seq_fade < 0.0 else 0.0, rdt * 3.0)
+	if cut_demo != "":
+		if state == "race":
+			cut_demo_t += rdt
+			if cut_demo_t > 1.2:
+				var dm = cut_demo
+				cut_demo = ""
+				if dm == "party":
+					state = "done"
+					t_state = 0.0
+					_fin_flow(1)
+				else:
+					_cut_kill_demo()
+		elif state == "menu" and cut_demo_t > 0.0:
+			cut_demo = ""
+
+
+# Vorschau Kill-Cam: Gegner vor dich setzen und eine Mega-Lenkrakete abfeuern
+func _cut_kill_demo() -> void:
+	if ships.size() < 2 or not mc.is_empty():
+		return
+	ships[1].z = ships[0].z + 55.0
+	ships[1].lat = clampf(float(ships[0].lat) + 0.8, -1.8, 1.8)
+	for oi in range(2, ships.size()):
+		ships[oi].z = ships[0].z - 40.0 - 8.0 * oi
+	_fire_mega(ships[0], "lenk")
+
+
+func _cut_play(s: String) -> String:
+	match s:
+		"intro":
+			if state != "menu":
+				return "Für das Intro bitte am Handy ins Hauptmenü gehen."
+			if not cine.is_empty():
+				_cine_end()
+			_cine_start()
+			return "ok"
+		"party":
+			if state == "race":
+				cut_demo = "party"
+				cut_demo_t = 1.2
+				return "ok"
+			if state == "menu":
+				cut_demo = "party"
+				cut_demo_t = 0.0
+				free_ride = false
+				_start()
+				return "ok – Rennen startet, dann sofort Sieg"
+		"kill":
+			if state == "race":
+				_cut_kill_demo()
+				return "ok"
+			if state == "menu":
+				cut_demo = "kill"
+				cut_demo_t = 0.0
+				free_ride = false
+				_start()
+				return "ok – Rennen startet, dann Mega-Lenkrakete"
+	return "Bitte am Handy ins Hauptmenü oder in ein Rennen gehen."
+
+
+func _cut_stop() -> void:
+	if not cine.is_empty():
+		_cine_end()
+	if not party.is_empty():
+		fin.skip = true
+	if not mc.is_empty():
+		_mc_end()
+	_seq_end()
+
+
+func _cut_answer(c: StreamPeerTCP, path: String, body: PackedByteArray) -> void:
+	var qs = {}
+	var qi = path.find("?")
+	if qi >= 0:
+		for kv in path.substr(qi + 1).split("&"):
+			qs[kv.get_slice("=", 0)] = kv.get_slice("=", 1).uri_decode()
+	var s = str(qs.get("s", ""))
+	if path.begins_with("/cut/get"):
+		var mi = {}
+		for q in CUT_SEQS:
+			var st = _cut_stream(q)
+			mi[q] = {"has": st != null, "len": st.get_length() if st != null else 0.0, "name": str(cut[q].get("mname", ""))}
+		var dfs = {}
+		for q in CUT_SEQS:
+			dfs[q] = _cut_def(q)
+		_live_send(c, "application/json", JSON.stringify({"cut": cut, "def": dfs, "mus": mi}))
+	elif path.begins_with("/cut/st"):
+		_live_send(c, "application/json", JSON.stringify({"s": seqc.get("s", ""), "t": float(seqc.get("t", 0.0)), "state": state, "ts": Engine.time_scale, "demo": cut_demo}))
+	elif path.begins_with("/cut/set") and s in CUT_SEQS:
+		var d = JSON.parse_string(body.get_string_from_utf8())
+		if d is Dictionary:
+			var mn = str(cut[s].get("mname", ""))
+			cut[s] = _cut_clean(s, d)
+			cut[s].mname = mn
+			_cut_save()
+			_live_send(c, "text/plain", "ok")
+		else:
+			_live_send(c, "text/plain", "bad")
+	elif path.begins_with("/cut/up") and s in CUT_SEQS:
+		_live_send(c, "text/plain", _cut_upload(s, str(qs.get("n", "musik.mp3")), body))
+	elif path.begins_with("/cut/mus") and s in CUT_SEQS:
+		var pth = _cut_mus_file(s)
+		var b = FileAccess.get_file_as_bytes(pth) if pth != "" else PackedByteArray()
+		var h = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" % b.size()
+		c.put_data(h.to_utf8_buffer())
+		c.put_data(b)
+	elif path.begins_with("/cut/mdel") and s in CUT_SEQS:
+		_cut_mus_del(s)
+		_live_send(c, "text/plain", "ok")
+	elif path.begins_with("/cut/play") and s in CUT_SEQS:
+		_live_send(c, "text/plain", _cut_play(s))
+	elif path.begins_with("/cut/stop"):
+		_cut_stop()
+		_live_send(c, "text/plain", "ok")
+	else:
+		var pg = FileAccess.get_file_as_string("res://web/cut.html")
+		_live_send(c, "text/html", pg if pg != "" else "Editor-Seite fehlt in der App")
+
+
 # ---------------------------------------------------------------- Kino-Intro beim App-Start (John: „Sicario“-Gefühl)
 # ~15 s: Kamera liegt am Kurvenrand, Grollen, der Pulk donnert vorbei (Beben, Tropfen auf der Linse), Vega friert schräg
 # in der Kurve ein (Comic-Karte mit Spruch), Speed-Ramp auf die Schiffsspitze, zwei schnelle Schnitte auf dich,
@@ -19244,7 +19655,6 @@ var cine = {}
 var cine_pending = false
 static var cine_done = false   # nur einmal pro App-Start
 const CINE_V = 30.0          # Tempo des Pulks (m/s Spielzeit)
-const CINE_ARR = 2.7         # nach so vielen Sekunden ist die Spitze an der Kamera
 const CINE_LANE = [0.55, -0.9, 1.3, -1.6]   # Spuren: du, Vega (Spitze), Kato, Mira
 const CINE_GAP = [9.0, 0.0, 5.0, 14.0]      # Abstand hinter der Spitze
 
@@ -19291,7 +19701,7 @@ func _cine_start() -> void:
 		save.append({"z": o.z, "lat": o.lat, "spd": o.spd, "psi": o.psi, "vpsi": o.vpsi, "u": o.get("u", 0.0), "boost": o.get("boost", 0.0), "vis": (o.node as Node3D).visible})
 	for i in range(ships.size()):
 		var o: Dictionary = ships[i]
-		o.z = zc - CINE_V * CINE_ARR - float(CINE_GAP[i % 4])
+		o.z = zc - CINE_V * _cut_int("intro", 0.0, float(cut.intro.m.arr)) - float(CINE_GAP[i % 4])   # Spitze genau zur Marke an der Kamera
 		o.lat = float(CINE_LANE[i % 4]) * 0.75 - outs * 0.3
 		o.spd = 24.0
 		o.psi = 0.0
@@ -19388,6 +19798,7 @@ func _cine_start() -> void:
 	hint.modulate = Color(1, 1, 1, 0.35)
 	root.add_child(hint)
 	ui.root.visible = false
+	_seq_begin("intro")
 	cine = {"tr": 0.0, "zc": zc, "outs": outs, "save": save, "cl": cl, "dirt": dirt, "card": card, "tl": tl, "jets": jets, "black": black,
 		"passed": {}, "ev": {}, "wet": 0.0, "fog": 0.0, "sh": 0.0, "oa": 0.0}
 
@@ -19395,6 +19806,7 @@ func _cine_start() -> void:
 func _cine_end() -> void:
 	if cine.is_empty():
 		return
+	_seq_end("intro")
 	if not ed.is_empty() and ed.was == "cine":
 		ed = {}
 		if post != null:
@@ -19433,12 +19845,20 @@ func _cine_once(k: String, at: float) -> bool:
 
 
 func _cine_step(dt: float) -> void:
-	var ts0 = maxf(0.03, Engine.time_scale)
-	var rdt = clampf(dt / ts0, 0.0, 0.1)
-	cine.tr = float(cine.tr) + rdt
+	var rdt = rdt_g
+	cine.tr = float(seqc.t) if seqc.get("s", "") == "intro" else float(cine.tr) + rdt
 	var tr: float = cine.tr
 	var zc: float = cine.zc
 	var outs: float = cine.outs
+	# Zeiten aus dem Schnitt-Editor
+	var M: Dictionary = cut.intro.m
+	var cuts: Array = cut.intro.cuts
+	var t_frz = float(M.frz)
+	var t_ramp = float(M.ramp)
+	var t_dep = float(M.dep)
+	var t_ed = float(cuts[0]) if not cuts.is_empty() and float(cuts[0]) < t_dep else t_dep
+	var t_ti = float(M.title)
+	var t_te = maxf(t_ti + 0.1, float(M.tend))
 	# Pulk fährt mit Spielzeit (Zeitlupe bremst ihn mit)
 	for i in range(ships.size()):
 		var o: Dictionary = ships[i]
@@ -19448,27 +19868,16 @@ func _cine_step(dt: float) -> void:
 		o.u = -outs * 0.7 if absf(float(o.z) - zc) < 80.0 else 0.0
 		o.vpsi = 0.06 * sin(float(o.z) * 0.05 + i)
 	var lead: Dictionary = ships[1 if ships.size() > 1 else 0]
-	# --- Tempo der ganzen Szene
-	var ts = 1.0
-	if tr >= 4.0 and tr < 4.35:
-		ts = lerpf(1.0, 0.035, smoothstep(4.0, 4.35, tr))
-	elif tr >= 4.35 and tr < 7.6:
-		ts = 0.035
-	elif tr >= 7.6 and tr < 9.0:
-		var ku = clampf((tr - 7.6) / 0.35, 0.0, 1.0)
-		ts = lerpf(0.035, 1.8, ku * ku * (3.0 - 2.0 * ku)) if tr < 7.95 else lerpf(1.8, 1.0, (tr - 7.95) / 1.05)
-	if ed.is_empty() or ed.was != "cine":
-		Engine.time_scale = ts
-		_pss(clampf(ts * 1.4, 0.5, 1.0))
-	# --- Schwarzblende rein/raus
-	var bl = 1.0 - smoothstep(0.0, 0.7, tr)
-	if tr > 14.0:
-		bl = 0.0
-	(cine.black as ColorRect).color.a = bl
+	# --- Tempo der ganzen Szene: Tempokurve aus dem Editor (die eigene Musik läuft davon unberührt im Takt)
+	var ts = _cut_ts("intro", tr)
+	Engine.time_scale = ts
+	_pss(clampf(ts * 1.4, 0.5, 1.0) if int(cut.intro.slow) == 1 else 1.0)
+	# --- Schwarzblende rein
+	(cine.black as ColorRect).color.a = 1.0 - smoothstep(0.0, 0.7, tr)
 	# --- Kamera
 	var f0 = T.sframe(zc, outs * (T.TW - 0.35))
 	var shk = 0.0
-	if tr < 4.35:
+	if tr < t_frz:
 		# 1+2: Kamera liegt am Kurvenrand, schaut dem Pulk entgegen und dreht mit, wenn er vorbeidonnert
 		var cp: Vector3 = f0.c + f0.uu * 0.3
 		var dl = zc - float(lead.z)
@@ -19481,28 +19890,18 @@ func _cine_step(dt: float) -> void:
 		cam.look_at(tgt, f0.uu)
 		cam.rotate_object_local(Vector3(0, 0, 1), deg_to_rad(-7.0 * outs))
 		cam.fov = 74.0
-		if _cine_once("rumble", 0.25):
-			_snd("start", 2.0)
-	elif tr < 7.6:
+	elif tr < t_ramp:
 		# 3: Freeze – Vega schräg in der Kurve, die Kamera schleicht in Echtzeit um sie herum
-		cine.oa = float(cine.oa) + rdt
+		var oq = clampf((tr - t_frz) / maxf(0.3, t_ramp - t_frz), 0.0, 1.0)
 		var P: Vector3 = (lead.node as Node3D).global_position
 		var fl = T.sframe(float(lead.z), float(lead.lat))
-		var a = lerpf(-0.9, 0.5, float(cine.oa) / 3.2) * outs
-		var cp2: Vector3 = P + fl.fw * cos(a) * 2.9 + fl.rr * sin(a) * 2.9 + fl.uu * (0.35 + 0.15 * float(cine.oa) / 3.2)
+		var a = lerpf(-0.9, 0.5, oq) * outs
+		var cp2: Vector3 = P + fl.fw * cos(a) * 2.9 + fl.rr * sin(a) * 2.9 + fl.uu * (0.35 + 0.15 * oq)
 		cam.global_position = cp2
 		cam.look_at(P + fl.uu * 0.15, fl.uu)
 		cam.rotate_object_local(Vector3(0, 0, 1), deg_to_rad(9.0 * outs))
 		cam.fov = 62.0
-		if _cine_once("bass", 4.3):
-			_snd("ko_boom", 2.0, 0.7)
-		if _cine_once("line", 5.0):
-			_snd("cv_vega_start", 2.0)
-		var ca = smoothstep(4.9, 5.2, tr) * (1.0 - smoothstep(7.2, 7.5, tr))
-		(cine.card as Control).modulate.a = ca
-		(cine.card as Control).position.x = 40.0 + (1.0 - smoothstep(4.9, 5.3, tr)) * -120.0
-	elif tr < 9.0:
-		(cine.card as Control).modulate.a = 0.0
+	elif tr < t_ed:
 		# 4: Speed-Ramp – Kamera vorn an der Schiffsspitze von Vega, die Welt schießt los
 		var P2: Vector3 = (lead.node as Node3D).global_position
 		var fl2 = T.sframe(float(lead.z), float(lead.lat))
@@ -19512,33 +19911,33 @@ func _cine_step(dt: float) -> void:
 		cam.look_at(fa.c + fa.uu * 0.5, up2)
 		cam.fov = 82.0
 		shk = 0.02
-		if _cine_once("whoosh", 7.6):
-			_snd("cm_whoosh", 3.0)
-			_snd("boost", 0.0)
-	elif tr < 10.5:
-		# 5: zwei schnelle Schnitte auf dich (Ren)
-		if _cine_once("edit", 9.0):
+	elif tr < t_dep:
+		# 5: schnelle Schnitte auf dich (Ren) – Schnittpunkte aus dem Editor
+		if not cine.has("edgo"):
+			cine.edgo = true
 			_ed_start("cine", func():
 				var gs: Dictionary = ships[0]
 				if not is_instance_valid(gs.node):
 					return null
-				return [(gs.node as Node3D).global_position, T.sframe(float(gs.z), float(gs.lat))], 0.8, 2, 0.7, false)
-		if not _ed_step(dt):
-			pass
+				return [(gs.node as Node3D).global_position, T.sframe(float(gs.z), float(gs.lat))], 0.8, 0, 0.0, false, "intro")
+		_ed_step(dt)
 	else:
 		if not ed.is_empty() and ed.was == "cine":
 			_ed_stop()
 		# 6: Abgang – Kamera tief hinter dem Pulk, alle rasen davon, die Plasmastrahlen schreiben den Titel
-		if _cine_once("regroup", 10.5):
+		if not cine.has("regroup"):
+			cine.regroup = true
 			for i in range(ships.size()):   # nach dem Schnitt: Pulk zurück an den Kurveneingang, vor ihm liegt freie Strecke
 				ships[i].z = zc - 15.0 - float(CINE_GAP[i % 4])
-		var zb = float(ships[0].z) - 10.0 - (tr - 10.5) * 6.0
+		var zb = float(ships[0].z) - 10.0 - (tr - t_dep) * 6.0
 		var fb = T.sframe(zb, 0.0)
 		cam.global_position = fb.c + fb.uu * 0.9
 		var fa2 = T.sframe(zb + 60.0, 0.0)
 		cam.look_at(fa2.c + fa2.uu * 2.2, fb.uu)
 		cam.fov = 66.0
-		var tk = clampf((tr - 11.0) / 2.0, 0.0, 1.0)
+	# Titel aus den Plasmastrahlen (eigene Zeiten, darf auch früher beginnen)
+	var tk = clampf((tr - t_ti) / (t_te - t_ti), 0.0, 1.0)
+	if tr >= t_ti:
 		var jj = 0
 		for j in cine.jets:
 			var jk = clampf(tk * 1.25 - jj * 0.08, 0.0, 1.0)
@@ -19552,10 +19951,25 @@ func _cine_step(dt: float) -> void:
 			var lb: Label = e[0]
 			var on = smoothstep(float(e[1]) - 20.0, float(e[1]) + 40.0, lead_x)
 			lb.modulate = Color(1.0 + 2.0 * (1.0 - on) * on * 4.0, 1.0 + 1.5 * (1.0 - on) * on * 4.0, 1.0 + 2.5 * (1.0 - on) * on * 4.0, on)
-		if _cine_once("riser", 11.0):
-			_snd("ignite", 2.0)
-		if _cine_once("stamp", 13.2):
-			_snd("cm_stamp", 1.0)
+	# Comic-Karte mit Vegas Spruch: vom Spruch bis zur Speed-Ramp
+	var t_ln = float(M.line)
+	var ca = smoothstep(t_ln - 0.1, t_ln + 0.2, tr) * (1.0 - smoothstep(t_ramp - 0.4, t_ramp - 0.1, tr))
+	(cine.card as Control).modulate.a = ca
+	(cine.card as Control).position.x = 40.0 + (1.0 - smoothstep(t_ln - 0.1, t_ln + 0.3, tr)) * -120.0
+	# --- Ereignisse (Töne) an ihren Zeitpunkten
+	if _cine_once("rumble", float(M.rumble)):
+		_snd("start", 2.0)
+	if _cine_once("bass", float(M.bass)):
+		_snd("ko_boom", 2.0, 0.7)
+	if _cine_once("line", t_ln):
+		_snd("cv_vega_start", 2.0)
+	if _cine_once("whoosh", t_ramp):
+		_snd("cm_whoosh", 3.0)
+		_snd("boost", 0.0)
+	if _cine_once("riser", t_ti):
+		_snd("ignite", 2.0)
+	if _cine_once("stamp", float(M.stamp)):
+		_snd("cm_stamp", 1.0)
 	# --- Kamerawackeln (Boden bebt)
 	cine.sh = lerpf(float(cine.sh), shk, 1.0 - exp(-rdt * 10.0))
 	if float(cine.sh) > 0.001:
@@ -19563,7 +19977,7 @@ func _cine_step(dt: float) -> void:
 		cam.global_position += Vector3(sin(tt * 61.0), sin(tt * 47.0 + 1.3), sin(tt * 53.0 + 2.1)) * float(cine.sh)
 		cam.rotate_object_local(Vector3(0, 0, 1), sin(tt * 37.0) * float(cine.sh) * 0.25)
 	# --- Vorbeiflug: Ton, Beben, Dreck auf der Linse
-	if tr < 4.4:
+	if tr < t_frz + 0.05:
 		for i in range(ships.size()):
 			var o2: Dictionary = ships[i]
 			if float(o2.z) > zc - 2.0 and not (cine.passed as Dictionary).has(i):
@@ -19572,7 +19986,7 @@ func _cine_step(dt: float) -> void:
 				_vib(60, 0.6)
 				cine.wet = minf(1.0, float(cine.wet) + 0.45)
 				cine.fog = minf(0.3, float(cine.fog) + 0.12)
-	cine.wet = move_toward(float(cine.wet), 0.0, rdt * (0.05 if tr < 9.0 else 0.6))
+	cine.wet = move_toward(float(cine.wet), 0.0, rdt * (0.05 if tr < t_ed else 0.6))
 	cine.fog = move_toward(float(cine.fog), 0.0, rdt * 1.2)
 	var dr: ColorRect = cine.dirt
 	dr.visible = float(cine.wet) > 0.01 or float(cine.fog) > 0.01
@@ -19580,12 +19994,12 @@ func _cine_step(dt: float) -> void:
 		_sp(dr.material, "wet", float(cine.wet))
 		_sp(dr.material, "fog", float(cine.fog))
 	if _ev("CINESHOT") != "":
-		# nur zum Testen: Bilder zu festen Zeitpunkten, danach beenden
+		# nur zum Testen: Bilder zu festen Zeitpunkten
 		for st in _ev("CINESHOT").split(","):
 			if _cine_once("shot" + st, float(st)):
 				get_viewport().get_texture().get_image().save_png("/home/claude/work/cmp/cine_%s.png" % st)
 				print("CINE t=", st, " ts=", Engine.time_scale, " zc=", zc, " outs=", outs, " lead=", lead.z)
-	if tr > 14.6:
+	if tr > float(M.end):
 		_cine_end()
 
 
@@ -19603,10 +20017,27 @@ const ED_SHOTS = [
 
 
 # was: "party" (Siegesfeier) oder "impact" (nach dem Raketeneinschlag); tg: Funktion → [Mitte, Rahmen]
-func _ed_start(was: String, tg: Callable, sc: float, n: int, dur: float, final: bool) -> void:
+func _ed_start(was: String, tg: Callable, sc: float, n: int, dur: float, final: bool, seq := "") -> void:
 	var order = range(ED_SHOTS.size())
 	order.shuffle()
 	var sl = []
+	if seq != "":
+		# Schnittpunkte und Tempo aus dem Schnitt-Editor: jede Einstellung läuft von Schnitt zu Schnitt,
+		# die Kamera bewegt sich im Takt der Tempokurve (schnell, wo die Zeit rast, fast still in der Zeitlupe)
+		var cuts: Array = cut[seq].cuts
+		var ee = _cut_eend(seq)
+		for i in range(cuts.size()):
+			var a = float(cuts[i])
+			var b = minf(float(cuts[i + 1]) if i + 1 < cuts.size() else ee, ee)
+			if b - a < 0.04:
+				continue
+			sl.append({"s": ED_SHOTS[order[i % order.size()]], "a": a, "b": b, "out": true, "mir": 1.0 if randf() < 0.5 else -1.0, "cum": _ed_cum(seq, a, b)})
+		if final and _cut_m(seq, "pend") > _cut_m(seq, "push") + 0.04:
+			var pa = _cut_m(seq, "push")
+			var pb = _cut_m(seq, "pend")
+			sl.append({"s": {"p0": Vector3(0.9, 0.65, 4.8), "p1": Vector3(0.5, 0.45, 2.7), "l": Vector3(0, 0.2, 0), "roll": 0.0, "fov": 60.0}, "a": pa, "b": pb, "out": false, "mir": 1.0, "cum": _ed_cum(seq, pa, pb)})
+		ed = {"was": was, "tg": tg, "sc": sc, "sl": sl, "i": 0, "u": 0.0, "pp": Vector3.ZERO, "seq": seq}
+		return
 	for i in range(mini(n, order.size())):
 		sl.append({"s": ED_SHOTS[order[i]], "dur": dur, "out": true, "mir": 1.0 if randf() < 0.5 else -1.0})
 	if final:
@@ -19626,24 +20057,63 @@ func _ed_stop() -> void:
 		AudioServer.playback_speed_scale = 1.0
 
 
+# Fortschritt der Kamerafahrt innerhalb einer Einstellung: anteilige Spielzeit (32 Stützstellen)
+func _ed_cum(seq: String, a: float, b: float) -> Array:
+	var c = [0.0]
+	var sm = 0.0
+	for j in range(32):
+		sm += _cut_ts(seq, lerpf(a, b, (j + 0.5) / 32.0))
+		c.append(sm)
+	for j in range(c.size()):
+		c[j] = float(c[j]) / maxf(0.0001, sm)
+	return c
+
+
 # true = die Schnitt-Kamera hat die Kamera gesetzt
 func _ed_step(dt: float) -> bool:
 	if ed.is_empty():
 		return false
 	var rdt = clampf(dt / maxf(0.03, Engine.time_scale), 0.0, 0.1)
-	var sh: Dictionary = ed.sl[ed.i]
-	ed.u = float(ed.u) + rdt / float(sh.dur)
-	if float(ed.u) >= 1.0:
-		ed.i = int(ed.i) + 1
-		ed.u = 0.0
-		if int(ed.i) >= (ed.sl as Array).size():
-			_ed_stop()
-			return false
-		sh = ed.sl[ed.i]
-	var u: float = ed.u
+	var sh: Dictionary
+	var u: float
 	var e: float
 	var v: float
-	if sh.out:
+	if ed.has("seq"):
+		var sl: Array = ed.sl
+		if sl.is_empty() or seqc.get("s", "") != ed.seq:
+			_ed_stop()
+			return false
+		var t = float(seqc.t)
+		var idx = -1
+		for i in range(sl.size()):
+			if t >= float(sl[i].a) and t < float(sl[i].b):
+				idx = i
+		if idx < 0:
+			if t >= float(sl[sl.size() - 1].b):
+				_ed_stop()
+			return false
+		sh = sl[idx]
+		u = (t - float(sh.a)) / maxf(0.001, float(sh.b) - float(sh.a))
+		var cm: Array = sh.cum
+		var fj = u * 32.0
+		var j0 = clampi(int(fj), 0, 31)
+		e = lerpf(float(cm[j0]), float(cm[j0 + 1]), fj - j0)
+		var tsn = _cut_ts(ed.seq, t)
+		v = 1.0 + clampf((tsn - 1.0) / 0.6, 0.0, 1.0) * 0.86 if sh.out else 1.0   # Wischer, wo die Zeit rast
+	else:
+		sh = ed.sl[ed.i]
+		ed.u = float(ed.u) + rdt / float(sh.dur)
+		if float(ed.u) >= 1.0:
+			ed.i = int(ed.i) + 1
+			ed.u = 0.0
+			if int(ed.i) >= (ed.sl as Array).size():
+				_ed_stop()
+				return false
+			sh = ed.sl[ed.i]
+		u = ed.u
+	if ed.has("seq"):
+		pass
+	elif sh.out:
 		var k = 0.86   # schnell an den Enden, langsam in der Mitte
 		e = u + k * sin(TAU * u) / TAU
 		v = 1.0 + k * cos(TAU * u)
@@ -19670,7 +20140,9 @@ func _ed_step(dt: float) -> bool:
 	# Tempo der ganzen Szene: beim Reißen schnell, beim Gleiten Zeitlupe
 	var w = clampf((v - 1.0) / 0.86, 0.0, 1.0)
 	var ts = lerpf(0.22, 1.6, w * w) if sh.out else lerpf(0.35, 1.0, u)
-	if mc.is_empty() or ed.was == "impact" or ed.was == "cine":
+	if ed.has("seq"):
+		pass   # das Tempo setzt die Szene selbst (Tempokurve)
+	elif mc.is_empty() or ed.was == "impact" or ed.was == "cine":
 		Engine.time_scale = ts
 		_pss(1.0 if ed.was == "party" else clampf(ts, 0.5, 1.0))   # Siegesfeier: Musik und Töne laufen normal weiter, nur das Bild spielt mit der Zeit (John)
 	# Wischer in Bewegungsrichtung auf dem Bildschirm
@@ -19733,10 +20205,16 @@ func _mc_cam(dt: float) -> bool:
 		# nach dem Knall: Schnitt-Kamera mit kurzen Einstellungen um die Explosion (nicht in Röhre/Tunnel – zu eng)
 		if mc.hold >= 0.0 and not ed.is_empty() and ed.was == "impact":
 			mc.hold -= rdt0
+			if seqc.get("s", "") == "kill":
+				mc.hold = float(mc.get("hend", 2.8)) - float(seqc.t)   # Uhr der Szene (im Takt der Musik)
 			if mc.hold <= 0.0:
 				_ed_stop()
 				_mc_end()
 				return false
+			var pik = float(mc.get("hend", 2.8)) - float(mc.hold)
+			var sk = _cut_ts("kill", pik)
+			Engine.time_scale = sk
+			_pss(clampf(sk * 1.5, 0.5, 1.0) if int(cut.kill.slow) == 1 else 1.0)
 			if _ed_step(dt):
 				_mcl_tick()
 				return true
@@ -19750,24 +20228,19 @@ func _mc_cam(dt: float) -> bool:
 			var kr = smoothstep(1.0, float(mc.get("dcut", 6.0)), dle)
 			slo = lerpf(0.1, 1.0, kr * kr)
 		else:
-			var pi = 2.8 - float(mc.hold)   # echte Sekunden seit dem Einschlag
+			var pi = float(mc.get("hend", 2.8)) - float(mc.hold)   # echte Sekunden seit dem Einschlag
 			var ctx = mc.get("ctg")
-			if pi >= 0.45 and not mc.has("edgo") and ctx != null and is_instance_valid(ctx.node) and not (T.pipe_k(float(ctx.z)) > 0.05 or T.in_tun(T.lz(float(ctx.z)), 3.0)):
+			var kcuts: Array = cut.kill.cuts
+			if not kcuts.is_empty() and pi >= float(kcuts[0]) and pi < _cut_eend("kill") and not mc.has("edgo") and ctx != null and is_instance_valid(ctx.node) and not (T.pipe_k(float(ctx.z)) > 0.05 or T.in_tun(T.lz(float(ctx.z)), 3.0)):
 				mc.edgo = true
 				var cref = ctx
 				_ed_start("impact", func():
 					if not is_instance_valid(cref.node):
 						return null
-					return [(cref.node as Node3D).global_position, T.sframe(float(cref.z), float(cref.lat))], 5.2, 3, 0.62, false)
-			if pi < 0.45:
-				slo = 0.06
-			elif pi < 1.05:
-				var ku = (pi - 0.45) / 0.6
-				slo = lerpf(0.06, 1.35, ku * ku * (3.0 - 2.0 * ku))
-			else:
-				slo = lerpf(1.35, 1.0, clampf((pi - 1.05) / 0.9, 0.0, 1.0))
+					return [(cref.node as Node3D).global_position, T.sframe(float(cref.z), float(cref.lat))], 5.2, 0, 0.0, false, "kill")
+			slo = _cut_ts("kill", pi)   # Tempokurve aus dem Schnitt-Editor
 		Engine.time_scale = slo
-		_pss(clampf(slo * 1.5, 0.5, 1.0))
+		_pss(clampf(slo * 1.5, 0.5, 1.0) if (mc.hold < 0.0 or int(cut.kill.slow) == 1) else 1.0)
 		var ct = mc.get("ctg")
 		if ct == null or not is_instance_valid(ct.node):
 			_mc_end()
@@ -19778,7 +20251,9 @@ func _mc_cam(dt: float) -> bool:
 			# Rakete noch unterwegs: vor dem Schiff, leicht seitlich, Blick zurück – die Raketen kommen von hinten an
 			if not (shots.has(sh) and is_instance_valid(sh.n)) or float(mc.t) > 12.0:
 				_mcl("HALT (Zeitlupe) t=%.2f" % float(mc.t))
-				mc.hold = 2.8   # Kamerafahrt ums Schiff nach dem Einschlag (eine Sekunde länger als früher)
+				mc.hend = maxf(0.5, _cut_m("kill", "end"))   # Länge nach dem Einschlag aus dem Schnitt-Editor
+				mc.hold = mc.hend
+				_seq_begin("kill")
 				mc.oa = 0.0
 			var want2 = TP + f3.fw * 4.6 + f3.rr * (1.5 * float(mc.side)) + f3.uu * 0.95
 			var look2 = TP - f3.fw * 2.5 + f3.uu * 0.2
@@ -19790,16 +20265,18 @@ func _mc_cam(dt: float) -> bool:
 		else:
 			# nach dem Einschlag: langsame Fahrt um das Schiff (von vorn-seitlich nach seitlich-hinten), Blick aufs Schiff
 			mc.hold -= rdt0
+			if seqc.get("s", "") == "kill":
+				mc.hold = float(mc.get("hend", 2.8)) - float(seqc.t)
 			mc.oa = float(mc.get("oa", 0.0)) + rdt0
-			var a = lerpf(0.35, 1.9, clampf(float(mc.oa) / 2.8, 0.0, 1.0)) * float(mc.side)
-			var off = f3.fw * (cos(a) * 9.0) + f3.rr * (sin(a) * 9.0) + f3.uu * (1.8 + 0.6 * float(mc.oa) / 2.8)   # weiter weg: die (jetzt riesige) Explosion passt ins Bild
+			var a = lerpf(0.35, 1.9, clampf(float(mc.oa) / float(mc.get("hend", 2.8)), 0.0, 1.0)) * float(mc.side)
+			var off = f3.fw * (cos(a) * 9.0) + f3.rr * (sin(a) * 9.0) + f3.uu * (1.8 + 0.6 * float(mc.oa) / float(mc.get("hend", 2.8)))   # weiter weg: die (jetzt riesige) Explosion passt ins Bild
 			var want3: Vector3 = TP + off
 			# Röhre/Tunnel: die Kamera bleibt drinnen (9 m zur Seite lag sie draußen hinter der Wand – man sah nur die Stadt,
 			# nicht die Explosion, John). Stattdessen vor dem Schiff längs der Röhre, leicht seitlich, an der Wand entlang.
 			if T.pipe_k(float(ct.z)) > 0.05 or T.in_tun(T.lz(float(ct.z)), 3.0):
-				var a2 = lerpf(0.3, 1.0, clampf(float(mc.oa) / 2.8, 0.0, 1.0)) * float(mc.side)
+				var a2 = lerpf(0.3, 1.0, clampf(float(mc.oa) / float(mc.get("hend", 2.8)), 0.0, 1.0)) * float(mc.side)
 				var sfc = T.sframe(float(ct.z) + cos(a2) * 8.5, float(ct.lat) + sin(a2) * 1.5)
-				want3 = sfc.c + sfc.uu * (1.15 + 0.25 * float(mc.oa) / 2.8)
+				want3 = sfc.c + sfc.uu * (1.15 + 0.25 * float(mc.oa) / float(mc.get("hend", 2.8)))
 			mc.p = (mc.p as Vector3).lerp(want3, 1.0 - exp(-rdt0 * 6.0))
 			mc.l = (mc.l as Vector3).lerp(TP, 1.0 - exp(-rdt0 * 8.0))
 			if mc.hold <= 0.0:
@@ -21434,7 +21911,11 @@ func _fin_update(dt: float) -> void:
 				fin.phase = 1
 				_comic_start("win" if fin.win else "lose", fin.who)
 	elif fin.phase == 5:
-		fin.pt = float(fin.pt) + dt
+		# Uhr der Feier in echten Sekunden (passt so zur Musik); Tempo aus dem Schnitt-Editor
+		fin.pt = float(seqc.t) if seqc.get("s", "") == "party" else float(fin.pt) + rdt_g
+		var pts = _cut_ts("party", float(fin.pt))
+		Engine.time_scale = pts
+		_pss(clampf(pts, 0.5, 1.0) if int(cut.party.slow) == 1 else 1.0)
 		if _ev("FEETDBG") != "" and not party.is_empty() and int(fin.get("fdb", 0)) == 0 and float(fin.pt) > 1.0:
 			fin.fdb = 1
 			for fg in (party.n as Node3D).find_children("*", "Skeleton3D", true, false):
@@ -21455,7 +21936,7 @@ func _fin_update(dt: float) -> void:
 				fin.pk = k + 1
 				if k + 1 >= ts.size():
 					get_tree().quit()
-		if fin.pt >= PARTY_T or fin.get("skip", false):
+		if fin.pt >= _cut_m("party", "end") or fin.get("skip", false):
 			fin.phase = 1
 			_party_end()
 			_comic_start("win", fin.who)
@@ -22835,7 +23316,7 @@ func _music_update(dt: float) -> void:
 				music_p.play()
 	else:
 		music_f = minf(1.0, music_f + dt / 1.2)
-	music_p.volume_db = linear_to_db(maxf(0.0005, music_f)) + (float(MUSIC_GAIN.get(music_cur, 0.0)) if music_k == "music_race" else 0.0)
+	music_p.volume_db = linear_to_db(maxf(0.0005, music_f * (1.0 - seq_duck))) + (float(MUSIC_GAIN.get(music_cur, 0.0)) if music_k == "music_race" else 0.0)   # eigene Szenen-Musik übertönt
 	# Zeitlupe: Musik wird wie alles andere hörbar langsamer und tiefer (John mag den Effekt)
 	music_p.pitch_scale = 1.0
 	# Sicherung: läuft gerade keine Zeitlupe, spielt der Ton in Normaltempo. Sonst konnte das Tempo nach einer
