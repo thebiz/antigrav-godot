@@ -19330,8 +19330,121 @@ void fragment(){
 	ALBEDO=c;
 }
 """
+const EB_SHADER = """
+shader_type spatial;
+render_mode unshaded,cull_disabled,blend_add,depth_draw_never,shadows_disabled;
+// Rettungsblase: Waben wie die Notluke, am Rand heller, Randschimmer in der Fahrerfarbe; von innen fast klar
+uniform vec3 rc=vec3(1.,.2,.3);
+float hd(vec2 p){p=abs(p);return max(dot(p,vec2(.5,.8660254)),p.x);}
+void fragment(){
+	vec2 q=UV*vec2(22.,11.);
+	vec2 r=vec2(1.,1.7320508),h=r*.5;
+	vec2 a=mod(q,r)-h,b=mod(q-h,r)-h;
+	vec2 g=dot(a,a)<dot(b,b)?a:b;
+	float e=smoothstep(.38,.48,hd(g));
+	float rnd=fract(sin(dot(q-g,vec2(12.9898,78.233)))*43758.5453);
+	float sh=.5+.5*sin(TIME*3.+rnd*6.283);
+	float fr=pow(1.-abs(dot(normalize(NORMAL),normalize(VIEW))),2.2);
+	vec3 c=vec3(.2,.75,1.)*e*(.04+.5*fr)*(.6+.6*sh)+mix(vec3(.2,.75,1.),rc,.55)*fr*.7;
+	ALBEDO=c;
+}
+"""
 var ejs = []
 var ej_cam = {}
+var ej_ps: PackedScene = null
+
+
+# Fahrerfigur (Ren aus der Siegerfeier) auf dem Sitz; Gegner im Anzug in ihrer Fahrerfarbe
+func _ej_fig(parent: Node3D, col: Color, idx: int) -> Dictionary:
+	if ej_ps == null:
+		ej_ps = party_cache.get("ren", null)
+		if ej_ps == null:
+			ej_ps = load("res://win/ren.glb")
+			party_cache["ren"] = ej_ps
+	var n: Node3D = ej_ps.instantiate()
+	var root = Node3D.new()
+	root.add_child(n)
+	parent.add_child(root)
+	var sk: Skeleton3D = n.find_children("*", "Skeleton3D", true, false)[0]
+	var dx: Transform3D = _rel_xf(n, sk)
+	var hd = sk.find_bone("mixamorig_Head")
+	var lf = sk.find_bone("mixamorig_LeftFoot")
+	var hp = sk.find_bone("mixamorig_Hips")
+	var hgt = maxf(0.05, ((dx * sk.get_bone_global_rest(hd).origin).y - (dx * sk.get_bone_global_rest(lf).origin).y) * 1.12)
+	var hpp: Vector3 = dx * sk.get_bone_global_rest(hp).origin
+	n.position = -hpp   # Hüfte auf den Sitz
+	root.scale = Vector3.ONE * (0.3 / hgt)   # etwas kleiner als in der Feier, passt in die Blase
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = mi
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var src = m.mesh.surface_get_material(0)
+		if src is StandardMaterial3D:
+			# leicht selbstleuchtend, damit man den Fahrer in der Nacht in seiner Blase erkennt
+			var mm = (src as StandardMaterial3D).duplicate()
+			if idx != 0:
+				mm.albedo_color = col.lerp(Color(1, 1, 1), 0.35)
+			mm.emission_enabled = idx != 0
+			mm.emission = mm.albedo_color * 0.16
+			mm.emission_texture = mm.albedo_texture
+			m.material_override = mm
+	var bn = {}
+	for k in ["Hips", "Spine", "Spine2", "Neck", "Head", "LeftUpLeg", "LeftLeg", "LeftFoot", "LeftToeBase", "RightUpLeg", "RightLeg", "RightFoot", "RightToeBase",
+			"LeftArm", "LeftForeArm", "LeftHand", "RightArm", "RightForeArm", "RightHand"]:
+		bn[k] = sk.find_bone("mixamorig_" + k)
+	return {"sk": sk, "bn": bn, "dxb": dx.basis.orthonormalized(), "ph": randf() * 6.0}
+
+
+# Knochen so drehen, dass er (zum Kind hin) in Richtung d zeigt – d in Figur-Richtungen (+Y oben, +Z vorn, +X links)
+func _ej_aim(f: Dictionary, b: String, c: String, d: Vector3) -> void:
+	var sk: Skeleton3D = f.sk
+	var bi = int(f.bn.get(b, -1))
+	var ci = int(f.bn.get(c, -1))
+	if bi < 0 or ci < 0:
+		return
+	var gp = sk.get_bone_global_pose(bi)
+	var cur = (gp.basis * sk.get_bone_rest(ci).origin).normalized()
+	var want = ((f.dxb as Basis).inverse() * d).normalized()
+	if cur.length() < 0.5 or absf(cur.dot(want)) > 0.99999:
+		return
+	gp.basis = Basis(Quaternion(cur, want)) * gp.basis
+	sk.set_bone_global_pose(bi, gp)
+
+
+# Sitzhaltung: Oberschenkel nach vorn, Unterschenkel baumeln (wechselnd), Hände an den Griffen;
+# Gegner rudern mit den Armen. Eigene Figur: Kopf ausgeblendet (die Kamera sitzt dort)
+func _ej_pose(f: Dictionary, t: float, own: bool) -> void:
+	if f.is_empty() or not is_instance_valid(f.sk):
+		return
+	var sk: Skeleton3D = f.sk
+	sk.reset_bone_poses()
+	var ph = float(f.ph) + t
+	for sd in [1.0, -1.0]:
+		var L = "Left" if sd > 0.0 else "Right"
+		var a = 0.35 + 0.42 * sin(ph * 6.5 + (0.0 if sd > 0.0 else 2.4))
+		_ej_aim(f, L + "UpLeg", L + "Leg", Vector3(0.36 * sd, -0.25, 1.0))
+		_ej_aim(f, L + "Leg", L + "Foot", Vector3(0.05 * sd, -cos(a), sin(a)))
+		_ej_aim(f, L + "Foot", L + "ToeBase", Vector3(0.0, -0.35, 1.0))
+		if own:
+			_ej_aim(f, L + "Arm", L + "ForeArm", Vector3(0.3 * sd, -1.0, -0.05))
+			_ej_aim(f, L + "ForeArm", L + "Hand", Vector3(0.12 * sd, -0.55, 1.0))
+		else:
+			var w = sin(ph * 7.5 + (0.0 if sd > 0.0 else 1.7))
+			_ej_aim(f, L + "Arm", L + "ForeArm", Vector3(0.8 * sd, 0.15 + 0.55 * w, 0.25))
+			_ej_aim(f, L + "ForeArm", L + "Hand", Vector3(0.5 * sd, 0.6 + 0.4 * w, 0.4))
+	if own:
+		for k in ["Head", "Neck"]:
+			var hb = int(f.bn.get(k, -1))
+			if hb >= 0:
+				sk.set_bone_pose_scale(hb, Vector3.ONE * 0.001)
+
+
+func _ej_head(e: Dictionary) -> Vector3:
+	var f: Dictionary = e.fig
+	if f.is_empty() or not is_instance_valid(f.sk):
+		return (e.n as Node3D).global_position + Vector3.UP * 0.12
+	var sk: Skeleton3D = f.sk
+	var hi = int(f.bn.get("Neck", -1))
+	return sk.global_transform * sk.get_bone_global_rest(hi).origin if hi >= 0 else (e.n as Node3D).global_position
 var ef_rip = {}   # Energiefeld: {"p": Durchbruchstelle, "t": Sekunden seither}
 const EJ_CAM_T = 3.0
 
@@ -19394,76 +19507,53 @@ func _eject(o: Dictionary, z: float, lat: float, from_rp := false) -> void:
 		C = f.c + U * (0.4 + R)
 		kind = "tun"
 	var own = int(o.idx) == 0 and not from_rp and state != "replay" and state != "kill"
-	# Kapsel: dunkler Körper mit Leuchtband, Glasdom, Helm in der Fahrerfarbe, Düse unten
+	# Rettungsfeld: der Fahrer sitzt sichtbar auf seinem Sitz in einer Energieblase aus Waben (wie die Notluke)
 	var n = Node3D.new()
 	add_child(n)
-	var body = MeshInstance3D.new()
-	var bm = SphereMesh.new()
-	bm.radius = 0.26
-	bm.height = 0.42
-	bm.radial_segments = 16
-	bm.rings = 8
-	body.mesh = bm
-	body.scale = Vector3(1.0, 0.8, 1.35)
-	var bmat = StandardMaterial3D.new()
-	bmat.albedo_color = Color(0.22, 0.23, 0.27)
-	bmat.metallic = 0.6
-	bmat.roughness = 0.3
-	bmat.emission_enabled = true
-	bmat.emission = col * 0.25
-	body.material_override = bmat
-	n.add_child(body)
-	var band = MeshInstance3D.new()
-	var tm = TorusMesh.new()
-	tm.inner_radius = 0.258
-	tm.outer_radius = 0.278
-	tm.rings = 20
-	tm.ring_segments = 6
-	band.mesh = tm
-	band.scale = Vector3(1.0, 1.0, 1.35)
-	band.material_override = _glow_mat(col, 6.0)
-	n.add_child(band)
-	var helm = MeshInstance3D.new()
-	var hm = SphereMesh.new()
-	hm.radius = 0.09
-	hm.height = 0.18
-	helm.mesh = hm
-	helm.position = Vector3(0, 0.17, 0.05)
-	helm.material_override = _glow_mat(col.lerp(Color(1, 1, 1), 0.25), 2.4)
-	n.add_child(helm)
-	var visor = MeshInstance3D.new()
-	var vm = BoxMesh.new()
-	vm.size = Vector3(0.12, 0.035, 0.03)
-	visor.mesh = vm
-	visor.position = Vector3(0, 0.18, -0.03)
-	visor.material_override = _glow_mat(Color(0.6, 0.95, 1.0), 3.0)
-	n.add_child(visor)
-	var dome = MeshInstance3D.new()
-	var dm = SphereMesh.new()
-	dm.radius = 0.2
-	dm.height = 0.2
-	dm.is_hemisphere = true
-	dome.mesh = dm
-	dome.position = Vector3(0, 0.1, 0.03)
-	var gm = StandardMaterial3D.new()
-	gm.albedo_color = Color(0.55, 0.85, 1.0, 0.22)
-	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	gm.metallic = 0.2
-	gm.roughness = 0.05
-	gm.emission_enabled = true
-	gm.emission = Color(0.3, 0.6, 1.0)
-	gm.emission_energy_multiplier = 0.3
-	dome.material_override = gm
-	n.add_child(dome)
-	var jet = MeshInstance3D.new()
+	var smat = StandardMaterial3D.new()
+	smat.albedo_color = Color(0.16, 0.17, 0.2)
+	smat.metallic = 0.7
+	smat.roughness = 0.35
+	var seat = []
+	for sp in [[Vector3(0.13, 0.025, 0.13), Vector3(0, -0.035, 0.035)], [Vector3(0.13, 0.17, 0.025), Vector3(0, 0.05, -0.04)], [Vector3(0.02, 0.05, 0.11), Vector3(0.075, 0.0, 0.03)], [Vector3(0.02, 0.05, 0.11), Vector3(-0.075, 0.0, 0.03)]]:
+		var bx = MeshInstance3D.new()
+		var bmh = BoxMesh.new()
+		bmh.size = sp[0]
+		bx.mesh = bmh
+		bx.position = sp[1]
+		bx.material_override = smat
+		n.add_child(bx)
+		seat.append(bx)
+	var edge = MeshInstance3D.new()   # Leuchtkante am Sitz in der Fahrerfarbe
+	var em = BoxMesh.new()
+	em.size = Vector3(0.135, 0.008, 0.008)
+	edge.mesh = em
+	edge.position = Vector3(0, 0.137, -0.04)
+	edge.material_override = _glow_mat(col, 6.0)
+	n.add_child(edge)
+	seat.append(edge)
+	var fig = _ej_fig(n, col, int(o.idx))
+	var bub = MeshInstance3D.new()
+	var bsm = SphereMesh.new()
+	bsm.radius = 0.24
+	bsm.height = 0.48
+	bsm.radial_segments = 28
+	bsm.rings = 14
+	bub.mesh = bsm
+	bub.position = Vector3(0, 0.02, 0.02)
+	var bmat = _shader_mat(EB_SHADER)
+	bmat.set_shader_parameter("rc", Vector3(col.r, col.g, col.b))
+	bub.material_override = bmat
+	n.add_child(bub)
+	var jet = MeshInstance3D.new()   # Antrieb unter dem Sitz
 	var jm = SphereMesh.new()
-	jm.radius = 0.07
-	jm.height = 0.14
+	jm.radius = 0.05
+	jm.height = 0.1
 	jet.mesh = jm
-	jet.position = Vector3(0, -0.22, 0)
-	jet.material_override = _glow_mat(Color(1.0, 0.85, 0.6).lerp(col, 0.35), 5.0)
+	jet.position = Vector3(0, -0.21, 0.0)
+	jet.material_override = _glow_mat(Color(0.7, 0.95, 1.0).lerp(col, 0.3), 5.0)
 	n.add_child(jet)
-	for c in n.get_children():
+	for c in n.find_children("*", "GeometryInstance3D", true, false):
 		(c as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# Schweif als leuchtendes Band (zum Betrachter gedreht)
 	var tr = MeshInstance3D.new()
@@ -19495,7 +19585,7 @@ func _eject(o: Dictionary, z: float, lat: float, from_rp := false) -> void:
 		(gr.mesh as TorusMesh).outer_radius = 0.4
 		gr.visible = false
 		ag.append(gr)
-	var e = {"n": n, "body": [body, band, helm, visor, dome, jet], "tr": tr, "ring": ring, "ag": ag, "S": S, "A": A, "C": C, "U": U, "k": kind,
+	var e = {"n": n, "body": [jet], "fig": fig, "bub": bub, "tr": tr, "ring": ring, "ag": ag, "S": S, "A": A, "C": C, "U": U, "k": kind,
 		"z0": z, "lat0": lat, "v0": 0.0 if own else float(o.get("spd", 0.0)) * 1.25, "H": 28.0 if own else 7.0, "t": 0.0, "col": col, "own": own, "pts": [], "rip": false, "fw": f.fw, "side": f.rr * (1.0 if randf() < 0.5 else -1.0), "W": S}
 	n.global_position = S
 	ejs.append(e)
@@ -19509,8 +19599,15 @@ func _eject(o: Dictionary, z: float, lat: float, from_rp := false) -> void:
 		if not ed.is_empty():
 			_ed_stop()
 		ej_cam = {"e": e, "t": 0.0}
-		for c in e.body:
-			(c as Node3D).visible = false   # die Kamera sitzt in der Kapsel
+		jet.visible = false
+		(seat[0] as Node3D).visible = false   # Sitzfläche würde in der Ego-Sicht den Blick zwischen den Beinen verdecken
+		var bl = OmniLight3D.new()   # die Blase leuchtet den Fahrer von innen an (sonst sind die Beine über dem dunklen Tunnel schwarz)
+		bl.light_color = Color(0.65, 0.88, 1.0)
+		bl.light_energy = 0.22
+		bl.omni_range = 0.55
+		bl.shadow_enabled = false
+		bl.position = Vector3(0, 0.2, 0.25)
+		n.add_child(bl)
 
 
 func _ej_clear() -> void:
@@ -19578,11 +19675,13 @@ func _ej_update(dt: float) -> void:
 			p += (e.side as Vector3) * down * 1.4 - Vector3.UP * down * 1.6
 		var pv: Vector3 = n.global_position
 		n.global_position = p
-		# Lage: Dom zeigt nach hinten oben (man sieht den Helm), leichtes Pendeln
-		var up: Vector3 = (e.U as Vector3)
+		# Lage: aufrecht, Blick in Fahrtrichtung; Gegner drehen sich langsam (man sieht sie von allen Seiten)
+		var up: Vector3 = (e.U as Vector3).lerp(Vector3.UP, clampf(t * 1.5, 0.0, 1.0)).normalized()
 		var fwd: Vector3 = (e.fw as Vector3)
-		var bz = Basis.looking_at(fwd.lerp(-up, 0.35).normalized(), up.lerp(-fwd, 0.55).normalized()) if absf(fwd.dot(up)) < 0.98 else Basis()
-		n.global_transform.basis = bz.rotated(up, sin(t * 3.0) * 0.25 * minf(1.0, t))
+		var bz = Basis.looking_at(-fwd, up) if absf(fwd.dot(up)) < 0.98 else Basis()
+		var spin = 0.0 if e.own else t * 1.1 + sin(t * 2.0) * 0.3
+		n.global_transform.basis = bz.rotated(up, spin + sin(t * 2.6) * 0.12)
+		_ej_pose(e.fig, t, e.own)
 		# Absprengring
 		var ring = e.ring
 		if ring != null and is_instance_valid(ring):
@@ -19667,18 +19766,15 @@ func _ej_cam_step() -> bool:
 	if float(ej_cam.t) > EJ_CAM_T + 0.6 or not is_instance_valid(e.n) or state == "menu":
 		ej_cam = {}
 		return false
-	var p: Vector3 = (e.n as Node3D).global_position
-	var U: Vector3 = e.U
-	var dw: Vector3 = (e.W as Vector3) - p
-	var dl = dw.length()
-	var look: Vector3 = (-U).lerp(dw / maxf(0.001, dl), clampf((dl - 0.8) / 3.0, 0.0, 0.85)).normalized()
-	cam.global_position = p + U * 0.05
-	var upv: Vector3 = (e.fw as Vector3)
-	if absf(upv.dot(look)) > 0.97:
-		upv = (e.side as Vector3)
-	cam.look_at(p + look * 10.0, upv)
-	cam.rotate_object_local(Vector3(0, 0, 1), float(ej_cam.t) * 0.12)
-	cam.fov = 80.0
+	# Ego-Perspektive: aus dem Kopf des Fahrers nach unten – zwischen den eigenen baumelnden Beinen hindurch auf Wrack und Strecke
+	var n: Node3D = e.n
+	var hp: Vector3 = _ej_head(e)
+	var U: Vector3 = n.global_transform.basis.y.normalized()
+	var F: Vector3 = n.global_transform.basis.z.normalized()
+	var look: Vector3 = (-U * 1.0 + F * 0.3).normalized()
+	cam.global_position = hp + U * 0.035 + F * 0.03
+	cam.look_at(cam.global_position + look * 10.0, F)
+	cam.fov = 84.0
 	return true
 
 
