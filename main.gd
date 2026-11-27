@@ -17244,6 +17244,10 @@ func _lap_pos(z: float) -> void:
 	if deco != null and not party_on:
 		deco.position = Vector3(0, 0, l0 * T.LAP)
 	blimp_off = l0 * T.LAP
+	if gate.has("h") and is_instance_valid(gate.h):
+		# Start-Ziel-Tor: in der zweiten Rundenhälfte schon an der nächsten Ziellinie, damit man darauf zufährt
+		var gl = l0 + (1 if z - 20.0 - l0 * T.LAP > T.LAP * 0.5 else 0)
+		(gate.h as Node3D).position = Vector3(0, 0, gl * T.LAP)
 	for i in range(laps.size()):
 		var p = Vector3(0, 0, (l0 - 1 + i) * T.LAP)
 		if laps[i].position != p:
@@ -24478,8 +24482,12 @@ func _gate_build() -> void:
 		return
 	var z = T.ZST
 	var f = T.frame(z)
+	# eigener Halter statt deco: deco springt erst beim Überfahren der Linie in die nächste Runde –
+	# das Tor muss aber schon beim Anfahren in der nächsten Runde stehen (sonst sieht man es nie, siehe _lap_pos)
+	var holder = Node3D.new()
+	add_child(holder)
 	var root = Node3D.new()
-	deco.add_child(root)
+	holder.add_child(root)
 	root.global_transform = Transform3D(Basis.looking_at(f.fw, f.uu), f.c)
 	var half = T.TW + 0.45
 	var met = StandardMaterial3D.new()
@@ -24543,7 +24551,7 @@ func _gate_build() -> void:
 	root.add_child(led)
 	for c in root.get_children():
 		(c as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	gate = {"vp": vp, "cv": cv, "txt": "", "k": ""}
+	gate = {"vp": vp, "cv": cv, "txt": "", "k": "", "h": holder}
 	# grüne Lichtstreifen auf der Fahrbahn: vom Tor bis zum Ladefeld, an beiden Rändern der Ladespur
 	if T.S:
 		return
