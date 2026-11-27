@@ -165,6 +165,13 @@ func _hp_fx(g: Dictionary, racing: bool, dt: float) -> void:
 		if a.size() > 3 and float(a[3]) > 0.0 and race_t > float(a[3]) and not has_meta("hpt3"):
 			set_meta("hpt3", 1)
 			_flare_fire(g)
+		if a.size() > 5 and float(a[5]) > 0.0 and race_t > float(a[5]) and not has_meta("hpt4"):
+			set_meta("hpt4", 1)
+			g.wpn = "rak"
+			g.sup = false
+			g.mega = false
+			g.wpc = 1
+			_fire()
 		var ts = _ev("TSHOT").split(",")
 		for st in ts:
 			if race_t >= float(st) and not has_meta("ts" + st.replace(".", "_")):
@@ -5884,6 +5891,7 @@ func _tribunes() -> void:
 		deco = Node3D.new()
 		add_child(deco)
 	_chg_build()
+	_gate_build()
 	var L0 = T.TW + TRIB_L0
 	var depth = TRIB_ROWS * TRIB_SD
 	var top = TRIB_BASE + TRIB_ROWS * TRIB_RISE
@@ -11845,7 +11853,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	fl.add_child(fo)
 	# Glutball als Billboard: von hinten (Raketenkamera) sieht man die Kapseln nur von vorne – der Ball leuchtet aus jeder Richtung
 	var gq = QuadMesh.new()
-	gq.size = Vector2(RK_FL[4], RK_FL[4]) * float(X.size)
+	gq.size = Vector2(RK_FL[4], RK_FL[4]) * float(X.size) * 1.7   # größer, damit man die Rakete auch von hinten davonfliegen sieht
 	var gm = StandardMaterial3D.new()
 	gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	gm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
@@ -11853,7 +11861,7 @@ func _add_shot(from: Dictionary, at_player := false, homing := false, dir := 1.0
 	gm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	gm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	gm.albedo_texture = _puff_tex()
-	gm.albedo_color = Color(2.0, 1.2, 0.5, 0.6)
+	gm.albedo_color = Color(2.4, 1.4, 0.55, 0.85)
 	var gb = MeshInstance3D.new()
 	gb.mesh = gq
 	gb.material_override = gm
@@ -14185,6 +14193,8 @@ func _weapons(dt: float, racing: bool) -> void:
 			vs = base_spd * 3.75 * float(fx.rak.speed)   # so schnell wie die Mega-Rakete (John) – gilt für Normal und Super
 		elif sh.get("mega", false):
 			vs = base_spd * 3.75 * float(fx.rak.speed)   # Mega: ein Blitz – selbst eine ganze Runde dauert nur Sekunden
+		elif not sh.pl:
+			vs = maxf(spd, float(sh.get("ov", 0.0)) + base_spd * 1.4)   # normale Rakete immer klar schneller als ihr Schütze – sonst bleibt sie hinter dir und man sieht sie nie
 		var drp = float(sh.get("drp", 0.0))   # normal 0: zündet sofort; nur beim Close-up klinkt sie sichtbar aus
 		var dropping = sh.t < drp
 		if dropping:
@@ -17504,6 +17514,7 @@ func _process(delta: float) -> void:
 	_props_update(dt)
 	_cp("charge")
 	_chg_update(dt, racing)
+	_gate_update()
 	_cp("weapons")
 	_weapons(dt, racing)
 	_cp("mine_warn")
@@ -20034,6 +20045,14 @@ func _ej_update(dt: float) -> void:
 
 # Kamera in der eigenen Kapsel: senkrecht nach unten, das Wrack wird kleiner, die Strecke läuft im Bild nach oben
 func _ej_cam_step() -> bool:
+	if _ev("GATEVIEW") != "":
+		# nur zum Testen: Start-Ziel-Tor von vorn ansehen
+		var gf = T.frame(T.ZST - float(_ev("GATEVIEW")))
+		cam.global_position = gf.c + gf.uu * 1.2
+		var gt = T.frame(T.ZST)
+		cam.look_at(gt.c + gt.uu * 2.6, gf.uu)
+		cam.fov = 60.0
+		return true
 	if ej_cam.is_empty() and _ev("EJVIEW") != "" and not ejs.is_empty() and is_instance_valid(ejs[0].n):
 		# nur zum Testen: Kapsel von schräg hinten ansehen
 		var qp: Vector3 = (ejs[0].n as Node3D).global_position
@@ -24420,6 +24439,196 @@ func _dg_popup() -> void:
 	var b2 = _btn("Schließen")
 	b2.pressed.connect(func(): cl.queue_free())
 	vb.add_child(b2)
+
+
+# ================================================================ Start-Ziel-Tor (John)
+# Schwebende LED-Brücke über der Start-Ziel-Linie: oben „START / FINISH“, groß die Runde (letzte Runde blinkt rot,
+# im Ziel flackert FINISH in Gold), rechts „CHARGE“ mit Pfeil auf die Spur des Ladefelds. Von dort laufen grüne
+# Lichtstreifen auf der Fahrbahn bis zum Ladefeld – das Tor ist zugleich die Vorwarnung.
+const GATE_LED = """
+shader_type spatial;
+render_mode unshaded,cull_back,shadows_disabled;
+// LED-Wand: jedes Pixel ein runder Leuchtpunkt, Farbe aus dem gezeichneten Bild
+uniform sampler2D tx:filter_linear;
+uniform vec2 dots=vec2(144.,44.);
+void fragment(){
+	vec2 g=UV*dots;
+	vec2 id=floor(g)+.5;
+	vec3 c=texture(tx,id/dots).rgb;
+	float d=length(fract(g)-.5);
+	float m=smoothstep(.48,.3,d);
+	float lum=max(c.r,max(c.g,c.b));
+	ALBEDO=(c*3.2*m+vec3(.03,.035,.05)*m*(1.-step(.05,lum)))*(.92+.08*sin(TIME*60.+UV.y*40.));
+}"""
+const GATE_STRIPE = """
+shader_type spatial;
+render_mode unshaded,blend_add,cull_disabled,depth_draw_never,shadows_disabled;
+// grüne Lichtstreifen vom Tor zum Ladefeld: Striche laufen in Fahrtrichtung
+void fragment(){
+	float d=fract(UV.y*.32-TIME*1.5);
+	float dash=smoothstep(0.,.06,d)*smoothstep(.55,.45,d);
+	float fade=smoothstep(0.,5.,UV.y);
+	ALBEDO=vec3(.15,1.,.45)*(.1+dash*.95)*fade;
+}"""
+var gate = {}
+
+
+func _gate_build() -> void:
+	if deco == null:
+		return
+	var z = T.ZST
+	var f = T.frame(z)
+	var root = Node3D.new()
+	deco.add_child(root)
+	root.global_transform = Transform3D(Basis.looking_at(f.fw, f.uu), f.c)
+	var half = T.TW + 0.45
+	var met = StandardMaterial3D.new()
+	met.albedo_color = Color(0.08, 0.085, 0.1)
+	met.metallic = 0.8
+	met.roughness = 0.35
+	var neon = _neon(Color(0.2, 0.85, 1.0), 3.0)
+	var y0 = 2.5
+	var ph = 1.55
+	# Pfeiler links und rechts mit Leuchtkante
+	for sd in [-1.0, 1.0]:
+		var pl = MeshInstance3D.new()
+		var bm = BoxMesh.new()
+		bm.size = Vector3(0.2, y0 + ph + 0.2, 0.26)
+		pl.mesh = bm
+		pl.material_override = met
+		pl.position = Vector3(sd * half, (y0 + ph + 0.2) * 0.5 - 0.05, 0)
+		root.add_child(pl)
+		var ls = MeshInstance3D.new()
+		var lm = BoxMesh.new()
+		lm.size = Vector3(0.035, y0 + ph, 0.03)
+		ls.mesh = lm
+		ls.material_override = neon
+		ls.position = Vector3(sd * (half - 0.11), (y0 + ph) * 0.5, 0.14)
+		root.add_child(ls)
+	# Brücke mit LED-Wand
+	var beam = MeshInstance3D.new()
+	var bb = BoxMesh.new()
+	bb.size = Vector3(half * 2.0 + 0.2, ph + 0.18, 0.24)
+	beam.mesh = bb
+	beam.material_override = met
+	beam.position = Vector3(0, y0 + ph * 0.5, 0)
+	root.add_child(beam)
+	for yy in [y0 - 0.06, y0 + ph + 0.06]:
+		var es = MeshInstance3D.new()
+		var em = BoxMesh.new()
+		em.size = Vector3(half * 2.0 + 0.2, 0.04, 0.03)
+		es.mesh = em
+		es.material_override = neon
+		es.position = Vector3(0, yy, 0.135)
+		root.add_child(es)
+	var vp = SubViewport.new()
+	vp.size = Vector2i(576, 176)
+	vp.transparent_bg = false
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	vp.disable_3d = true
+	add_child(vp)
+	var cv = Control.new()
+	cv.size = Vector2(576, 176)
+	vp.add_child(cv)
+	cv.draw.connect(func(): _gate_draw(cv))
+	var led = MeshInstance3D.new()
+	var qm = QuadMesh.new()
+	qm.size = Vector2(half * 2.0 - 0.1, ph - 0.06)
+	led.mesh = qm
+	var lmat = _shader_mat(GATE_LED)
+	lmat.set_shader_parameter("tx", vp.get_texture())
+	led.material_override = lmat
+	led.position = Vector3(0, y0 + ph * 0.5, 0.125)
+	led.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(led)
+	for c in root.get_children():
+		(c as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	gate = {"vp": vp, "cv": cv, "txt": "", "k": ""}
+	# grüne Lichtstreifen auf der Fahrbahn: vom Tor bis zum Ladefeld, an beiden Rändern der Ladespur
+	if T.S:
+		return
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var za = z + 3.0
+	var zb: float = CHG_Z[0]
+	for edge in [[CHG_L[0], CHG_L[0] + 0.09], [CHG_L[1] - 0.09, CHG_L[1]]]:
+		var zz = za
+		while zz < zb - 0.001:
+			var z2 = minf(zz + 1.0, zb)
+			var f1 = T.frame(zz)
+			var f2 = T.frame(z2)
+			var a1: Vector3 = f1.c + f1.rr * float(edge[0]) + f1.uu * 0.016
+			var b1: Vector3 = f1.c + f1.rr * float(edge[1]) + f1.uu * 0.016
+			var a2: Vector3 = f2.c + f2.rr * float(edge[0]) + f2.uu * 0.016
+			var b2: Vector3 = f2.c + f2.rr * float(edge[1]) + f2.uu * 0.016
+			var u1 = zz - za
+			var u2 = z2 - za
+			for v in [[a1, Vector2(0, u1)], [b1, Vector2(1, u1)], [b2, Vector2(1, u2)], [a1, Vector2(0, u1)], [b2, Vector2(1, u2)], [a2, Vector2(0, u2)]]:
+				st.set_uv(v[1])
+				st.add_vertex(v[0])
+			zz = z2
+	var sm = MeshInstance3D.new()
+	sm.mesh = st.commit()
+	sm.material_override = _shader_mat(GATE_STRIPE)
+	sm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	deco.add_child(sm)
+
+
+# was die LED-Wand gerade zeigt: [Schlüssel, großer Text, Farbe, blinkt]
+func _gate_state() -> Array:
+	if ships.is_empty() or state == "menu":
+		return ["menu", "ANTIGRAV", Color(1.0, 0.55, 0.15), false]
+	var g: Dictionary = ships[0]
+	if free_ride:
+		return ["free", "FREE RIDE", Color(0.4, 0.95, 1.0), false]
+	var fin = float(g.get("fin", 0.0)) > 0.0 or (state == "done" and not g.out)
+	if fin:
+		return ["fin", "FINISH", Color(1.0, 0.8, 0.25), true]
+	var lap = clampi(int(floor((float(g.z) - T.ZST) / T.LAP)) + 1, 1, T.LAPS)
+	if lap >= T.LAPS and state == "race":
+		return ["final", "FINAL LAP", Color(1.0, 0.15, 0.12), true]
+	return ["lap%d" % lap, "LAP %d/%d" % [lap, T.LAPS], Color(1, 1, 1), false]
+
+
+func _gate_update() -> void:
+	if gate.is_empty() or not is_instance_valid(gate.vp):
+		return
+	var gs = _gate_state()
+	var on = true
+	if gs[3]:
+		on = fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.5
+	var k = str(gs[0]) + ("1" if on else "0")
+	if k != gate.k:
+		gate.k = k
+		gate.gs = gs
+		gate.on = on
+		(gate.cv as Control).queue_redraw()
+		(gate.vp as SubViewport).render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
+func _gate_draw(cv: Control) -> void:
+	var gs: Array = gate.get("gs", _gate_state())
+	var on: bool = gate.get("on", true)
+	var fnt = cv.get_theme_default_font()
+	cv.draw_rect(Rect2(0, 0, 576, 176), Color(0, 0, 0))
+	var top = "START / FINISH"
+	var tw = fnt.get_string_size(top, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+	var cx = 230.0 if not T.S else 288.0
+	cv.draw_string(fnt, Vector2(cx - tw * 0.5, 38), top, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(0.25, 0.85, 1.0))
+	if on:
+		var big: String = gs[1]
+		var fs = 72 if big.length() <= 8 else 60
+		var bw = fnt.get_string_size(big, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		cv.draw_string_outline(fnt, Vector2(cx - bw * 0.5, 130), big, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, gs[2])
+		cv.draw_string(fnt, Vector2(cx - bw * 0.5, 130), big, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gs[2])
+	if not T.S:
+		# rechts: CHARGE mit Pfeil nach rechts unten (dort liegt die Ladespur)
+		var gc = Color(0.2, 1.0, 0.45)
+		cv.draw_line(Vector2(462, 12), Vector2(462, 164), Color(0.2, 0.25, 0.3), 3.0)
+		var cw = fnt.get_string_size("CHARGE", HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+		cv.draw_string(fnt, Vector2(519 - cw * 0.5, 44), "CHARGE", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, gc)
+		var a = PackedVector2Array([Vector2(490, 70), Vector2(530, 110), Vector2(540, 88), Vector2(556, 150), Vector2(494, 134), Vector2(516, 124), Vector2(476, 84)])
+		cv.draw_colored_polygon(a, gc)
 
 
 # ================================================================ Ladestreifen
