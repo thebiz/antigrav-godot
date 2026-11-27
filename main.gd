@@ -404,6 +404,7 @@ func _ready() -> void:
 			shot_arg = true
 	cine_pending = not cine_done and (not shot_arg or _ev("CINE") != "") and int(cfg.get("intro", 1)) == 1
 	_cut_load()
+	RenderingServer.frame_pre_draw.connect(_seq_pause_hold)
 	if OS.get_cmdline_user_args().has("--free") and OS.get_environment("AG_RELOADED") == "":
 		free_ride = true
 	if pending_free:
@@ -20111,6 +20112,8 @@ var seq_duck = 0.0
 var seq_fade = -1.0
 var cut_mus = {}
 var rdt_g = 0.0          # echte Sekunden dieses Bildes, unabhängig von der Zeitlupe
+var seq_pause = false   # Vorschau vom PC angehalten
+var cut_from = {}        # Vorschau ab dem Abspielkopf: {"s": Szene, "t": Sekunden}
 var cut_demo = ""        # Vorschau vom PC wartet auf das Rennen (Siegerehrung / Kill-Cam)
 var cut_demo_t = 0.0
 
@@ -20365,7 +20368,24 @@ func _seq_begin(s: String) -> void:
 	if seq_p != null and seq_p.playing:
 		seq_p.stop()
 	seq_fade = -1.0
-	seqc = {"s": s, "t": 0.0, "ms": false}
+	seq_pause = false
+	var t0 = 0.0
+	if cut_from.get("s", "") == s:
+		t0 = maxf(0.0, float(cut_from.t))   # Vorschau ab dem Abspielkopf
+		cut_from = {}
+	seqc = {"s": s, "t": t0, "ms": false}
+
+
+# angehaltene Vorschau: nach allen Szenen-Updates die Zeit fast anhalten (die Szenen setzen ihr Tempo jedes Bild neu)
+func _seq_pause_hold() -> void:
+	if seq_pause:
+		if seqc.is_empty():
+			seq_pause = false
+			Engine.time_scale = 1.0
+			if seq_p != null:
+				seq_p.stream_paused = false
+		else:
+			Engine.time_scale = 0.0001
 
 
 func _seq_end(s := "") -> void:
@@ -20384,8 +20404,11 @@ func _seq_tick(rdt: float) -> void:
 		add_child(seq_p)
 	if not seqc.is_empty():
 		# Uhr der Szene: echte Sekunden; läuft eigene Musik, gibt der Song den Takt vor (auch wenn ein Bild hängt)
-		seqc.t = float(seqc.t) + rdt
-		if seqc.ms and seq_p.playing and seq_fade < 0.0 and seq_p.stream == cut_mus.get(seqc.s):
+		if not seq_pause:
+			seqc.t = float(seqc.t) + rdt
+		if seq_p.stream_paused != seq_pause:
+			seq_p.stream_paused = seq_pause
+		if not seq_pause and seqc.ms and seq_p.playing and seq_fade < 0.0 and seq_p.stream == cut_mus.get(seqc.s):
 			var tt = seq_p.get_playback_position() + AudioServer.get_time_since_last_mix() - float(cut[seqc.s].moff)
 			if absf(tt - float(seqc.t)) < 1.5:
 				seqc.t = tt
@@ -20472,6 +20495,7 @@ func _cut_play(s: String) -> String:
 
 
 func _cut_stop() -> void:
+	seq_pause = false
 	if not cine.is_empty():
 		_cine_end()
 	if not party.is_empty():
@@ -20498,7 +20522,7 @@ func _cut_answer(c: StreamPeerTCP, path: String, body: PackedByteArray) -> void:
 			dfs[q] = _cut_def(q)
 		_live_send(c, "application/json", JSON.stringify({"cut": cut, "def": dfs, "mus": mi}))
 	elif path.begins_with("/cut/st"):
-		_live_send(c, "application/json", JSON.stringify({"s": seqc.get("s", ""), "t": float(seqc.get("t", 0.0)), "state": state, "ts": Engine.time_scale, "demo": cut_demo}))
+		_live_send(c, "application/json", JSON.stringify({"s": seqc.get("s", ""), "t": float(seqc.get("t", 0.0)), "state": state, "ts": Engine.time_scale, "demo": cut_demo, "p": seq_pause}))
 	elif path.begins_with("/cut/set") and s in CUT_SEQS:
 		var d = JSON.parse_string(body.get_string_from_utf8())
 		if d is Dictionary:
@@ -20521,7 +20545,15 @@ func _cut_answer(c: StreamPeerTCP, path: String, body: PackedByteArray) -> void:
 		_cut_mus_del(s)
 		_live_send(c, "text/plain", "ok")
 	elif path.begins_with("/cut/play") and s in CUT_SEQS:
+		seq_pause = false
+		cut_from = {"s": s, "t": float(qs.get("t", "0"))}
 		_live_send(c, "text/plain", _cut_play(s))
+	elif path.begins_with("/cut/pause"):
+		if not seqc.is_empty():
+			seq_pause = not seq_pause
+			if not seq_pause:
+				Engine.time_scale = 1.0
+		_live_send(c, "text/plain", "paused" if seq_pause else "playing")
 	elif path.begins_with("/cut/stop"):
 		_cut_stop()
 		_live_send(c, "text/plain", "ok")
@@ -20576,6 +20608,8 @@ func _cine_find_curve() -> Array:
 func _cine_start() -> void:
 	cine_pending = false
 	cine_done = true
+	if _ev("CINEFROM") != "":
+		cut_from = {"s": "intro", "t": float(_ev("CINEFROM"))}   # nur zum Testen
 	var cv = _cine_find_curve()
 	var zc: float = cv[0]
 	var outs: float = cv[1]   # Außenseite der Kurve (Vorzeichen der Querlage)
@@ -20682,8 +20716,15 @@ func _cine_start() -> void:
 	root.add_child(hint)
 	ui.root.visible = false
 	_seq_begin("intro")
-	cine = {"tr": 0.0, "zc": zc, "outs": outs, "save": save, "cl": cl, "dirt": dirt, "card": card, "tl": tl, "jets": jets, "black": black,
+	var t0 = float(seqc.t)   # Vorschau ab dem Abspielkopf: Schiffe dorthin vorspulen
+	if t0 > 0.0:
+		for o in ships:
+			o.z = float(o.z) + CINE_V * _cut_int("intro", 0.0, t0)
+	cine = {"tr": t0, "skip": t0, "zc": zc, "outs": outs, "save": save, "cl": cl, "dirt": dirt, "card": card, "tl": tl, "jets": jets, "black": black,
 		"passed": {}, "ev": {}, "wet": 0.0, "fog": 0.0, "sh": 0.0, "oa": 0.0}
+	for i in range(ships.size()):
+		if float(ships[i].z) > zc - 2.0:
+			cine.passed[i] = true   # vorgespult: schon vorbei, kein Vorbeiflug-Ton
 
 
 func _cine_end() -> void:
@@ -20723,7 +20764,7 @@ func _cine_end() -> void:
 func _cine_once(k: String, at: float) -> bool:
 	if float(cine.tr) >= at and not (cine.ev as Dictionary).has(k):
 		cine.ev[k] = true
-		return true
+		return at >= float(cine.get("skip", 0.0)) - 0.02   # vorgespult: was davor lag, nicht nachholen
 	return false
 
 
@@ -20811,7 +20852,7 @@ func _cine_step(dt: float) -> void:
 		if not cine.has("regroup"):
 			cine.regroup = true
 			for i in range(ships.size()):   # nach dem Schnitt: Pulk zurück an den Kurveneingang, vor ihm liegt freie Strecke
-				ships[i].z = zc - 15.0 - float(CINE_GAP[i % 4])
+				ships[i].z = zc - 15.0 - float(CINE_GAP[i % 4]) + CINE_V * _cut_int("intro", t_dep, tr)
 		var zb = float(ships[0].z) - 10.0 - (tr - t_dep) * 6.0
 		var fb = T.sframe(zb, 0.0)
 		cam.global_position = fb.c + fb.uu * 0.9

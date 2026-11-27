@@ -49,7 +49,8 @@ kbd{background:#151a2a;border:1px solid #2a3350;border-radius:4px;padding:0 5px;
 
 <div class="bar"><span class="t">Abspielen</span>
  <button id="pPC" class="pri">▶ Am PC</button>
- <button id="pPh">▶ Am Handy</button>
+ <button id="pPh" title="Spielt am Handy ab der Stelle des Abspielkopfs">▶ Am Handy</button>
+ <button id="pPa" title="Szene am Handy anhalten / weiter">❚❚ Pause Handy</button>
  <button id="pSt">■ Stopp</button>
  <span id="time">0.00 s</span>
  <div class="sep"></div>
@@ -70,7 +71,7 @@ kbd{background:#151a2a;border:1px solid #2a3350;border-radius:4px;padding:0 5px;
 <div id="tlw"><canvas id="tl"></canvas><div id="tip"></div></div>
 <div id="selp"></div>
 <div id="help">
-<b style="color:#cfd8ea">So geht's:</b> Oben die Szene wählen, Musik laden. <kbd>Leertaste</kbd> spielt am PC ab, „Am Handy“ spielt die echte Szene mit deiner Musik (Intro: Handy im Hauptmenü; Siegerehrung und Kill-Cam starten vom Hauptmenü aus ein Rennen).
+<b style="color:#cfd8ea">So geht's:</b> Oben die Szene wählen, Musik laden. <kbd>Leertaste</kbd> spielt am PC ab, „Am Handy“ spielt die echte Szene mit deiner Musik ab der Stelle des Abspielkopfs (<kbd>Pos1</kbd> = an den Anfang), „Pause Handy“ hält sie an (Intro: Handy im Hauptmenü; Siegerehrung und Kill-Cam starten vom Hauptmenü aus ein Rennen).
 <br><b style="color:#cfd8ea">Tempo</b> (unten): Punkte ziehen · <kbd>Doppelklick</kbd> neuer Punkt · <kbd>Rechtsklick</kbd> löschen · <kbd>Umschalt</kbd> nur hoch/runter · <kbd>K</kbd> Punkt am Abspielkopf. 1× = normal, darunter Zeitlupe, darüber Zeitraffer. Zwei Punkte zur selben Zeit = harter Sprung.
 <br><b style="color:#cfd8ea">Wackeln</b>: wie das Tempo – Punkte ziehen, <kbd>Doppelklick</kbd> neu, <kbd>Rechtsklick</kbd> löschen, <kbd>W</kbd> Punkt am Abspielkopf. 0 = ganz ruhig, 1 = normal, 2 = doppelt. Gilt in allen drei Szenen.
 <br><b style="color:#cfd8ea">Schnitte</b>: Dreiecke ziehen · <kbd>Doppelklick</kbd> oder <kbd>C</kbd> neuer Schnitt · <kbd>Rechtsklick</kbd> löschen. <b style="color:#cfd8ea">Ereignisse</b>: Fähnchen ziehen.
@@ -211,10 +212,13 @@ function playPC(){if(playing){stopPC();return;}stopFollow();ensureAC();playing=t
 function stopPC(){playing=false;$('pPC').textContent='▶ Am PC';if(src){try{src.stop();}catch(e){}src=null;}}
 function stopFollow(){follow=false;fAt=0;}
 async function playPhone(){stopPC();clearTimeout(svT);await fetch('/cut/set?s='+cur,{method:'POST',body:JSON.stringify(S())}).catch(()=>{});
- const r=await fetch('/cut/play?s='+cur).then(r=>r.text()).catch(()=>'keine Verbindung zum Handy');
- if(!r.startsWith('ok')){status(r,'err');return;}status(r=='ok'?'läuft am Handy …':r);follow=true;fSeen=false;fAt=0;fStart=performance.now();ph=0;view.t0=-0.4;poll();}
+ const t0=(ph>0.05&&ph<endT()-0.1)?ph:0;
+ const r=await fetch('/cut/play?s='+cur+'&t='+t0.toFixed(3)).then(r=>r.text()).catch(()=>'keine Verbindung zum Handy');
+ if(!r.startsWith('ok')){status(r,'err');return;}status(r=='ok'?'läuft am Handy …':r);follow=true;fSeen=false;fAt=0;fPaused=false;$('pPa').textContent='❚❚ Pause Handy';fStart=performance.now();ph=t0;poll();}
+let fPaused=false;
+async function pausePhone(){const r=await fetch('/cut/pause').then(r=>r.text()).catch(()=>'');if(r=='paused'){fPaused=true;$('pPa').textContent='▶ Weiter am Handy';status('angehalten am Handy');}else if(r=='playing'){fPaused=false;$('pPa').textContent='❚❚ Pause Handy';status('läuft am Handy …');}}
 function poll(){if(!follow)return;fetch('/cut/st').then(r=>r.json()).then(d=>{if(!follow)return;
-  if(d.s===cur){fSeen=true;fT=d.t;fAt=performance.now();}
+  if(d.s===cur){fSeen=true;fT=d.t;fAt=d.p?0:performance.now();if(d.p)ph=d.t;}
   else if(fSeen){stopFollow();status('fertig am Handy ✓','ok');return;}
   else if(d.demo)status(d.state=='race'?'Rennen läuft – gleich geht es los …':'Rennen wird gestartet …');
   if(!fSeen&&performance.now()-fStart>90000){stopFollow();status('Szene kam nicht – läuft das Rennen?','err');return;}
@@ -343,7 +347,7 @@ $('bh2').onclick=()=>{const u=U();if(!u.bpm)return;snap0();u.bpm=Math.round(u.bp
 $('bhere').onclick=()=>{const u=U();if(!u.bpm){status('Erst BPM eintragen oder erkennen','err');return;}snap0();const p=60/u.bpm;let o=(ph+(+S().moff||0))%p;if(o<0)o+=p;u.boff=Math.round(o*1000)/1000;fill();save();};
 $('bload').onclick=()=>$('fin').click();$('fin').onchange=()=>{loadMusicFile($('fin').files[0]);$('fin').value='';};
 $('mdel').onclick=()=>{if(!confirm('Musik dieser Szene vom Handy entfernen?'))return;fetch('/cut/mdel?s='+cur).then(()=>{delete AU[cur];MI[cur]={has:false};fill();status('Musik entfernt','ok');});};
-$('pPC').onclick=playPC;$('pPh').onclick=playPhone;$('pSt').onclick=stopAll;
+$('pPC').onclick=playPC;$('pPh').onclick=playPhone;$('pSt').onclick=stopAll;$('pPa').onclick=pausePhone;
 $('zi').onclick=()=>zoom(1.5);$('zo').onclick=()=>zoom(1/1.5);$('zf').onclick=fit;
 $('undo').onclick=undo;$('redo').onclick=redo;
 $('bdef').onclick=()=>{if(!confirm('Tempo, Schnitte und Ereignisse dieser Szene auf Standard zurücksetzen? (Musik bleibt)'))return;snap0();const s=S(),d=JSON.parse(JSON.stringify(DEF[cur]));d.moff=s.moff;d.mdb=s.mdb;d.ui=s.ui;CUT[cur]=d;sel=null;fill();save();};
