@@ -24,7 +24,7 @@ label{color:#cfd8ea;display:inline-flex;gap:6px;align-items:center;white-space:n
 #st.ok{color:#7fe0b0}#st.err{color:var(--rd)}
 #mname{color:#cfd8ea;max-width:260px;overflow:hidden;text-overflow:ellipsis}
 #tlw{position:relative;margin:10px 16px 6px;border:1px solid var(--ln);border-radius:10px;overflow:hidden;background:#0a0c16}
-#tl{display:block;width:100%;height:500px;cursor:default}
+#tl{display:block;width:100%;height:590px;cursor:default}
 #tip{position:absolute;pointer-events:none;background:#151a2aee;border:1px solid #2a3350;border-radius:6px;padding:4px 8px;font-size:12px;display:none;white-space:nowrap}
 #selp{display:flex;gap:10px;align-items:center;padding:4px 16px 0;min-height:36px;color:#cfd8ea}
 #selp b{color:var(--cy);font-weight:600}
@@ -72,6 +72,7 @@ kbd{background:#151a2a;border:1px solid #2a3350;border-radius:4px;padding:0 5px;
 <div id="help">
 <b style="color:#cfd8ea">So geht's:</b> Oben die Szene wählen, Musik laden. <kbd>Leertaste</kbd> spielt am PC ab, „Am Handy“ spielt die echte Szene mit deiner Musik (Intro: Handy im Hauptmenü; Siegerehrung und Kill-Cam starten vom Hauptmenü aus ein Rennen).
 <br><b style="color:#cfd8ea">Tempo</b> (unten): Punkte ziehen · <kbd>Doppelklick</kbd> neuer Punkt · <kbd>Rechtsklick</kbd> löschen · <kbd>Umschalt</kbd> nur hoch/runter · <kbd>K</kbd> Punkt am Abspielkopf. 1× = normal, darunter Zeitlupe, darüber Zeitraffer. Zwei Punkte zur selben Zeit = harter Sprung.
+<br><b style="color:#cfd8ea">Wackeln</b>: wie das Tempo – Punkte ziehen, <kbd>Doppelklick</kbd> neu, <kbd>Rechtsklick</kbd> löschen, <kbd>W</kbd> Punkt am Abspielkopf. 0 = ganz ruhig, 1 = normal, 2 = doppelt. Gilt in allen drei Szenen.
 <br><b style="color:#cfd8ea">Schnitte</b>: Dreiecke ziehen · <kbd>Doppelklick</kbd> oder <kbd>C</kbd> neuer Schnitt · <kbd>Rechtsklick</kbd> löschen. <b style="color:#cfd8ea">Ereignisse</b>: Fähnchen ziehen.
 <br><b style="color:#cfd8ea">Ansicht</b>: <kbd>Mausrad</kbd> zoomen · Wellenform ziehen = verschieben · <kbd>Alt</kbd> + Wellenform ziehen = Musik verschieben · Zeitleiste anklicken = Abspielkopf · <kbd>Alt</kbd> beim Ziehen = nicht einrasten · <kbd>←</kbd><kbd>→</kbd> Auswahl verschieben · <kbd>Entf</kbd> löschen.
 <br>Alles wird sofort am Handy gespeichert. <button id="bdef" style="margin-left:8px">Szene auf Standard</button> <button id="bexp">Export (JSON)</button> <button id="bimp">Import …</button><input type="file" id="fimp" accept=".json" style="display:none">
@@ -99,7 +100,13 @@ let follow=false,fSeen=false,fT=0,fAt=0,fStart=0;
 const cv=$('tl'),cx=cv.getContext('2d');
 let W=0,H=0,DPR=1;
 // Bahnen (CSS-Pixel)
-const RU={y:0,h:26},WV={y:26,h:84},MK={y:110,h:84},CU={y:194,h:32},TP={y:226,h:262};
+const RU={y:0,h:26},WV={y:26,h:84},MK={y:110,h:84},CU={y:194,h:32},WK={y:226,h:90},TP={y:316,h:262};
+const SMAX=2;
+function s2y(v){return WK.y+WK.h-8-Math.max(0,Math.min(SMAX,v))/SMAX*(WK.h-16);}
+function y2s(y){return Math.max(0,Math.min(SMAX,(WK.y+WK.h-8-y)/(WK.h-16)*SMAX));}
+// Wackeln wie am Handy: weich zwischen den Punkten
+function shAt(t){const k=S().sh||[];if(!k.length)return 0;if(t<=k[0][0])return k[0][1];for(let i=0;i<k.length-1;i++){const a=k[i],b=k[i+1];if(t<b[0]){let u=Math.min(1,Math.max(0,(t-a[0])/Math.max(1e-4,b[0]-a[0])));u=u*u*(3-2*u);return a[1]+(b[1]-a[1])*u;}}return k[k.length-1][1];}
+function sortSh(){(S().sh=S().sh||[]).sort((a,b)=>a[0]-b[0]);}
 const VMIN=0.02,VMAX=3,L0=Math.log(VMIN),L1=Math.log(VMAX);
 function S(){return CUT[cur];}
 function U(){const s=S();if(!s.ui||Array.isArray(s.ui))s.ui={};return s.ui;}
@@ -132,8 +139,8 @@ function draw(){
  if(!CUT){requestAnimationFrame(draw);return;}
  tick();
  cx.setTransform(DPR,0,0,DPR,0,0);cx.clearRect(0,0,W,H);
- lane(RU.y,RU.h,'#0d1020');lane(WV.y,WV.h,'#0a0c16');lane(MK.y,MK.h,'#0b0e1a');lane(CU.y,CU.h,'#0a0c16');lane(TP.y,TP.h,'#0b0e1a');
- cx.fillStyle='#1d2338';[WV.y,MK.y,CU.y,TP.y].forEach(y=>cx.fillRect(0,y,W,1));
+ lane(RU.y,RU.h,'#0d1020');lane(WV.y,WV.h,'#0a0c16');lane(MK.y,MK.h,'#0b0e1a');lane(CU.y,CU.h,'#0a0c16');lane(WK.y,WK.h,'#0a0c16');lane(TP.y,TP.h,'#0b0e1a');
+ cx.fillStyle='#1d2338';[WV.y,MK.y,CU.y,WK.y,TP.y].forEach(y=>cx.fillRect(0,y,W,1));
  const s=S(),e=endT();
  // außerhalb der Szene abdunkeln
  cx.fillStyle='#00000066';const x0=t2x(0),xe=t2x(e);if(x0>0)cx.fillRect(0,RU.h,x0,H);if(xe<W)cx.fillRect(xe,RU.h,W-xe,H);
@@ -153,7 +160,12 @@ function draw(){
   const bps=1000;for(let x=0;x<W;x++){const ta=x2t(x)+(+s.moff||0),tb=x2t(x+1)+(+s.moff||0);let i0=Math.floor(ta*bps),i1=Math.max(i0+1,Math.floor(tb*bps));if(i1<=0||i0>=A.mn.length)continue;i0=Math.max(0,i0);i1=Math.min(A.mn.length,i1);
    let lo=1,hi=-1;for(let i=i0;i<i1;i++){if(A.mn[i]<lo)lo=A.mn[i];if(A.mx[i]>hi)hi=A.mx[i];}cx.fillRect(x,mid-hi*amp,1,Math.max(1,(hi-lo)*amp));}
  }else{cx.fillStyle='#3a4565';cx.font='12px system-ui';cx.fillText(MI[cur]&&MI[cur].has?'Musik wird geladen …':'Keine Musik – „Musik laden …“ oder Datei hier hineinziehen',14,WV.y+WV.h/2+4);}
- label('Musik',WV.y);label('Ereignisse',MK.y);label(CUTN[cur],CU.y);label('Tempo',TP.y);
+ label('Musik',WV.y);label('Ereignisse',MK.y);label(CUTN[cur],CU.y);label('Wackeln',WK.y);label('Tempo',TP.y);
+ // Wackeln: Fläche und Punkte
+ {const yb=s2y(0),y1s=s2y(1);cx.fillStyle='#2a3350';cx.fillRect(0,Math.round(y1s)+.5,W,1);cx.fillStyle='#4a5678';cx.font='10.5px system-ui';cx.fillText('1× normal',W-62,y1s-3);
+  cx.beginPath();cx.moveTo(0,yb);for(let x=0;x<=W;x+=2)cx.lineTo(x,s2y(shAt(x2t(x))));cx.lineTo(W,yb);cx.closePath();cx.fillStyle='#ffb34733';cx.fill();
+  cx.beginPath();for(let x=0;x<=W;x+=2){const y=s2y(shAt(x2t(x)));x?cx.lineTo(x,y):cx.moveTo(x,y);}cx.strokeStyle='#ffb347';cx.lineWidth=1.5;cx.stroke();cx.lineWidth=1;
+  (s.sh||[]).forEach(k=>{const x=t2x(k[0]),y=s2y(k[1]);if(x<-10||x>W+10)return;const on=sel&&sel.ty=='w'&&sel.r===k,hv=hover&&hover.ty=='w'&&hover.r===k;cx.beginPath();cx.arc(x,y,on?6.5:hv?5.5:4.5,0,7);cx.fillStyle=on?'#fff':'#ffb347';cx.fill();cx.strokeStyle='#07080d';cx.lineWidth=2;cx.stroke();cx.lineWidth=1;});}
  // Tempo-Raster
  cx.font='10.5px system-ui';
  [0.03,0.05,0.1,0.2,0.5,1,1.5,2,3].forEach(v=>{const y=Math.round(v2y(v))+.5;cx.fillStyle=v==1?'#3e4f86':'#161d33';cx.fillRect(0,y,W,1);cx.fillStyle=v==1?'#8fa0c8':'#4a5678';cx.fillText(v+'×',W-34,y-3);});
@@ -182,7 +194,7 @@ function draw(){
  const xz=t2x(0);cx.fillStyle='#e8ecf5';cx.fillRect(Math.round(xz),RU.h,1,4);cx.font='10.5px system-ui';cx.fillStyle='#cfd8ea';cx.fillText(ZERO[cur],xz+3,RU.h+12);
  // Abspielkopf
  const xp=Math.round(t2x(ph))+.5;cx.fillStyle=follow?'#7fe0b0':'#ff5470';cx.fillRect(xp-1,0,2,H);cx.beginPath();cx.moveTo(xp-6,0);cx.lineTo(xp+6,0);cx.lineTo(xp,9);cx.fill();
- $('time').textContent=fmt(ph)+'  ·  '+tsAt(ph).toFixed(2)+'×';
+ $('time').textContent=fmt(ph)+'  ·  '+tsAt(ph).toFixed(2)+'×  ·  Wackeln '+shAt(ph).toFixed(2);
  requestAnimationFrame(draw);
 }
 let FL=[];
@@ -243,6 +255,7 @@ function detect(quiet){const A=AU[cur];if(!A||!A.buf){status('Erst Musik laden',
 // ---------- Treffer unter der Maus
 function hit(x,y){const s=S();
  if(y>=TP.y){let b=null,bd=9;s.ts.forEach(k=>{const d=Math.hypot(t2x(k[0])-x,v2y(k[1])-y);if(d<bd){bd=d;b=k;}});if(b)return {ty:'k',r:b};return {ty:'tp'};}
+ if(y>=WK.y){let b=null,bd=9;(s.sh||[]).forEach(k=>{const d=Math.hypot(t2x(k[0])-x,s2y(k[1])-y);if(d<bd){bd=d;b=k;}});if(b)return {ty:'w',r:b};return {ty:'wk'};}
  if(y>=CU.y){let bi=-1,bd=9;s.cuts.forEach((c,i)=>{const d=Math.abs(t2x(c)-x);if(d<bd){bd=d;bi=i;}});return bi>=0?{ty:'c',i:bi}:{ty:'cu'};}
  if(y>=MK.y){for(let i=FL.length-1;i>=0;i--){const f=FL[i];if(x>=f.x-3&&x<=f.x+f.w&&y>=f.y&&y<=f.y+f.h)return {ty:'m',k:f.k};}return {ty:'mk'};}
  if(y>=WV.y)return {ty:'wv'};return {ty:'ru'};}
@@ -251,40 +264,47 @@ function selDesc(){const p=$('selp');p.innerHTML='';if(!sel)return;const s=S();
  const del=()=>{const b=document.createElement('button');b.textContent='Löschen';b.className='red';b.onclick=delSel;return b;};
  const t=document.createElement('b');
  if(sel.ty=='k'){t.textContent='Tempo-Punkt';p.append(t,mk('Zeit (s)',sel.r[0],0.01,v=>{sel.r[0]=Math.max(0,v);sortKeys();}),mk('Tempo (×)',sel.r[1],0.01,v=>{sel.r[1]=Math.min(VMAX,Math.max(VMIN,v));}),del());}
+ if(sel.ty=='w'){t.textContent='Wackel-Punkt';p.append(t,mk('Zeit (s)',sel.r[0],0.01,v=>{sel.r[0]=Math.max(0,v);sortSh();}),mk('Stärke (1 = normal)',sel.r[1],0.05,v=>{sel.r[1]=Math.min(SMAX,Math.max(0,v));}),del());}
  if(sel.ty=='c'){t.textContent='Schnitt '+(sel.i+1);p.append(t,mk('Zeit (s)',s.cuts[sel.i],0.01,v=>{const c=s.cuts[sel.i]=Math.max(0,v);s.cuts.sort((a,b)=>a-b);sel.i=s.cuts.indexOf(c);}),del());}
  if(sel.ty=='m'){t.textContent=MN[cur][sel.k][0];p.append(t,mk('Zeit (s)',s.m[sel.k],0.01,v=>{s.m[sel.k]=Math.max(0,v);}));}}
 function delSel(){if(!sel)return;const s=S();snap0();
  if(sel.ty=='k'){if(s.ts.length>1)s.ts.splice(s.ts.indexOf(sel.r),1);}
+ else if(sel.ty=='w')s.sh.splice(s.sh.indexOf(sel.r),1);
  else if(sel.ty=='c')s.cuts.splice(sel.i,1);
  sel=null;selDesc();save();}
 // ---------- Maus
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 cv.addEventListener('mousedown',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,h=hit(x,y),s=S();
- if(e.button==2){if(h.ty=='k'||h.ty=='c'){sel=h.ty=='k'?{ty:'k',r:h.r}:{ty:'c',i:h.i};delSel();}return;}
+ if(e.button==2){if(h.ty=='k'||h.ty=='c'||h.ty=='w'){sel=h.ty=='c'?{ty:'c',i:h.i}:{ty:h.ty,r:h.r};delSel();}return;}
  if(h.ty=='ru'){stopFollow();const wasP=playing;stopPC();ph=x2t(x);drag={ty:'ph',wasP};return;}
  if(h.ty=='k'){snap0();sel={ty:'k',r:h.r};drag={ty:'k',r:h.r,x0:x,y0:y,t0:h.r[0],v0:h.r[1]};selDesc();return;}
+ if(h.ty=='w'){snap0();sel={ty:'w',r:h.r};drag={ty:'w',r:h.r};selDesc();return;}
  if(h.ty=='c'){snap0();sel={ty:'c',i:h.i};drag={ty:'c',i:h.i};selDesc();return;}
  if(h.ty=='m'){snap0();sel={ty:'m',k:h.k};drag={ty:'m',k:h.k};selDesc();return;}
  if(h.ty=='wv'&&e.altKey){snap0();drag={ty:'mo',x0:x,m0:+s.moff||0};return;}
  sel=null;selDesc();drag={ty:'pan',x0:x,t0:view.t0};});
 window.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,s=S();
- if(!drag){if(x>=0&&y>=0&&x<=W&&y<=H){hover=hit(x,y);cv.style.cursor=hover.ty=='k'||hover.ty=='c'||hover.ty=='m'?'grab':hover.ty=='ru'?'text':(hover.ty=='wv'&&e.altKey)?'ew-resize':'default';tip(x,y);}else{$('tip').style.display='none';}return;}
+ if(!drag){if(x>=0&&y>=0&&x<=W&&y<=H){hover=hit(x,y);cv.style.cursor=hover.ty=='k'||hover.ty=='w'||hover.ty=='c'||hover.ty=='m'?'grab':hover.ty=='ru'?'text':(hover.ty=='wv'&&e.altKey)?'ew-resize':'default';tip(x,y);}else{$('tip').style.display='none';}return;}
  const tip0=$('tip');
  if(drag.ty=='ph'){ph=Math.max(-1,x2t(x));return;}
  if(drag.ty=='pan'){view.t0=drag.t0-(x-drag.x0)/view.pps;return;}
  if(drag.ty=='mo'){s.moff=Math.round((drag.m0-(x-drag.x0)/view.pps)*1000)/1000;$('moff').value=s.moff;return;}
  if(drag.ty=='k'){const k=drag.r;if(!e.shiftKey)k[0]=Math.max(0,snapT(x2t(x),e));if(!e.ctrlKey)k[1]=Math.round(y2v(y)*1000)/1000;sortKeys();selDesc();return;}
+ if(drag.ty=='w'){const k=drag.r;if(!e.shiftKey)k[0]=Math.max(0,snapT(x2t(x),e));if(!e.ctrlKey)k[1]=Math.round(y2s(y)*100)/100;sortSh();selDesc();return;}
  if(drag.ty=='c'){const t=Math.max(0,snapT(x2t(x),e));s.cuts[drag.i]=t;s.cuts.sort((a,b)=>a-b);drag.i=s.cuts.indexOf(t);sel.i=drag.i;selDesc();return;}
  if(drag.ty=='m'){s.m[drag.k]=Math.max(0,snapT(x2t(x),e));selDesc();return;}});
-window.addEventListener('mouseup',()=>{if(!drag)return;const d=drag;drag=null;if(['k','c','m','mo'].includes(d.ty)){save();fill();}if(d.ty=='ph'&&d.wasP)playPC();});
+window.addEventListener('mouseup',()=>{if(!drag)return;const d=drag;drag=null;if(['k','w','c','m','mo'].includes(d.ty)){save();fill();}if(d.ty=='ph'&&d.wasP)playPC();});
 cv.addEventListener('dblclick',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,h=hit(x,y),s=S();
  if(h.ty=='tp'){snap0();const k=[Math.max(0,snapT(x2t(x),e)),Math.round(y2v(y)*1000)/1000];s.ts.push(k);sortKeys();sel={ty:'k',r:k};selDesc();save();}
+ else if(h.ty=='wk'){snap0();const k=[Math.max(0,snapT(x2t(x),e)),Math.round(y2s(y)*100)/100];(s.sh=s.sh||[]).push(k);sortSh();sel={ty:'w',r:k};selDesc();save();}
  else if(h.ty=='cu'){snap0();const t=Math.max(0,snapT(x2t(x),e));s.cuts.push(t);s.cuts.sort((a,b)=>a-b);sel={ty:'c',i:s.cuts.indexOf(t)};selDesc();save();}});
 cv.addEventListener('wheel',e=>{e.preventDefault();const r=cv.getBoundingClientRect(),x=e.clientX-r.left;
  if(e.shiftKey||Math.abs(e.deltaX)>Math.abs(e.deltaY)){view.t0+=(e.shiftKey?e.deltaY:e.deltaX)/view.pps;return;}
  const t=x2t(x);view.pps=Math.min(4000,Math.max(8,view.pps*Math.exp(-e.deltaY*0.0016)));view.t0=t-x/view.pps;},{passive:false});
 function tip(x,y){const h=hover,el=$('tip'),s=S();let t='';
  if(h.ty=='k')t='Tempo '+h.r[1].toFixed(2)+'× bei '+fmt(h.r[0]);
+ else if(h.ty=='w')t='Wackeln '+h.r[1].toFixed(2)+'× bei '+fmt(h.r[0]);
+ else if(h.ty=='wk')t=fmt(x2t(x))+' · Wackeln '+y2s(y).toFixed(2)+'× (Doppelklick: Punkt)';
  else if(h.ty=='c')t='Schnitt '+(h.i+1)+' bei '+fmt(s.cuts[h.i]);
  else if(h.ty=='m')t=MN[cur][h.k][0]+' bei '+fmt(s.m[h.k]);
  else if(h.ty=='tp')t=fmt(x2t(x))+' · '+y2v(y).toFixed(2)+'× (Doppelklick: Punkt)';
@@ -298,10 +318,12 @@ window.addEventListener('keydown',e=>{if(e.target.tagName=='INPUT'||e.target.tag
  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()=='y'){e.preventDefault();redo();return;}
  if(e.key=='Delete'||e.key=='Backspace'){e.preventDefault();delSel();return;}
  if(e.key=='c'||e.key=='C'){snap0();const t=Math.max(0,snapT(ph,e));s.cuts.push(t);s.cuts.sort((a,b)=>a-b);sel={ty:'c',i:s.cuts.indexOf(t)};selDesc();save();return;}
+ if(e.key=='w'||e.key=='W'){snap0();const k=[Math.max(0,snapT(ph,e)),Math.round(shAt(ph)*100)/100];(s.sh=s.sh||[]).push(k);sortSh();sel={ty:'w',r:k};selDesc();save();return;}
  if(e.key=='k'||e.key=='K'){snap0();const k=[Math.max(0,snapT(ph,e)),Math.round(tsAt(ph)*1000)/1000];s.ts.push(k);sortKeys();sel={ty:'k',r:k};selDesc();save();return;}
  if(e.key=='Home'){ph=0;view.t0=-0.4;return;}
  if((e.key=='ArrowLeft'||e.key=='ArrowRight')&&sel){e.preventDefault();const g=grid();const d=(e.key=='ArrowLeft'?-1:1)*(e.shiftKey||!g?0.01:g.step);snap0();
   if(sel.ty=='k'){sel.r[0]=Math.max(0,Math.round((sel.r[0]+d)*1000)/1000);sortKeys();}
+  else if(sel.ty=='w'){sel.r[0]=Math.max(0,Math.round((sel.r[0]+d)*1000)/1000);sortSh();}
   else if(sel.ty=='c'){const c=s.cuts[sel.i]=Math.max(0,Math.round((s.cuts[sel.i]+d)*1000)/1000);s.cuts.sort((a,b)=>a-b);sel.i=s.cuts.indexOf(c);}
   else if(sel.ty=='m')s.m[sel.k]=Math.max(0,Math.round((s.m[sel.k]+d)*1000)/1000);
   selDesc();save();}});

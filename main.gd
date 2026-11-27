@@ -20135,6 +20135,7 @@ func _cut_def(s: String) -> Dictionary:
 			_cut_shot_keys(k, 9.75, 10.5)
 			k.append([10.5, 1.0])
 			return {"ts": k, "cuts": cuts, "moff": 0.0, "mdb": 0.0, "slow": 1, "ui": {},
+				"sh": [[0.0, 0.0], [2.2, 0.15], [2.65, 1.0], [3.3, 0.45], [4.2, 0.0], [7.6, 0.25], [8.9, 0.25], [9.0, 0.0]],
 				"m": {"rumble": 0.25, "arr": 2.7, "bass": 4.3, "frz": 4.35, "line": 5.0, "ramp": 7.6, "dep": 10.5,
 					"title": 11.0, "tend": 13.0, "stamp": 13.2, "end": 14.6}}
 		"party":
@@ -20147,7 +20148,7 @@ func _cut_def(s: String) -> Dictionary:
 				_cut_shot_keys(k, cuts[i], cuts[i] + 0.55)
 			k.append([snappedf(push, 0.001), 0.35])
 			k.append([snappedf(push + 1.3, 0.001), 1.0])
-			return {"ts": k, "cuts": cuts, "moff": 0.0, "mdb": 0.0, "slow": 0, "ui": {},
+			return {"ts": k, "cuts": cuts, "moff": 0.0, "mdb": 0.0, "slow": 0, "ui": {}, "sh": [],
 				"m": {"c1": 2.1, "push": snappedf(push, 0.001), "pend": snappedf(push + 1.3, 0.001), "end": PARTY_T}}
 		_:
 			cuts = [0.45, 1.07, 1.69]
@@ -20156,7 +20157,7 @@ func _cut_def(s: String) -> Dictionary:
 			_cut_shot_keys(k, 1.07, 1.69)
 			_cut_shot_keys(k, 1.69, 2.31)
 			k.append([2.8, 1.0])
-			return {"ts": k, "cuts": cuts, "moff": 0.0, "mdb": 0.0, "slow": 1, "ui": {}, "m": {"eend": 2.31, "end": 2.8}}
+			return {"ts": k, "cuts": cuts, "moff": 0.0, "mdb": 0.0, "slow": 1, "ui": {}, "sh": [], "m": {"eend": 2.31, "end": 2.8}}
 
 
 # Daten vom PC prüfen und in Ordnung bringen (fehlende Werte aus dem Standard)
@@ -20177,6 +20178,18 @@ func _cut_clean(s: String, d) -> Dictionary:
 		o.ts.append([kv[0], kv[1]])
 	if o.ts.is_empty():
 		o.ts = df.ts
+	# Wackeln: 0 = ruhig, 1 = normal, 2 = doppelt (darf leer sein)
+	o.sh = []
+	if d.get("sh") is Array:
+		var rs = []
+		for kv in d.sh:
+			if kv is Array and kv.size() >= 2:
+				rs.append([clampf(float(kv[0]), 0.0, 180.0), clampf(float(kv[1]), 0.0, 2.0), rs.size()])
+		rs.sort_custom(func(a, b): return a[0] < b[0] or (a[0] == b[0] and a[2] < b[2]))
+		for kv in rs:
+			o.sh.append([kv[0], kv[1]])
+	else:
+		o.sh = df.sh
 	if d.get("cuts") is Array:
 		for c in d.cuts:
 			o.cuts.append(clampf(float(c), 0.0, 180.0))
@@ -20221,6 +20234,34 @@ func _cut_ts(s: String, t: float) -> float:
 			u = u * u * (3.0 - 2.0 * u)
 			return exp(lerpf(log(float(a[1])), log(float(b[1])), u))
 	return float(k[k.size() - 1][1])
+
+
+# Wackelstärke zur Zeit t (weich zwischen den Punkten)
+func _cut_sh(s: String, t: float) -> float:
+	var k: Array = cut[s].get("sh", [])
+	if k.is_empty():
+		return 0.0
+	if t <= float(k[0][0]):
+		return float(k[0][1])
+	for i in range(k.size() - 1):
+		var a: Array = k[i]
+		var b: Array = k[i + 1]
+		if t < float(b[0]):
+			var u = clampf((t - float(a[0])) / maxf(0.0001, float(b[0]) - float(a[0])), 0.0, 1.0)
+			return lerpf(float(a[1]), float(b[1]), u * u * (3.0 - 2.0 * u))
+	return float(k[k.size() - 1][1])
+
+
+# Kamerawackeln einer laufenden Szene (Siegerehrung, Kill-Cam) nach der Wackel-Spur des Editors
+func _seq_shake() -> void:
+	if seqc.is_empty() or seqc.s == "intro":
+		return
+	var a = _cut_sh(seqc.s, float(seqc.t)) * 0.09
+	if a <= 0.0005:
+		return
+	var tt = Time.get_ticks_msec() / 1000.0
+	cam.global_position += Vector3(sin(tt * 61.0), sin(tt * 47.0 + 1.3), sin(tt * 53.0 + 2.1)) * a
+	cam.rotate_object_local(Vector3(0, 0, 1), sin(tt * 37.0) * a * 0.25)
 
 
 # Spielzeit, die zwischen a und b (echte Sekunden) vergeht
@@ -20812,8 +20853,8 @@ func _cine_step(dt: float) -> void:
 		_snd("ignite", 2.0)
 	if _cine_once("stamp", float(M.stamp)):
 		_snd("cm_stamp", 1.0)
-	# --- Kamerawackeln (Boden bebt)
-	cine.sh = lerpf(float(cine.sh), shk, 1.0 - exp(-rdt * 10.0))
+	# --- Kamerawackeln: Wackel-Spur aus dem Schnitt-Editor (1 = normal)
+	cine.sh = _cut_sh("intro", tr) * 0.09 + shk * 0.0
 	if float(cine.sh) > 0.001:
 		var tt = Time.get_ticks_msec() / 1000.0
 		cam.global_position += Vector3(sin(tt * 61.0), sin(tt * 47.0 + 1.3), sin(tt * 53.0 + 2.1)) * float(cine.sh)
@@ -21178,6 +21219,11 @@ func _mc_cam(dt: float) -> bool:
 
 
 func _camera(dt: float) -> void:
+	_camera_main(dt)
+	_seq_shake()
+
+
+func _camera_main(dt: float) -> void:
 	_ck_update(dt)
 	if state == "replay" and _rp_cam(dt):
 		return
