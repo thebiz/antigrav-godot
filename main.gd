@@ -89,6 +89,251 @@ var quake = null
 var quake2 = null   # Super-Quake: zweite Welle rollt nach hinten
 var bwaves = []     # Super-Turbo: Druckwellen nach hinten
 var fire_req = false
+var flare_req = false
+var flrs = []          # fliegende Flares
+var hp_beep_t = 0.0
+var hp_k = 0.0
+var plus_fx = []       # grüne Plus-Zeichen: [Position, Alter, Größe]
+const FLARE_C = Vector2(782.0, 1318.0)   # Flare-Knopf im unteren Rahmen (Bildpunkte im Rahmenbild)
+const FLARE_R = 58.0
+const STEAM_SH = """
+shader_type canvas_item;
+// Dampf im Cockpit: weiche Schwaden, die von unten nach oben vor der Scheibe vorbeiziehen
+uniform float k=0.;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+1.),f.x),f.y);}
+float fb(vec2 p){float s=0.,a=.5;for(int i=0;i<4;i++){s+=vn(p)*a;p*=2.03;a*=.5;}return s;}
+void fragment(){
+	vec2 uv=SCREEN_UV;
+	vec2 q=vec2(uv.x*2.2,uv.y*1.6+TIME*.32);
+	float n=fb(q+vec2(fb(q*.7+TIME*.1)*1.2,0.));
+	float edge=smoothstep(.25,.0,min(uv.x,1.-uv.x))*.6+smoothstep(.35,1.,uv.y)*.9+.45;
+	float a=smoothstep(.36,.78,n)*edge*(.35+.65*k);
+	COLOR=vec4(vec3(.8,.82,.86),clamp(a*step(.01,k),0.,.85));
+}
+"""
+const LOWV_SH = """
+shader_type canvas_item;
+// Warnrand: rot von außen, pulsiert (Tempo und Stärke kommen aus dem Spiel)
+uniform float k=0.;
+uniform float p=0.;
+void fragment(){
+	vec2 d=abs(SCREEN_UV-.5)*2.;
+	float e=max(pow(d.x,3.),pow(d.y,4.));
+	float a=smoothstep(.25,1.,e)*k*(.35+.65*p);
+	COLOR=vec4(1.,.05,.04,a*.8);
+}
+"""
+
+
+# ---------------------------------------------------------------- Heilen, Warnungen bei wenig Energie, Flares (John)
+func _heal(o: Dictionary, amt: float) -> void:
+	var before = float(o.en)
+	o.en = minf(1.0, float(o.en) + amt)
+	if o.idx != 0:
+		return
+	_snd("heal", 0.0)
+	_flash(Color(0.3, 1.0, 0.45), 0.22)
+	_msg("+%d%% ENERGY" % int(round((float(o.en) - before) * 100.0)) if o.en > before else "ENERGY FULL", Color(0.4, 1.0, 0.5))
+	_vib(30, 0.4)
+	var vs = get_viewport().get_visible_rect().size
+	for i in range(7):
+		plus_fx.append([Vector2(vs.x * randf_range(0.25, 0.75), vs.y * randf_range(0.42, 0.62)), -i * 0.06, randf_range(0.8, 1.35)])
+
+
+func _hp_fx(g: Dictionary, racing: bool, dt: float) -> void:
+	if _ev("HPTEST") != "" and racing:
+		# nur zum Testen: HPTEST=Energie,Sicht,Heilzeit,Flarezeit,MEGA ; TSHOT=Zeiten
+		var a = _ev("HPTEST").split(",")
+		if not has_meta("hpt0"):
+			set_meta("hpt0", 1)
+			g.en = float(a[0])
+			cfg.view = int(a[1])
+			if a.size() > 4 and a[4] == "1":
+				g.wpn = "rak"
+				g.mega = true
+				g.sup = true
+				g.wpc = 4
+		if a.size() > 2 and float(a[2]) > 0.0 and race_t > float(a[2]) and not has_meta("hpt1"):
+			set_meta("hpt1", 1)
+			_heal(g, 0.1)
+		if a.size() > 3 and float(a[3]) > 0.0 and race_t > float(a[3]) - 0.25 and not has_meta("hpt2"):
+			set_meta("hpt2", 1)
+			ships[1].z = g.z - 45.0
+			ships[1].lat = g.lat
+			_add_shot(ships[1], false, true)
+		if a.size() > 3 and float(a[3]) > 0.0 and race_t > float(a[3]) and not has_meta("hpt3"):
+			set_meta("hpt3", 1)
+			_flare_fire(g)
+		var ts = _ev("TSHOT").split(",")
+		for st in ts:
+			if race_t >= float(st) and not has_meta("ts" + st.replace(".", "_")):
+				set_meta("ts" + st.replace(".", "_"), 1)
+				get_viewport().get_texture().get_image().save_png("/home/claude/work/cmp/hp_%s.png" % st)
+		if race_t > float(ts[ts.size() - 1]) + 0.1:
+			get_tree().quit()
+	var rdt = clampf(dt / maxf(0.03, Engine.time_scale), 0.0, 0.1)
+	var live = racing and not g.out and not free_ride
+	var tk = clampf((0.25 - float(g.en)) / 0.22, 0.0, 1.0) if live else 0.0
+	hp_k = move_toward(hp_k, tk, rdt * (1.5 if tk > hp_k else 0.8))   # beim Heilen verfliegt alles weich
+	# Warnpiepen: wird immer schneller
+	if tk > 0.0:
+		hp_beep_t -= rdt
+		if hp_beep_t <= 0.0:
+			hp_beep_t = lerpf(1.25, 0.32, tk)
+			_snd("low_hp", lerpf(-8.0, -2.0, tk))
+	else:
+		hp_beep_t = 0.0
+	var lv: ColorRect = hud.lowv
+	lv.visible = hp_k > 0.01
+	if lv.visible:
+		var ph = Time.get_ticks_msec() / 1000.0 * lerpf(3.0, 8.0, hp_k)
+		_sp(lv.material, "k", hp_k)
+		_sp(lv.material, "p", pow(0.5 + 0.5 * sin(ph), 2.0))
+	var st: ColorRect = hud.steam
+	st.visible = hp_k > 0.01 and _ck_on()
+	if st.visible:
+		_sp(st.material, "k", hp_k)
+	# grüne Plus-Zeichen steigen auf
+	var pc: Control = hud.plus
+	for e in plus_fx.duplicate():
+		e[1] = float(e[1]) + rdt
+		if float(e[1]) > 1.1:
+			plus_fx.erase(e)
+	pc.queue_redraw()
+	if not pc.draw.is_connected(_plus_draw):
+		pc.draw.connect(_plus_draw)
+
+
+# jedes Bild: Flares fliegen weiter; außerhalb des Rennens verschwinden Warnrand und Dampf
+func _hp_tick(dt: float) -> void:
+	_flare_update(clampf(dt / maxf(0.03, Engine.time_scale), 0.0, 0.1))
+	if not state in ["race", "count"] and hud.has("lowv"):
+		hp_k = 0.0
+		(hud.lowv as Control).visible = false
+		(hud.steam as Control).visible = false
+		if not plus_fx.is_empty():
+			plus_fx.clear()
+			(hud.plus as Control).queue_redraw()
+
+
+func _plus_draw() -> void:
+	var pc: Control = hud.plus
+	for e in plus_fx:
+		var a = float(e[1])
+		if a < 0.0:
+			continue
+		var p: Vector2 = (e[0] as Vector2) + Vector2(0, -a * 170.0)
+		var sz = 26.0 * float(e[2]) * (0.6 + 0.6 * minf(1.0, a * 5.0))
+		var al = clampf(1.0 - (a - 0.55) / 0.55, 0.0, 1.0)
+		var w = sz * 0.34
+		for gl in [[2.4, 0.18], [1.0, 0.95]]:
+			var ww = w * float(gl[0])
+			var cc = Color(0.35, 1.0, 0.45, al * float(gl[1]))
+			pc.draw_rect(Rect2(p.x - ww * 0.5, p.y - sz * 0.5 - (ww - w) * 0.5, ww, sz + (ww - w)), cc)
+			pc.draw_rect(Rect2(p.x - sz * 0.5 - (ww - w) * 0.5, p.y - ww * 0.5, sz + (ww - w), ww), cc)
+
+
+func _flare_hit(pos: Vector2) -> bool:
+	if int(cfg.get("hud", 2)) != 2 or ships.is_empty():
+		return false
+	var vp = get_viewport().get_visible_rect().size
+	var k = vp.x / GA_W
+	var cpos = Vector2(FLARE_C.x * k, vp.y - (GA_H - FLARE_C.y) * k)
+	return pos.distance_to(cpos) < FLARE_R * 1.35 * k
+
+
+# Knopf im unteren Rahmen: leuchtet blau, wenn ein Flare bereit ist; pulsiert rot-blau, wenn eine Lenkrakete auf dich zielt
+func _flare_draw(c: Control, g: Dictionary, t: float) -> void:
+	if not state in ["race", "count"]:
+		return
+	var n = int(g.get("flare", 1))
+	var thr = bool(ckh.get("mis", false))
+	var fc = Color(0.45, 0.85, 1.0)
+	var p = FLARE_C
+	c.draw_circle(p, FLARE_R, Color(0.03, 0.04, 0.08, 0.8))
+	if n > 0:
+		var pu = 0.5 + 0.5 * sin(t * (14.0 if thr else 3.0))
+		if thr:
+			c.draw_circle(p, FLARE_R + 10.0 * pu, Color(1.0, 0.25, 0.2, 0.18 + 0.25 * pu))
+		c.draw_circle(p, FLARE_R - 4.0, Color(fc, 0.12 + 0.12 * pu))
+		c.draw_arc(p, FLARE_R, 0.0, TAU, 48, Color(fc, 0.6 + 0.4 * pu), 4.0, true)
+	else:
+		c.draw_arc(p, FLARE_R, 0.0, TAU, 48, Color(1, 1, 1, 0.18), 3.0, true)
+	# Zeichen: drei Leuchtkugeln, die nach oben auseinanderfliegen
+	var ic = Color(1, 1, 1, 0.95) if n > 0 else Color(1, 1, 1, 0.25)
+	for i in range(3):
+		var a = -PI * 0.5 + (i - 1) * 0.55
+		var q = p + Vector2(0, 8) + Vector2(cos(a), sin(a)) * 22.0
+		c.draw_line(p + Vector2(0, 10), q, Color(ic, ic.a * 0.5), 2.5, true)
+		c.draw_circle(q, 5.5, ic)
+	_ga_txt(c, p + Vector2(0, 36), "FLARE", 15, ic, 1, 3)
+
+
+# Flare zünden: Plasmakugeln schießen aus dem Heck, jede Lenkrakete auf dich jagt einer hinterher und verglüht daran
+func _flare_fire(g: Dictionary) -> void:
+	if int(g.get("flare", 1)) <= 0:
+		_snd("click", -6.0, 0.7)
+		return
+	g.flare = 0
+	_snd("flare", 0.0)
+	_vib(40, 0.6)
+	var nd: Node3D = g.node
+	var p0: Vector3 = nd.global_position + nd.global_transform.basis.y * 0.15
+	var fw: Vector3 = T.frame(float(g.z)).fw
+	var up: Vector3 = T.frame(float(g.z)).uu
+	var rr: Vector3 = T.frame(float(g.z)).rr
+	var tg = []
+	for sh in shots:
+		var stg = sh.get("tg")
+		if stg != null and typeof(stg) == TYPE_DICTIONARY and int(stg.get("idx", -1)) == 0:
+			tg.append(sh)
+	var n = maxi(4, tg.size())
+	for i in range(n):
+		var m = _glow_node(SphereMesh.new(), Color(0.6, 0.9, 1.0), 4.0, 1.0)
+		(m.mesh as SphereMesh).radius = 0.05
+		(m.mesh as SphereMesh).height = 0.1
+		m.global_position = p0
+		var sd = (i - (n - 1) * 0.5) / maxf(1.0, n - 1.0)
+		var v: Vector3 = fw * randf_range(1.0, 4.0) + up * randf_range(7.0, 10.0) + rr * sd * 8.0   # nach oben und zur Seite, weg von der Kamera
+		flrs.append({"n": m, "v": v, "t": 0.0, "sh": tg[i] if i < tg.size() else null, "pts": []})
+	_burst(p0 + up * 0.2, fxr.spark, 14, 0.4, 3.0, 8.0, 70.0, Vector3(0, -4, 0), 0.4, 0.2, 0.4,
+		_ramp([[0.0, Color(4, 7, 10, 1)], [1.0, Color(0.3, 0.6, 1, 0)]]), null, true, false, 0.25)
+	if tg.is_empty():
+		_msg("FLARE", Color(0.55, 0.9, 1.0))
+
+
+func _flare_kill(sh: Dictionary) -> void:
+	if not shots.has(sh):
+		return
+	_explode(float(sh.z), float(sh.lat), false, 0.6)
+	_qf(sh.n)
+	for e in sh.get("ex", []):
+		_qf(e)
+	shots.erase(sh)
+	_msg("MISSILE DECOYED", Color(0.55, 0.9, 1.0))
+
+
+func _flare_update(dt: float) -> void:
+	for f in flrs.duplicate():
+		f.t = float(f.t) + dt
+		var m = f.n
+		if m == null or not is_instance_valid(m):
+			flrs.erase(f)
+			continue
+		var sh = f.sh
+		var p: Vector3 = (m as Node3D).global_position
+		if sh != null and float(f.t) > 0.4:
+			# die Lenkrakete hat angebissen: sie dreht ab und verglüht
+			_flare_kill(sh)
+			f.sh = null
+		f.v = (f.v as Vector3) * exp(-dt * 1.5) + Vector3(0, -3.0, 0) * dt
+		(m as Node3D).global_position = p + (f.v as Vector3) * dt
+		var al = clampf(1.0 - (float(f.t) - 0.9) / 0.5, 0.0, 1.0)
+		(m as Node3D).scale = Vector3.ONE * (0.6 + 0.6 * al + 0.2 * sin(float(f.t) * 40.0))
+		if al <= 0.0:
+			_qf(m)
+			flrs.erase(f)
 var fire_rect = Rect2()
 var t_state = 0.0
 var race_t = 0.0
@@ -515,7 +760,8 @@ const SND_NAMES = {"boom": "Explosion", "engine": "Schiff – Fahrt (Schleife)",
 	"rk_loop": "Rakete – Triebwerk (Schleife)", "minedrop": "Mine – Ablegen", "ko_boom": "K.o.-Knall", "shield": "Schild", "boost": "Boost",
 	"pick": "Waffe eingesammelt", "zap": "Treffer-Zap", "quake": "Beben", "field": "Kraftfeld (Schleife)", "hover": "Schweben (Schleife)",
 	"amb": "Umgebung (Schleife)", "crowd": "Publikum", "crowd_roar": "Publikum jubelt", "lock": "Zielerfassung", "incoming": "Warnung Rakete",
-	"crash_bump": "Wand-Stoß", "crash_scrape": "Wand-Schrammen", "debris": "Trümmer", "start": "Start", "go": "GO", "startfx": "Startsound (nach GO)", "win": "Sieg", "lap": "Runde"}
+	"crash_bump": "Wand-Stoß", "crash_scrape": "Wand-Schrammen", "debris": "Trümmer", "start": "Start", "go": "GO", "startfx": "Startsound (nach GO)", "win": "Sieg", "lap": "Runde",
+	"heal": "Heilung (Waffensäule mit Mega-Waffe)", "low_hp": "Warnpiepen wenig Energie", "flare": "Flare – Abschuss", "flare_charge": "Flare – aufgeladen"}
 
 
 # Lautstärke je Ansicht: g = Außenansicht, h = Helm (fehlt h, gilt g) – gleitet mit dem Umschalten
@@ -697,7 +943,8 @@ func _sounds() -> void:
 			"vo_3.wav", "vo_2.wav", "vo_1.wav", "vo_go.wav", "vo_final.wav", "vo_lrec.wav", "vo_p1.wav", "vo_p2.wav", "vo_p3.wav", "vo_p4.wav",
 			"cbeep.wav", "load_weapon.wav", "holozap.wav", "confetti.wav", "crowd_roar.wav", "an_p1.wav", "an_p2.wav", "an_p3.wav", "an_p4.wav", "an_final.wav", "an_wow.wav", "crowd.ogg", "neon_buzz.wav", "crash_bump.wav", "crash_scrape.wav", "ko_boom.wav", "debris.wav", "dmg_spark.ogg", "dmg_fire.ogg", "quake.wav", "shieldbreak.wav", "lap.wav", "click.wav", "lock.wav", "incoming.wav", "radio.wav", "ck_herz90.ogg", "ck_herz140.ogg", "ck_mines.ogg", "ck_missile.ogg", "water.wav", "splash.wav", "blackout.wav", "minewarn.wav", "hover.wav", "ignite.wav",
 			"amb_city.ogg", "amb_jungle.ogg", "music_nr1.mp3", "music_nr2.mp3", "music_menu.ogg",
-			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav", "rk_loop.wav"]:
+			"cm_whoosh.wav", "cm_hit.wav", "cm_pop.wav", "cm_stamp.wav", "cm_crash.wav", "rk_loop.wav",
+			"heal.wav", "low_hp.wav", "flare.wav", "flare_charge.wav"]:
 		snd[n.get_basename()] = load("res://sfx/" + n)
 	# Fahrer-Stimmen (japanisch) für die Comic-Seiten
 	for c in ["ren", "vega", "kato", "mira"]:
@@ -7928,7 +8175,7 @@ func _spawn_ships() -> void:
 		var s = {"z": starts[i][0], "lat": starts[i][1], "psi": 0.0, "vpsi": 0.0, "u": 0.0, "spd": 0.0, "boost": 0.0, "slow": 1.0,
 			"h": 0.0, "vy": 0.0, "air": false, "padK": -1, "hitT": -9.0, "sk": (1.0 + (i - 1) * 0.035) * float(cfg.ai) if i > 0 else 1.0, "sk0": 0.0, "lane": randf_range(-0.7, 0.7), "tl": 0.0, "wT": 0.0, "orbs": 0.0,
 			"ai": randf() * 100.0, "node": _ship_node(sm), "sm": sm, "fin": 0.0, "roll": 0.0,
-			"en": 1.0, "out": false, "dealt": 0.0, "outT": 0.0, "wpn": "", "wpK": -1, "shield": 0.0, "auto": 0.0, "turbo": 0.0, "slowT": 0.0, "enL": 0, "idx": i, "sup": false, "sorb": false, "sauto": false}
+			"en": 1.0, "out": false, "dealt": 0.0, "outT": 0.0, "wpn": "", "wpK": -1, "shield": 0.0, "auto": 0.0, "turbo": 0.0, "slowT": 0.0, "enL": 0, "idx": i, "sup": false, "sorb": false, "sauto": false, "flare": 1}
 		s.sk0 = s.sk
 		s.lane = s.lat
 		s.tl = s.lat
@@ -8154,8 +8401,29 @@ void fragment(){
 }""")
 	cl.add_child(drops)
 	hud.drops = drops
+	# Dampf im Cockpit bei wenig Energie: zieht vor der Scheibe vorbei (unter Cockpitrahmen und Helm, nicht im Visier)
+	var steam = ColorRect.new()
+	steam.set_anchors_preset(Control.PRESET_FULL_RECT)
+	steam.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	steam.visible = false
+	steam.material = _shader_mat(STEAM_SH)
+	cl.add_child(steam)
+	hud.steam = steam
 	_ck_build(cl)
 	_radio_build(cl)
+	# Warnrand bei wenig Energie: rot pulsierend von außen
+	var lowv = ColorRect.new()
+	lowv.set_anchors_preset(Control.PRESET_FULL_RECT)
+	lowv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lowv.visible = false
+	lowv.material = _shader_mat(LOWV_SH)
+	cl.add_child(lowv)
+	hud.lowv = lowv
+	var plus = Control.new()   # grüne Plus-Zeichen beim Heilen
+	plus.set_anchors_preset(Control.PRESET_FULL_RECT)
+	plus.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cl.add_child(plus)
+	hud.plus = plus
 	# Lenkzonen: weicher weißer Schein vom linken und rechten Rand nach innen (keine Knöpfe, nur Licht)
 	var sg = GradientTexture2D.new()
 	sg.fill = GradientTexture2D.FILL_RADIAL
@@ -9653,6 +9921,9 @@ func _input(ev: InputEvent) -> void:
 				ckh.vt = 0.0
 				ckh.gl = 0.9   # kurze Bildstörung beim Umschalten
 				return
+			if state == "race" and _flare_hit(ev.position):
+				flare_req = true
+				return
 			if state == "race" and fire_rect.has_point(ev.position):
 				fire_req = true
 				return
@@ -9666,6 +9937,8 @@ func _input(ev: InputEvent) -> void:
 			touches[ev.index] = ev.position.x
 	elif ev is InputEventKey and ev.pressed and ev.keycode == KEY_SPACE:
 		fire_req = true
+	elif ev is InputEventKey and ev.pressed and ev.keycode == KEY_F:
+		flare_req = true
 
 
 func _steer_input() -> int:
@@ -13772,7 +14045,11 @@ func _weapons(dt: float, racing: bool) -> void:
 				var pull = (1.0 - clampf(dz / 16.0, 0.0, 1.0)) * (3.2 + 2.0 * T.pipe_k(zz))
 				g.lat = float(g.lat) + dl * clampf(pull * dt, 0.0, 0.5)
 	var hitw = float(fx.pillar.get("hitw", 0.5)) * (1.0 + 0.8 * T.pipe_k(zz))   # in der Röhre breiter
-	if racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < hitw and wk != g.wpK and (g.wpn == "" or not g.get("mega", false)):
+	if racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < hitw and wk != g.wpK and g.wpn != "" and g.get("mega", false):
+		# Waffe schon MEGA: die Säule heilt stattdessen 10 % Energie (John)
+		g.wpK = wk
+		_heal(g, 0.10)
+	elif racing and posmod(wk, 2) == 0 and wz < maxf(1.75, g.spd * dt * 1.3) / 35.0 and not g.air and absf(g.lat - _wpx(wk)) < hitw and wk != g.wpK and (g.wpn == "" or not g.get("mega", false)):
 		g.wpK = wk
 		if g.wpn == "":
 			g.wpn = _pick_w()
@@ -13808,6 +14085,11 @@ func _weapons(dt: float, racing: bool) -> void:
 				_snd("pick", -6.0, 1.2)
 				_msg("SUPER %d / 3" % g.wpc, Color(1.0, 0.82, 0.35))
 	_tips_check(g, racing, dt)
+	if flare_req:
+		flare_req = false
+		if racing:
+			_flare_fire(g)
+	_hp_fx(g, racing, dt)
 	if fire_req:
 		fire_req = false
 		if g.wpn != "" and racing:
@@ -16975,6 +17257,7 @@ func _process(delta: float) -> void:
 	rdt_g = clampf(delta / maxf(0.01, Engine.time_scale), 0.0, 0.1)
 	_live_poll(dt)
 	_ej_update(dt)
+	_hp_tick(dt)
 	_seq_tick(clampf(delta / maxf(0.01, Engine.time_scale), 0.0, 0.25))
 	_duck(delta / maxf(0.01, Engine.time_scale))
 	_perf(delta)
@@ -23190,6 +23473,14 @@ func _ga_draw(c: Control) -> void:
 	# Energie: zehn schräge Segmente
 	var en = clampf(g.en, 0.0, 1.0)
 	var low = en <= 0.25 and not g.out
+	if low and state in ["race", "count"]:
+		# wenig Energie: das ganze Energiefeld glüht rot und pulsiert, schneller je leerer
+		var lk = clampf((0.25 - en) / 0.22, 0.0, 1.0)
+		var pl2 = 0.5 + 0.5 * sin(t * lerpf(5.0, 13.0, lk))
+		for rr in range(4):
+			c.draw_rect(Rect2(600 - rr * 10, 1446 - rr * 8, 300 + rr * 20, 80 + rr * 16), Color(1.0, 0.1, 0.06, (0.10 + 0.16 * pl2) * (1.0 - rr * 0.22)))
+		if pl2 > 0.35:
+			_ga_txt(c, Vector2(756, 1440), "LOW ENERGY", 18, Color(1.0, 0.3, 0.2, 0.6 + 0.4 * pl2), 1, 4)
 	var ec = OR2 if en > 0.5 else (Color(1.0, 0.85, 0.25) if en > 0.25 else Color(1.0, 0.2, 0.15))
 	_ga_txt(c, Vector2(628, 1469), "ENERGY", 20, ec)
 	_ga_txt(c, Vector2(872, 1469), "%d %%" % int(round(en * 100.0)), 20, TXT, 2)
@@ -23208,6 +23499,12 @@ func _ga_draw(c: Control) -> void:
 	var mega = g.get("mega", false)
 	var sup = g.get("sup", false)
 	var gc = Color(1.0, 0.15, 0.2) if mega else (Color(1.0, 0.8, 0.25) if sup else WC.get(cw, OR2))
+	if mega and cw != "" and state in ["race", "count"]:
+		# MEGA: rotes Licht pulsiert hinter dem Waffenrad wie eine Warnleuchte
+		var mp = pow(0.5 + 0.5 * sin(t * 4.2), 2.0)
+		for rr in range(5):
+			c.draw_circle(GA_RC, GA_RR * (0.55 + rr * 0.13 + mp * 0.06), Color(1.0, 0.08, 0.12, (0.05 + 0.13 * mp) * (1.0 - rr * 0.17)))
+		c.draw_arc(GA_RC, GA_RR + 4.0, 0.0, TAU, 72, Color(1.0, 0.2, 0.25, 0.35 + 0.6 * mp), 5.0 + 4.0 * mp, true)
 	if cw != "":
 		var bounce = 0.0
 		if not ga_rl.is_empty():
@@ -23250,6 +23547,7 @@ func _ga_draw(c: Control) -> void:
 	c.draw_line(fp + Vector2(-11, -20), fp + Vector2(11, -20), sw, 4.0, true)
 	c.draw_colored_polygon(PackedVector2Array([fp + Vector2(-4, -32), fp + Vector2(0, -40), fp + Vector2(4, -32)]), sw)
 	_ga_txt(c, fp + Vector2(0, 30), "FIRE", 20, sw, 1, 4)
+	_flare_draw(c, g, t)
 	c.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -24205,6 +24503,10 @@ func _chg_update(dt: float, racing: bool) -> void:
 			var dz = maxf(0.0, o.spd * cos(o.vpsi)) * dt
 			var before: float = o.en
 			o.en = minf(1.0, o.en + CHG_MAX * dz / (CHG_Z[1] - CHG_Z[0]))
+			if o.idx == 0 and int(o.get("flare", 1)) < 1:
+				o.flare = 1   # Ladefeld füllt auch den Flare wieder auf
+				_snd("flare_charge", 0.0)
+				_msg("FLARE READY", Color(0.55, 0.9, 1.0))
 			if o.idx == 0 and o.en > before:
 				pl_on = true
 				var pr = clampf((lz - CHG_Z[0]) / (CHG_Z[1] - CHG_Z[0]), 0.0, 1.0)
