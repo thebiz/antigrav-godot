@@ -93,6 +93,7 @@ var flare_req = false
 var flrs = []          # fliegende Flares
 var hp_beep_t = 0.0
 var hp_k = 0.0
+var heal_t = 0.0
 var plus_fx = []       # grüne Plus-Zeichen: [Position, Alter, Größe]
 const FLARE_C = Vector2(782.0, 1318.0)   # Flare-Knopf im unteren Rahmen (Bildpunkte im Rahmenbild)
 const FLARE_R = 58.0
@@ -117,11 +118,12 @@ shader_type canvas_item;
 // Warnrand: rot von außen, pulsiert (Tempo und Stärke kommen aus dem Spiel)
 uniform float k=0.;
 uniform float p=0.;
+uniform vec3 col=vec3(1.,.05,.04);
 void fragment(){
 	vec2 d=abs(SCREEN_UV-.5)*2.;
 	float e=max(pow(d.x,3.),pow(d.y,4.));
 	float a=smoothstep(.25,1.,e)*k*(.35+.65*p);
-	COLOR=vec4(1.,.05,.04,a*.8);
+	COLOR=vec4(col,a*.8);
 }
 """
 
@@ -133,12 +135,15 @@ func _heal(o: Dictionary, amt: float) -> void:
 	if o.idx != 0:
 		return
 	_snd("heal", 0.0)
-	_flash(Color(0.3, 1.0, 0.45), 0.22)
+	heal_t = 1.0   # Rand leuchtet kurz grün, das Energiefeld unten auch – die Bildmitte bleibt frei
 	_msg("+%d%% ENERGY" % int(round((float(o.en) - before) * 100.0)) if o.en > before else "ENERGY FULL", Color(0.4, 1.0, 0.5))
 	_vib(30, 0.4)
+	# Plus-Zeichen steigen unten aus der Energieanzeige auf
 	var vs = get_viewport().get_visible_rect().size
-	for i in range(7):
-		plus_fx.append([Vector2(vs.x * randf_range(0.25, 0.75), vs.y * randf_range(0.42, 0.62)), -i * 0.06, randf_range(0.8, 1.35)])
+	var kk = vs.x / GA_W
+	for i in range(6):
+		var fx0 = Vector2(randf_range(650.0, 860.0), randf_range(1455.0, 1490.0))
+		plus_fx.append([Vector2(fx0.x * kk, vs.y - (GA_H - fx0.y) * kk), -i * 0.07, randf_range(0.6, 0.95)])
 
 
 func _hp_fx(g: Dictionary, racing: bool, dt: float) -> void:
@@ -191,12 +196,20 @@ func _hp_fx(g: Dictionary, racing: bool, dt: float) -> void:
 			_snd("low_hp", lerpf(-8.0, -2.0, tk))
 	else:
 		hp_beep_t = 0.0
+	heal_t = maxf(0.0, heal_t - rdt * 1.4)
 	var lv: ColorRect = hud.lowv
-	lv.visible = hp_k > 0.01
+	lv.visible = hp_k > 0.01 or heal_t > 0.0
 	if lv.visible:
 		var ph = Time.get_ticks_msec() / 1000.0 * lerpf(3.0, 8.0, hp_k)
-		_sp(lv.material, "k", hp_k)
-		_sp(lv.material, "p", pow(0.5 + 0.5 * sin(ph), 2.0))
+		if heal_t > 0.0:
+			# Heilen: der Rand leuchtet kurz grün statt rot
+			_sp(lv.material, "col", Vector3(0.2, 1.0, 0.4))
+			_sp(lv.material, "k", sin(heal_t * PI) * 0.9)
+			_sp(lv.material, "p", 1.0)
+		else:
+			_sp(lv.material, "col", Vector3(1.0, 0.05, 0.04))
+			_sp(lv.material, "k", hp_k)
+			_sp(lv.material, "p", pow(0.5 + 0.5 * sin(ph), 2.0))
 	var st: ColorRect = hud.steam
 	st.visible = hp_k > 0.01 and _ck_on()
 	if st.visible:
@@ -230,7 +243,7 @@ func _plus_draw() -> void:
 		var a = float(e[1])
 		if a < 0.0:
 			continue
-		var p: Vector2 = (e[0] as Vector2) + Vector2(0, -a * 170.0)
+		var p: Vector2 = (e[0] as Vector2) + Vector2(0, -a * 110.0)
 		var sz = 26.0 * float(e[2]) * (0.6 + 0.6 * minf(1.0, a * 5.0))
 		var al = clampf(1.0 - (a - 0.55) / 0.55, 0.0, 1.0)
 		var w = sz * 0.34
@@ -23496,7 +23509,11 @@ func _ga_draw(c: Control) -> void:
 	# Energie: zehn schräge Segmente
 	var en = clampf(g.en, 0.0, 1.0)
 	var low = en <= 0.25 and not g.out
-	if low and state in ["race", "count"]:
+	if heal_t > 0.0 and state in ["race", "count"]:
+		# Heilen: Energiefeld glüht kurz grün
+		for rr in range(4):
+			c.draw_rect(Rect2(600 - rr * 10, 1446 - rr * 8, 300 + rr * 20, 80 + rr * 16), Color(0.2, 1.0, 0.4, (0.32 * heal_t) * (1.0 - rr * 0.22)))
+	elif low and state in ["race", "count"]:
 		# wenig Energie: das ganze Energiefeld glüht rot und pulsiert, schneller je leerer
 		var lk = clampf((0.25 - en) / 0.22, 0.0, 1.0)
 		var pl2 = 0.5 + 0.5 * sin(t * lerpf(5.0, 13.0, lk))
