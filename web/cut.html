@@ -74,7 +74,7 @@ kbd{background:#151a2a;border:1px solid #2a3350;border-radius:4px;padding:0 5px;
 <b style="color:#cfd8ea">So geht's:</b> Oben die Szene wählen, Musik laden. <kbd>Leertaste</kbd> startet / pausiert am Handy (<kbd>Umschalt</kbd>+<kbd>Leertaste</kbd>: nur Musik am PC), „Am Handy“ spielt die echte Szene mit deiner Musik ab der Stelle des Abspielkopfs (<kbd>Pos1</kbd> = an den Anfang), „Pause Handy“ hält sie an (Intro: Handy im Hauptmenü; Siegerehrung und Kill-Cam starten vom Hauptmenü aus ein Rennen).
 <br><b style="color:#cfd8ea">Tempo</b> (unten): Punkte ziehen · <kbd>Doppelklick</kbd> neuer Punkt · <kbd>Rechtsklick</kbd> löschen · <kbd>Umschalt</kbd> nur hoch/runter · <kbd>K</kbd> Punkt am Abspielkopf. 1× = normal, darunter Zeitlupe, darüber Zeitraffer. Zwei Punkte zur selben Zeit = harter Sprung.
 <br><b style="color:#cfd8ea">Wackeln</b>: wie das Tempo – Punkte ziehen, <kbd>Doppelklick</kbd> neu, <kbd>Rechtsklick</kbd> löschen, <kbd>W</kbd> Punkt am Abspielkopf. 0 = ganz ruhig, 1 = normal, 2 = doppelt. Gilt in allen drei Szenen.
-<br><b style="color:#cfd8ea">Schnitte</b>: Dreiecke ziehen · <kbd>Doppelklick</kbd> oder <kbd>C</kbd> neuer Schnitt · <kbd>Rechtsklick</kbd> löschen. <b style="color:#cfd8ea">Ereignisse</b>: Fähnchen ziehen.
+<br><b style="color:#cfd8ea">Schnitte</b>: Dreiecke ziehen · <kbd>Doppelklick</kbd> oder <kbd>C</kbd> neuer Schnitt · <kbd>Rechtsklick</kbd> löschen. <b style="color:#cfd8ea">Ereignisse</b>: Fähnchen ziehen · <kbd>Rechtsklick</kbd> schaltet Töne, Vegas Spruch oder den Titel aus und wieder an (grau = aus).
 <br><b style="color:#cfd8ea">Ansicht</b>: <kbd>Mausrad</kbd> zoomen · Wellenform ziehen = verschieben · <kbd>Alt</kbd> + Wellenform ziehen = Musik verschieben · Zeitleiste anklicken = Abspielkopf · <kbd>Alt</kbd> beim Ziehen = nicht einrasten · <kbd>←</kbd><kbd>→</kbd> Auswahl verschieben · <kbd>Entf</kbd> löschen.
 <br>Alles wird sofort am Handy gespeichert. <button id="bdef" style="margin-left:8px">Szene auf Standard</button> <button id="bexp">Export (JSON)</button> <button id="bimp">Import …</button><input type="file" id="fimp" accept=".json" style="display:none">
 </div>
@@ -87,6 +87,10 @@ const MN={
  intro:{rumble:['Grollen','snd'],arr:['Pulk an der Kamera','cam'],bass:['Bass-Schlag','snd'],frz:['Freeze: Schnitt auf Vega','cam'],line:['Vega-Spruch + Karte','snd'],ramp:['Speed-Ramp: Schnitt auf die Nase','cam'],dep:['Abgang hinter dem Pulk','cam'],title:['Titel: Plasmastrahlen','cam'],tend:['Titel fertig','cam'],stamp:['Stempel','snd'],end:['Ende → Menü','end']},
  party:{c1:['Schnitt: Fahrt an den Fans','cam'],push:['Push-in auf dich','cam'],pend:['Push-in Ende → Kreisfahrt','cam'],end:['Ende → Comic','end']},
  kill:{eend:['Schnitt-Kamera Ende → Kreisfahrt','cam'],end:['Ende → weiter im Rennen','end']}};
+// Ereignisse, die man ausschalten kann (Rechtsklick aufs Fähnchen)
+const OFFABLE={intro:{rumble:'Grollen-Ton',bass:'Bass-Schlag',line:'Vegas Spruch und Karte',ramp:'Whoosh-Ton',title:'Titel und Riser-Ton',stamp:'Stempel-Ton'},party:{},kill:{}};
+function isOff(k){return !!(S().off||{})[k];}
+function togOff(k){if(!OFFABLE[cur][k])return;snap0();const o=S().off=S().off||{};if(o[k])delete o[k];else o[k]=true;selDesc();save();status(MN[cur][k][0]+(o[k]?' ist aus':' ist an'));}
 const CUTN={intro:'Schnitte auf dich',party:'Schnitt-Kamera',kill:'Schnitt-Kamera'};
 const ZERO={intro:'Start',party:'Start Feier',kill:'Einschlag'};
 const COL={cam:'#5ee8ff',snd:'#ffb347',end:'#ff5470'};
@@ -184,13 +188,13 @@ function draw(){
   cx.fillStyle=on?'#fff':hv?'#a8f3ff':'#5ee8ff';cx.beginPath();cx.moveTo(x-8,CU.y+6);cx.lineTo(x+8,CU.y+6);cx.lineTo(x,CU.y+CU.h-4);cx.closePath();cx.fill();
   cx.fillStyle='#07080d';cx.font='bold 9.5px system-ui';cx.fillText(String(i+1),x-3,CU.y+16);});
  // Ereignisse (Fähnchen, in Reihen ohne Überlappen)
- const ms=Object.keys(MN[cur]).map(k=>({k,t:+s.m[k],n:MN[cur][k][0],c:COL[MN[cur][k][1]]})).sort((a,b)=>a.t-b.t);
+ const ms=Object.keys(MN[cur]).map(k=>({k,t:+s.m[k],n:MN[cur][k][0]+(isOff(k)?' (aus)':''),c:isOff(k)?'#5a6378':COL[MN[cur][k][1]]})).sort((a,b)=>a.t-b.t);
  const rows=[-1e9,-1e9,-1e9];cx.font='11.5px system-ui';FL=[];
  ms.forEach(m=>{const x=t2x(m.t),w=cx.measureText(m.n).width+12;let r=rows.findIndex(e=>e<x-2);if(r<0)r=rows.indexOf(Math.min(...rows));rows[r]=x+w;
   const y=MK.y+8+r*25,on=sel&&sel.ty=='m'&&sel.k==m.k,hv=hover&&hover.ty=='m'&&hover.k==m.k;
   cx.fillStyle=m.c+(on?'':'99');cx.fillRect(Math.round(x),MK.y,on?2:1,H-MK.y);
   cx.fillStyle=on?'#ffffff':hv?m.c:'#151a2a';cx.fillRect(x,y,w,20);cx.fillStyle=on?'#07080d':m.c;cx.fillRect(x,y,3,20);
-  cx.fillStyle=on?'#07080d':'#e8ecf5';cx.fillText(m.n,x+7,y+14);FL.push({k:m.k,x,y,w,h:20});});
+  cx.fillStyle=on?'#07080d':(isOff(m.k)?'#6b7690':'#e8ecf5');cx.fillText(m.n,x+7,y+14);if(isOff(m.k)){cx.fillStyle='#6b7690';cx.fillRect(x+5,y+10,w-10,1);}FL.push({k:m.k,x,y,w,h:20});});
  // Nullpunkt
  const xz=t2x(0);cx.fillStyle='#e8ecf5';cx.fillRect(Math.round(xz),RU.h,1,4);cx.font='10.5px system-ui';cx.fillStyle='#cfd8ea';cx.fillText(ZERO[cur],xz+3,RU.h+12);
  // Abspielkopf
@@ -276,7 +280,8 @@ function selDesc(){const p=$('selp');p.innerHTML='';if(!sel)return;const s=S();
  if(sel.ty=='k'){t.textContent='Tempo-Punkt';p.append(t,mk('Zeit (s)',sel.r[0],0.01,v=>{sel.r[0]=Math.max(0,v);sortKeys();}),mk('Tempo (×)',sel.r[1],0.01,v=>{sel.r[1]=Math.min(VMAX,Math.max(VMIN,v));}),del());}
  if(sel.ty=='w'){t.textContent='Wackel-Punkt';p.append(t,mk('Zeit (s)',sel.r[0],0.01,v=>{sel.r[0]=Math.max(0,v);sortSh();}),mk('Stärke (1 = normal)',sel.r[1],0.05,v=>{sel.r[1]=Math.min(SMAX,Math.max(0,v));}),del());}
  if(sel.ty=='c'){t.textContent='Schnitt '+(sel.i+1);p.append(t,mk('Zeit (s)',s.cuts[sel.i],0.01,v=>{const c=s.cuts[sel.i]=Math.max(0,v);s.cuts.sort((a,b)=>a-b);sel.i=s.cuts.indexOf(c);}),del());}
- if(sel.ty=='m'){t.textContent=MN[cur][sel.k][0];p.append(t,mk('Zeit (s)',s.m[sel.k],0.01,v=>{s.m[sel.k]=Math.max(0,v);}));}}
+ if(sel.ty=='m'){t.textContent=MN[cur][sel.k][0];p.append(t,mk('Zeit (s)',s.m[sel.k],0.01,v=>{s.m[sel.k]=Math.max(0,v);}));
+  if(OFFABLE[cur][sel.k]){const l=document.createElement('label');const c=document.createElement('input');c.type='checkbox';c.checked=!isOff(sel.k);c.onchange=()=>togOff(sel.k);l.append(c,' aktiv ('+OFFABLE[cur][sel.k]+')');p.append(l);}}}
 function delSel(){if(!sel)return;const s=S();snap0();
  if(sel.ty=='k'){if(s.ts.length>1)s.ts.splice(s.ts.indexOf(sel.r),1);}
  else if(sel.ty=='w')s.sh.splice(s.sh.indexOf(sel.r),1);
@@ -285,7 +290,7 @@ function delSel(){if(!sel)return;const s=S();snap0();
 // ---------- Maus
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 cv.addEventListener('mousedown',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,h=hit(x,y),s=S();
- if(e.button==2){if(h.ty=='k'||h.ty=='c'||h.ty=='w'){sel=h.ty=='c'?{ty:'c',i:h.i}:{ty:h.ty,r:h.r};delSel();}return;}
+ if(e.button==2){if(h.ty=='m'){togOff(h.k);return;}if(h.ty=='k'||h.ty=='c'||h.ty=='w'){sel=h.ty=='c'?{ty:'c',i:h.i}:{ty:h.ty,r:h.r};delSel();}return;}
  if(h.ty=='ru'){if(!follow)stopFollow();const wasP=playing;stopPC();ph=Math.max(0,x2t(x));drag={ty:'ph',wasP,fol:follow};if(follow&&!fPaused)fAt=0;return;}
  if(h.ty=='k'){snap0();sel={ty:'k',r:h.r};drag={ty:'k',r:h.r,x0:x,y0:y,t0:h.r[0],v0:h.r[1]};selDesc();return;}
  if(h.ty=='w'){snap0();sel={ty:'w',r:h.r};drag={ty:'w',r:h.r};selDesc();return;}
@@ -317,7 +322,7 @@ function tip(x,y){const h=hover,el=$('tip'),s=S();let t='';
  else if(h.ty=='w')t='Wackeln '+h.r[1].toFixed(2)+'× bei '+fmt(h.r[0]);
  else if(h.ty=='wk')t=fmt(x2t(x))+' · Wackeln '+y2s(y).toFixed(2)+'× (Doppelklick: Punkt)';
  else if(h.ty=='c')t='Schnitt '+(h.i+1)+' bei '+fmt(s.cuts[h.i]);
- else if(h.ty=='m')t=MN[cur][h.k][0]+' bei '+fmt(s.m[h.k]);
+ else if(h.ty=='m')t=MN[cur][h.k][0]+' bei '+fmt(s.m[h.k])+(OFFABLE[cur][h.k]?(isOff(h.k)?' · aus (Rechtsklick: an)':' · Rechtsklick: aus'):'');
  else if(h.ty=='tp')t=fmt(x2t(x))+' · '+y2v(y).toFixed(2)+'× (Doppelklick: Punkt)';
  else if(h.ty=='cu')t='Doppelklick: neuer Schnitt';
  else if(h.ty=='wv')t=AU[cur]&&AU[cur].mn?'Song bei '+fmt(x2t(x)+(+s.moff||0))+' · Alt+Ziehen verschiebt die Musik':'';

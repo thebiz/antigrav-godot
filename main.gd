@@ -20199,6 +20199,12 @@ func _cut_clean(s: String, d) -> Dictionary:
 		o.cuts.sort()
 	else:
 		o.cuts = df.cuts
+	# ausgeschaltete Ereignisse (im Editor per Rechtsklick): an der Stelle passiert nichts
+	o.off = {}
+	if d.get("off") is Dictionary:
+		for k in d.off:
+			if df.m.has(k) and bool(d.off[k]):
+				o.off[k] = true
 	var dm = d.m if d.get("m") is Dictionary else {}
 	for mk in df.m:
 		o.m[mk] = clampf(float(dm.get(mk, df.m[mk])), 0.0, 180.0)
@@ -20276,6 +20282,10 @@ func _cut_int(s: String, a: float, b: float, n := 64) -> float:
 	for i in range(n):
 		sm += _cut_ts(s, a + (i + 0.5) * h)
 	return sm * h
+
+
+func _cut_on(s: String, k: String) -> bool:
+	return not (cut[s].get("off", {}) as Dictionary).has(k)
 
 
 func _cut_m(s: String, k: String) -> float:
@@ -20894,7 +20904,7 @@ func _cine_step(dt: float) -> void:
 		cam.fov = 66.0
 	# Titel aus den Plasmastrahlen (eigene Zeiten, darf auch früher beginnen)
 	var tk = clampf((tr - t_ti) / (t_te - t_ti), 0.0, 1.0)
-	if tr >= t_ti:
+	if tr >= t_ti and _cut_on("intro", "title"):
 		var jj = 0
 		for j in cine.jets:
 			var jk = clampf(tk * 1.25 - jj * 0.08, 0.0, 1.0)
@@ -20910,22 +20920,22 @@ func _cine_step(dt: float) -> void:
 			lb.modulate = Color(1.0 + 2.0 * (1.0 - on) * on * 4.0, 1.0 + 1.5 * (1.0 - on) * on * 4.0, 1.0 + 2.5 * (1.0 - on) * on * 4.0, on)
 	# Comic-Karte mit Vegas Spruch: vom Spruch bis zur Speed-Ramp
 	var t_ln = float(M.line)
-	var ca = smoothstep(t_ln - 0.1, t_ln + 0.2, tr) * (1.0 - smoothstep(t_ramp - 0.4, t_ramp - 0.1, tr))
+	var ca = smoothstep(t_ln - 0.1, t_ln + 0.2, tr) * (1.0 - smoothstep(t_ramp - 0.4, t_ramp - 0.1, tr)) * (1.0 if _cut_on("intro", "line") else 0.0)
 	(cine.card as Control).modulate.a = ca
 	(cine.card as Control).position.x = 40.0 + (1.0 - smoothstep(t_ln - 0.1, t_ln + 0.3, tr)) * -120.0
 	# --- Ereignisse (Töne) an ihren Zeitpunkten
-	if _cine_once("rumble", float(M.rumble)):
+	if _cine_once("rumble", float(M.rumble)) and _cut_on("intro", "rumble"):
 		_snd("start", 2.0)
-	if _cine_once("bass", float(M.bass)):
+	if _cine_once("bass", float(M.bass)) and _cut_on("intro", "bass"):
 		_snd("ko_boom", 2.0, 0.7)
-	if _cine_once("line", t_ln):
+	if _cine_once("line", t_ln) and _cut_on("intro", "line"):
 		_snd("cv_vega_start", 2.0)
-	if _cine_once("whoosh", t_ramp):
+	if _cine_once("whoosh", t_ramp) and _cut_on("intro", "ramp"):
 		_snd("cm_whoosh", 3.0)
 		_snd("boost", 0.0)
-	if _cine_once("riser", t_ti):
+	if _cine_once("riser", t_ti) and _cut_on("intro", "title"):
 		_snd("ignite", 2.0)
-	if _cine_once("stamp", float(M.stamp)):
+	if _cine_once("stamp", float(M.stamp)) and _cut_on("intro", "stamp"):
 		_snd("cm_stamp", 1.0)
 	# --- Kamerawackeln: Wackel-Spur aus dem Schnitt-Editor (1 = normal)
 	cine.sh = _cut_sh("intro", tr) * 0.09 + shk * 0.0
