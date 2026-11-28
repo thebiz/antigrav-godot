@@ -20433,7 +20433,9 @@ func _seq_tick(rdt: float) -> void:
 			if seq_fade <= 0.0:
 				seq_p.stop()
 				seq_fade = -1.0
-	seq_duck = move_toward(seq_duck, 1.0 if seq_p.playing and seq_fade < 0.0 else 0.0, rdt * 3.0)
+	# Menü- und Rennmusik weg, solange eigene Szenen-Musik läuft – im Intro immer (das Intro spielt technisch im Menü)
+	var mute = not seqc.is_empty() and (seqc.s == "intro" or (seq_p.playing and seq_fade < 0.0))
+	seq_duck = move_toward(seq_duck, 1.0 if mute else 0.0, rdt * 4.0)
 	if cut_demo != "":
 		if state == "race":
 			cut_demo_t += rdt
@@ -20551,7 +20553,7 @@ func _cut_answer(c: StreamPeerTCP, path: String, body: PackedByteArray) -> void:
 			dfs[q] = _cut_def(q)
 		_live_send(c, "application/json", JSON.stringify({"cut": cut, "def": dfs, "mus": mi}))
 	elif path.begins_with("/cut/st"):
-		_live_send(c, "application/json", JSON.stringify({"s": seqc.get("s", ""), "t": float(seqc.get("t", 0.0)), "state": state, "ts": Engine.time_scale, "demo": cut_demo, "p": seq_pause}))
+		_live_send(c, "application/json", JSON.stringify({"s": seqc.get("s", ""), "t": float(seqc.get("t", 0.0)), "state": state, "ts": Engine.time_scale, "demo": cut_demo, "p": seq_pause, "mp": seq_p != null and seq_p.playing, "menu_db": music_p.volume_db if music_p != null else -80.0}))
 	elif path.begins_with("/cut/set") and s in CUT_SEQS:
 		var d = JSON.parse_string(body.get_string_from_utf8())
 		if d is Dictionary:
@@ -24299,6 +24301,8 @@ func _music_update(dt: float) -> void:
 	else:
 		music_f = minf(1.0, music_f + dt / 1.2)
 	music_p.volume_db = linear_to_db(maxf(0.0005, music_f * (1.0 - seq_duck))) + (float(MUSIC_GAIN.get(music_cur, 0.0)) if music_k == "music_race" else 0.0)   # eigene Szenen-Musik übertönt
+	if seq_duck >= 0.99:
+		music_p.volume_db = -80.0   # ganz aus, nicht nur leise
 	# Zeitlupe: Musik wird wie alles andere hörbar langsamer und tiefer (John mag den Effekt)
 	music_p.pitch_scale = 1.0
 	# Sicherung: läuft gerade keine Zeitlupe, spielt der Ton in Normaltempo. Sonst konnte das Tempo nach einer

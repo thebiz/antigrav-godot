@@ -48,10 +48,10 @@ kbd{background:#151a2a;border:1px solid #2a3350;border-radius:4px;padding:0 5px;
 </div>
 
 <div class="bar"><span class="t">Abspielen</span>
- <button id="pPC" class="pri">▶ Am PC</button>
- <button id="pPh" title="Spielt am Handy ab der Stelle des Abspielkopfs">▶ Am Handy</button>
+ <button id="pPh" class="pri" title="Leertaste – spielt am Handy ab der Stelle des Abspielkopfs">▶ Am Handy</button>
  <button id="pPa" title="Szene am Handy anhalten / weiter">❚❚ Pause Handy</button>
  <button id="pSt">■ Stopp</button>
+ <button id="pPC" title="Umschalt+Leertaste – nur die Musik im Browser, ohne Bild">♪ Nur Musik am PC</button>
  <span id="time">0.00 s</span>
  <div class="sep"></div>
  <button id="zo" title="Verkleinern">−</button><button id="zi" title="Vergrößern">+</button><button id="zf">Ganze Szene</button>
@@ -71,7 +71,7 @@ kbd{background:#151a2a;border:1px solid #2a3350;border-radius:4px;padding:0 5px;
 <div id="tlw"><canvas id="tl"></canvas><div id="tip"></div></div>
 <div id="selp"></div>
 <div id="help">
-<b style="color:#cfd8ea">So geht's:</b> Oben die Szene wählen, Musik laden. <kbd>Leertaste</kbd> spielt am PC ab, „Am Handy“ spielt die echte Szene mit deiner Musik ab der Stelle des Abspielkopfs (<kbd>Pos1</kbd> = an den Anfang), „Pause Handy“ hält sie an (Intro: Handy im Hauptmenü; Siegerehrung und Kill-Cam starten vom Hauptmenü aus ein Rennen).
+<b style="color:#cfd8ea">So geht's:</b> Oben die Szene wählen, Musik laden. <kbd>Leertaste</kbd> startet / pausiert am Handy (<kbd>Umschalt</kbd>+<kbd>Leertaste</kbd>: nur Musik am PC), „Am Handy“ spielt die echte Szene mit deiner Musik ab der Stelle des Abspielkopfs (<kbd>Pos1</kbd> = an den Anfang), „Pause Handy“ hält sie an (Intro: Handy im Hauptmenü; Siegerehrung und Kill-Cam starten vom Hauptmenü aus ein Rennen).
 <br><b style="color:#cfd8ea">Tempo</b> (unten): Punkte ziehen · <kbd>Doppelklick</kbd> neuer Punkt · <kbd>Rechtsklick</kbd> löschen · <kbd>Umschalt</kbd> nur hoch/runter · <kbd>K</kbd> Punkt am Abspielkopf. 1× = normal, darunter Zeitlupe, darüber Zeitraffer. Zwei Punkte zur selben Zeit = harter Sprung.
 <br><b style="color:#cfd8ea">Wackeln</b>: wie das Tempo – Punkte ziehen, <kbd>Doppelklick</kbd> neu, <kbd>Rechtsklick</kbd> löschen, <kbd>W</kbd> Punkt am Abspielkopf. 0 = ganz ruhig, 1 = normal, 2 = doppelt. Gilt in allen drei Szenen.
 <br><b style="color:#cfd8ea">Schnitte</b>: Dreiecke ziehen · <kbd>Doppelklick</kbd> oder <kbd>C</kbd> neuer Schnitt · <kbd>Rechtsklick</kbd> löschen. <b style="color:#cfd8ea">Ereignisse</b>: Fähnchen ziehen.
@@ -209,7 +209,7 @@ function ensureAC(){if(!ac)ac=new (window.AudioContext||window.webkitAudioContex
 function playPC(){if(playing){stopPC();return;}stopFollow();ensureAC();playing=true;playFrom=ph;playAt=ac.currentTime;$('pPC').textContent='❚❚ Pause';
  const A=AU[cur];if(A&&A.buf){const off=ph+(+S().moff||0);src=ac.createBufferSource();src.buffer=A.buf;gainN=ac.createGain();gainN.gain.value=Math.pow(10,(+S().mdb||0)/20);src.connect(gainN).connect(ac.destination);
   if(off>=0){if(off<A.buf.duration)src.start(0,off);}else src.start(ac.currentTime-off,0);}}
-function stopPC(){playing=false;$('pPC').textContent='▶ Am PC';if(src){try{src.stop();}catch(e){}src=null;}}
+function stopPC(){playing=false;$('pPC').textContent='♪ Nur Musik am PC';if(src){try{src.stop();}catch(e){}src=null;}}
 function stopFollow(){follow=false;fAt=0;}
 async function playPhone(){stopPC();clearTimeout(svT);await fetch('/cut/set?s='+cur,{method:'POST',body:JSON.stringify(S())}).catch(()=>{});
  const t0=(ph>0.05&&ph<endT()-0.1)?ph:0;
@@ -324,7 +324,9 @@ function tip(x,y){const h=hover,el=$('tip'),s=S();let t='';
  if(!t){el.style.display='none';return;}el.textContent=t;el.style.display='block';el.style.left=Math.min(W-el.offsetWidth-6,x+14)+'px';el.style.top=(y+16)+'px';}
 // ---------- Tasten
 window.addEventListener('keydown',e=>{if(e.target.tagName=='INPUT'||e.target.tagName=='SELECT')return;const s=S();
- if(e.code=='Space'){e.preventDefault();playPC();return;}
+ if(e.code=='Space'){e.preventDefault();if(e.shiftKey){playPC();return;}
+  // Leertaste steuert das Handy: läuft eine Szene, Pause/Weiter – sonst ab dem Abspielkopf starten
+  if(follow&&fSeen)pausePhone();else playPhone();return;}
  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()=='z'){e.preventDefault();e.shiftKey?redo():undo();return;}
  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()=='y'){e.preventDefault();redo();return;}
  if(e.key=='Delete'||e.key=='Backspace'){e.preventDefault();delSel();return;}
