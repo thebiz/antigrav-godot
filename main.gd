@@ -20494,6 +20494,35 @@ func _cut_play(s: String) -> String:
 	return "Bitte am Handy ins Hauptmenü oder in ein Rennen gehen."
 
 
+# Vorschau springt an eine andere Stelle (Abspielkopf im Editor verschoben) und läuft dort weiter
+func _cut_seek(t: float) -> String:
+	if seqc.is_empty():
+		return "keine Szene läuft"
+	var s: String = seqc.s
+	t = maxf(0.0, t)
+	seq_pause = false
+	Engine.time_scale = 1.0
+	if s == "intro" and not cine.is_empty():
+		# Intro neu aufbauen und bis t vorspulen
+		_cine_end()
+		cut_from = {"s": "intro", "t": t}
+		_cine_start()
+		return "ok"
+	seqc.t = t
+	if seq_p != null:
+		seq_p.stream_paused = false
+		var st = _cut_stream(s)
+		if st != null and t + float(cut[s].moff) >= 0.0:
+			seq_p.stream = st
+			seq_p.volume_db = float(cut[s].mdb)
+			seq_p.play(t + float(cut[s].moff))
+			seqc.ms = true
+		elif seq_p.playing:
+			seq_p.stop()
+			seqc.ms = false
+	return "ok"
+
+
 func _cut_stop() -> void:
 	seq_pause = false
 	if not cine.is_empty():
@@ -20548,6 +20577,8 @@ func _cut_answer(c: StreamPeerTCP, path: String, body: PackedByteArray) -> void:
 		seq_pause = false
 		cut_from = {"s": s, "t": float(qs.get("t", "0"))}
 		_live_send(c, "text/plain", _cut_play(s))
+	elif path.begins_with("/cut/seek"):
+		_live_send(c, "text/plain", _cut_seek(float(qs.get("t", "0"))))
 	elif path.begins_with("/cut/pause"):
 		if not seqc.is_empty():
 			seq_pause = not seq_pause

@@ -216,9 +216,15 @@ async function playPhone(){stopPC();clearTimeout(svT);await fetch('/cut/set?s='+
  const r=await fetch('/cut/play?s='+cur+'&t='+t0.toFixed(3)).then(r=>r.text()).catch(()=>'keine Verbindung zum Handy');
  if(!r.startsWith('ok')){status(r,'err');return;}status(r=='ok'?'läuft am Handy …':r);follow=true;fSeen=false;fAt=0;fPaused=false;$('pPa').textContent='❚❚ Pause Handy';fStart=performance.now();ph=t0;poll();}
 let fPaused=false;
-async function pausePhone(){const r=await fetch('/cut/pause').then(r=>r.text()).catch(()=>'');if(r=='paused'){fPaused=true;$('pPa').textContent='▶ Weiter am Handy';status('angehalten am Handy');}else if(r=='playing'){fPaused=false;$('pPa').textContent='❚❚ Pause Handy';status('läuft am Handy …');}}
+let seeking=false,pSync=false;
+async function seekPhone(){seeking=true;const t=Math.max(0,ph);const r=await fetch('/cut/seek?t='+t.toFixed(3)).then(r=>r.text()).catch(()=>'');
+ fT=t;fAt=performance.now();fPaused=false;$('pPa').textContent='❚❚ Pause Handy';status(r=='ok'?'läuft am Handy ab '+fmt(t)+' …':r,r=='ok'?'':'err');setTimeout(()=>seeking=false,350);}
+async function pausePhone(){
+ // angehalten und Abspielkopf verschoben: an der neuen Stelle weiter
+ if(follow&&fPaused&&Math.abs(ph-fT)>0.04){await seekPhone();return;}
+ const r=await fetch('/cut/pause').then(r=>r.text()).catch(()=>'');if(r=='paused'){fPaused=true;fAt=0;pSync=true;$('pPa').textContent='▶ Weiter am Handy';status('angehalten am Handy');}else if(r=='playing'){fPaused=false;$('pPa').textContent='❚❚ Pause Handy';status('läuft am Handy …');}}
 function poll(){if(!follow)return;fetch('/cut/st').then(r=>r.json()).then(d=>{if(!follow)return;
-  if(d.s===cur){fSeen=true;fT=d.t;fAt=d.p?0:performance.now();if(d.p)ph=d.t;}
+  if(d.s===cur){fSeen=true;if(!(drag&&drag.ty=='ph')&&!seeking){fT=d.t;fAt=d.p?0:performance.now();if(d.p&&pSync){ph=d.t;pSync=false;}}}
   else if(fSeen){stopFollow();status('fertig am Handy ✓','ok');return;}
   else if(d.demo)status(d.state=='race'?'Rennen läuft – gleich geht es los …':'Rennen wird gestartet …');
   if(!fSeen&&performance.now()-fStart>90000){stopFollow();status('Szene kam nicht – läuft das Rennen?','err');return;}
@@ -280,7 +286,7 @@ function delSel(){if(!sel)return;const s=S();snap0();
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 cv.addEventListener('mousedown',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,h=hit(x,y),s=S();
  if(e.button==2){if(h.ty=='k'||h.ty=='c'||h.ty=='w'){sel=h.ty=='c'?{ty:'c',i:h.i}:{ty:h.ty,r:h.r};delSel();}return;}
- if(h.ty=='ru'){stopFollow();const wasP=playing;stopPC();ph=x2t(x);drag={ty:'ph',wasP};return;}
+ if(h.ty=='ru'){if(!follow)stopFollow();const wasP=playing;stopPC();ph=Math.max(0,x2t(x));drag={ty:'ph',wasP,fol:follow};if(follow&&!fPaused)fAt=0;return;}
  if(h.ty=='k'){snap0();sel={ty:'k',r:h.r};drag={ty:'k',r:h.r,x0:x,y0:y,t0:h.r[0],v0:h.r[1]};selDesc();return;}
  if(h.ty=='w'){snap0();sel={ty:'w',r:h.r};drag={ty:'w',r:h.r};selDesc();return;}
  if(h.ty=='c'){snap0();sel={ty:'c',i:h.i};drag={ty:'c',i:h.i};selDesc();return;}
@@ -297,7 +303,8 @@ window.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),x=e.c
  if(drag.ty=='w'){const k=drag.r;if(!e.shiftKey)k[0]=Math.max(0,snapT(x2t(x),e));if(!e.ctrlKey)k[1]=Math.round(y2s(y)*100)/100;sortSh();selDesc();return;}
  if(drag.ty=='c'){const t=Math.max(0,snapT(x2t(x),e));s.cuts[drag.i]=t;s.cuts.sort((a,b)=>a-b);drag.i=s.cuts.indexOf(t);sel.i=drag.i;selDesc();return;}
  if(drag.ty=='m'){s.m[drag.k]=Math.max(0,snapT(x2t(x),e));selDesc();return;}});
-window.addEventListener('mouseup',()=>{if(!drag)return;const d=drag;drag=null;if(['k','w','c','m','mo'].includes(d.ty)){save();fill();}if(d.ty=='ph'&&d.wasP)playPC();});
+window.addEventListener('mouseup',()=>{if(!drag)return;const d=drag;drag=null;if(['k','w','c','m','mo'].includes(d.ty)){save();fill();}if(d.ty=='ph'&&d.wasP)playPC();
+ if(d.ty=='ph'&&d.fol&&follow&&!fPaused)seekPhone();});
 cv.addEventListener('dblclick',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,h=hit(x,y),s=S();
  if(h.ty=='tp'){snap0();const k=[Math.max(0,snapT(x2t(x),e)),Math.round(y2v(y)*1000)/1000];s.ts.push(k);sortKeys();sel={ty:'k',r:k};selDesc();save();}
  else if(h.ty=='wk'){snap0();const k=[Math.max(0,snapT(x2t(x),e)),Math.round(y2s(y)*100)/100];(s.sh=s.sh||[]).push(k);sortSh();sel={ty:'w',r:k};selDesc();save();}
