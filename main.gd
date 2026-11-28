@@ -20363,6 +20363,33 @@ func _cut_upload(s: String, nm: String, body: PackedByteArray) -> String:
 	return "ok"
 
 
+# Musik einer Szene als eigene Rennmusik übernehmen (wie „Own song“ in den Einstellungen) – oder wieder entfernen
+func _cut_race_song(s: String, off: bool) -> String:
+	for e in ["mp3", "ogg", "wav"]:
+		if FileAccess.file_exists("user://own_song." + e):
+			DirAccess.remove_absolute("user://own_song." + e)
+	if off:
+		cfg.osong = ""
+		cfg.osongn = ""
+	else:
+		var pth = _cut_mus_file(s) if s in CUT_SEQS else ""
+		if pth == "":
+			return "Diese Szene hat keine Musik"
+		var ext = pth.get_extension()
+		DirAccess.copy_absolute(pth, "user://own_song." + ext)
+		cfg.osong = ext
+		cfg.osongn = str(cut[s].get("mname", "Song"))
+	_save_cfg()
+	own_song = null
+	own_song_k = ""
+	music_cur = ""
+	if music_k == "music_race":
+		music_k = "_reload"   # läuft gerade ein Rennen: gleich auf den neuen Song wechseln
+	if off:
+		return "ok"
+	return "ok" if _own_song() != null else "Song nicht lesbar"
+
+
 func _cut_mus_del(s: String) -> void:
 	for e in ["mp3", "ogg", "wav"]:
 		var old = "user://cut/%s.%s" % [s, e]
@@ -20561,7 +20588,7 @@ func _cut_answer(c: StreamPeerTCP, path: String, body: PackedByteArray) -> void:
 		var dfs = {}
 		for q in CUT_SEQS:
 			dfs[q] = _cut_def(q)
-		_live_send(c, "application/json", JSON.stringify({"cut": cut, "def": dfs, "mus": mi}))
+		_live_send(c, "application/json", JSON.stringify({"cut": cut, "def": dfs, "mus": mi, "race": str(cfg.get("osongn", "")) if str(cfg.get("osong", "")) != "" else ""}))
 	elif path.begins_with("/cut/st"):
 		_live_send(c, "application/json", JSON.stringify({"s": seqc.get("s", ""), "t": float(seqc.get("t", 0.0)), "state": state, "ts": Engine.time_scale, "demo": cut_demo, "p": seq_pause, "mp": seq_p != null and seq_p.playing, "menu_db": music_p.volume_db if music_p != null else -80.0}))
 	elif path.begins_with("/cut/set") and s in CUT_SEQS:
@@ -20582,6 +20609,8 @@ func _cut_answer(c: StreamPeerTCP, path: String, body: PackedByteArray) -> void:
 		var h = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" % b.size()
 		c.put_data(h.to_utf8_buffer())
 		c.put_data(b)
+	elif path.begins_with("/cut/race"):
+		_live_send(c, "text/plain", _cut_race_song(s, qs.has("off")))
 	elif path.begins_with("/cut/mdel") and s in CUT_SEQS:
 		_cut_mus_del(s)
 		_live_send(c, "text/plain", "ok")

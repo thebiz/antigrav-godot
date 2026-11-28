@@ -43,6 +43,8 @@ kbd{background:#151a2a;border:1px solid #2a3350;border-radius:4px;padding:0 5px;
  <label title="Ab welcher Sekunde im Song die Szene beginnt. Negativ: der Song setzt erst später in der Szene ein.">Start im Song <input type="number" id="moff" step="0.01"> s</label>
  <label>Lautstärke <input type="number" id="mdb" step="0.5" min="-30" max="12"> dB</label>
  <button id="mdel" class="red">Musik entfernen</button>
+ <button id="mrace" title="Dieser Song läuft dann im Rennen statt der normalen Renn-Songs (wie „Own song“ in den Einstellungen)">♫ Als Rennmusik verwenden</button>
+ <span id="mrn" style="color:#7d8aa6;font-size:12.5px"></span>
  <div class="sep"></div>
  <label title="An: Explosionen, Motoren usw. werden in der Zeitlupe langsamer und tiefer. Deine Musik bleibt immer im Takt."><input type="checkbox" id="slow"> Geräusche in Zeitlupe verlangsamen</label>
 </div>
@@ -95,7 +97,7 @@ const CUTN={intro:'Schnitte auf dich',party:'Schnitt-Kamera',kill:'Schnitt-Kamer
 const ZERO={intro:'Start',party:'Start Feier',kill:'Einschlag'};
 const COL={cam:'#5ee8ff',snd:'#ffb347',end:'#ff5470'};
 const $=id=>document.getElementById(id);
-let CUT=null,DEF=null,MI={},cur='intro';
+let CUT=null,DEF=null,MI={},cur='intro',RACE='';
 const AU={};            // je Szene: {buf, mn, mx, name}
 const UND={},RED={};
 let view={t0:-0.4,pps:60};
@@ -362,6 +364,10 @@ $('bx2').onclick=()=>{const u=U();if(!u.bpm)return;snap0();u.bpm=Math.round(u.bp
 $('bh2').onclick=()=>{const u=U();if(!u.bpm)return;snap0();u.bpm=Math.round(u.bpm*50)/100;fill();save();};
 $('bhere').onclick=()=>{const u=U();if(!u.bpm){status('Erst BPM eintragen oder erkennen','err');return;}snap0();const p=60/u.bpm;let o=(ph+(+S().moff||0))%p;if(o<0)o+=p;u.boff=Math.round(o*1000)/1000;fill();save();};
 $('bload').onclick=()=>$('fin').click();$('fin').onchange=()=>{loadMusicFile($('fin').files[0]);$('fin').value='';};
+function raceInfo(){$('mrn').innerHTML='';if(RACE){$('mrn').append('Im Rennen läuft: '+RACE+' ');const x=document.createElement('button');x.textContent='zurücksetzen';x.style.padding='2px 8px';x.onclick=()=>setRace(true);$('mrn').append(x);}}
+async function setRace(off){const r=await fetch('/cut/race?s='+cur+(off?'&off=1':'')).then(r=>r.text()).catch(()=>'keine Verbindung');
+ if(r=='ok'){RACE=off?'':((MI[cur]||{}).name||(AU[cur]||{}).name||'Song');status(off?'Rennmusik wieder normal ✓':'Läuft jetzt im Rennen ✓','ok');}else status(r,'err');raceInfo();}
+$('mrace').onclick=()=>setRace(false);
 $('mdel').onclick=()=>{if(!confirm('Musik dieser Szene vom Handy entfernen?'))return;fetch('/cut/mdel?s='+cur).then(()=>{delete AU[cur];MI[cur]={has:false};fill();status('Musik entfernt','ok');});};
 $('pPC').onclick=playPC;$('pPh').onclick=playPhone;$('pSt').onclick=stopAll;$('pPa').onclick=pausePhone;
 $('zi').onclick=()=>zoom(1.5);$('zo').onclick=()=>zoom(1/1.5);$('zf').onclick=fit;
@@ -380,7 +386,7 @@ window.addEventListener('dragleave',e=>{dc--;if(dc<=0)$('drop').style.display='n
 window.addEventListener('dragover',e=>e.preventDefault());
 window.addEventListener('drop',e=>{e.preventDefault();dc=0;$('drop').style.display='none';const f=e.dataTransfer.files[0];if(f){if(f.name.endsWith('.json')){status('JSON bitte über „Import …“ laden');return;}loadMusicFile(f);}});
 window.addEventListener('resize',resize);
-fetch('/cut/get').then(r=>r.json()).then(d=>{CUT=d.cut;DEF=d.def;MI=d.mus;resize();fit();fill();status('verbunden ✓','ok');fetchMusic(cur);requestAnimationFrame(draw);})
+fetch('/cut/get').then(r=>r.json()).then(d=>{CUT=d.cut;DEF=d.def;MI=d.mus;RACE=d.race||'';raceInfo();resize();fit();fill();status('verbunden ✓','ok');fetchMusic(cur);requestAnimationFrame(draw);})
  .catch(()=>status('Keine Verbindung – ist am Handy „Live“ an und dieselbe Adresse geöffnet?','err'));
 setInterval(()=>fetch('/ping').catch(()=>{}),2000);
 </script></body></html>
