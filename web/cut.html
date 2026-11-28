@@ -129,7 +129,9 @@ function tsAt(t){const k=S().ts;if(!k.length)return 1;if(t<=k[0][0])return k[0][
 function sortKeys(){S().ts.sort((a,b)=>a[0]-b[0]);}
 // ---------- Speichern / Rückgängig
 let svT=null;
-function save(){clearTimeout(svT);status('speichere …');svT=setTimeout(()=>{const s=cur;fetch('/cut/set?s='+s,{method:'POST',body:JSON.stringify(CUT[s])}).then(r=>r.text()).then(t=>status(t=='ok'?'gespeichert ✓':'Fehler: '+t,t=='ok'?'ok':'err')).catch(()=>status('keine Verbindung zum Handy','err'));},350);}
+// je Szene ein eigener Speicher-Zeitgeber, die Szene wird beim Ändern festgehalten (vorher ging beim schnellen Wechsel der Szene die Änderung verloren)
+const SVT={};
+function save(){const s=cur;clearTimeout(SVT[s]);status('speichere …');SVT[s]=setTimeout(()=>{delete SVT[s];fetch('/cut/set?s='+s,{method:'POST',body:JSON.stringify(CUT[s])}).then(r=>r.text()).then(t=>status(t=='ok'?'gespeichert ✓':'Fehler: '+t,t=='ok'?'ok':'err')).catch(()=>status('keine Verbindung zum Handy','err'));},350);}
 function snap0(){(UND[cur]=UND[cur]||[]).push(JSON.stringify(S()));if(UND[cur].length>200)UND[cur].shift();RED[cur]=[];}
 function undo(){const u=UND[cur]||[];if(!u.length)return;(RED[cur]=RED[cur]||[]).push(JSON.stringify(S()));CUT[cur]=JSON.parse(u.pop());sel=null;fill();save();}
 function redo(){const r=RED[cur]||[];if(!r.length)return;(UND[cur]=UND[cur]||[]).push(JSON.stringify(S()));CUT[cur]=JSON.parse(r.pop());sel=null;fill();save();}
@@ -215,7 +217,7 @@ function playPC(){if(playing){stopPC();return;}stopFollow();ensureAC();playing=t
   if(off>=0){if(off<A.buf.duration)src.start(0,off);}else src.start(ac.currentTime-off,0);}}
 function stopPC(){playing=false;$('pPC').textContent='♪ Nur Musik am PC';if(src){try{src.stop();}catch(e){}src=null;}}
 function stopFollow(){follow=false;fAt=0;}
-async function playPhone(){stopPC();clearTimeout(svT);await fetch('/cut/set?s='+cur,{method:'POST',body:JSON.stringify(S())}).catch(()=>{});
+async function playPhone(){stopPC();clearTimeout(SVT[cur]);delete SVT[cur];await fetch('/cut/set?s='+cur,{method:'POST',body:JSON.stringify(S())}).catch(()=>{});
  const t0=(ph>0.05&&ph<endT()-0.1)?ph:0;
  const r=await fetch('/cut/play?s='+cur+'&t='+t0.toFixed(3)).then(r=>r.text()).catch(()=>'keine Verbindung zum Handy');
  if(!r.startsWith('ok')){status(r,'err');return;}status(r=='ok'?'läuft am Handy …':r);follow=true;fSeen=false;fAt=0;fPaused=false;$('pPa').textContent='❚❚ Pause Handy';fStart=performance.now();ph=t0;poll();}

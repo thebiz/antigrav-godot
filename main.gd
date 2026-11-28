@@ -21004,6 +21004,8 @@ func _ed_start(was: String, tg: Callable, sc: float, n: int, dur: float, final: 
 			var pb = _cut_m(seq, "pend")
 			sl.append({"s": {"p0": Vector3(0.9, 0.65, 4.8), "p1": Vector3(0.5, 0.45, 2.7), "l": Vector3(0, 0.2, 0), "roll": 0.0, "fov": 60.0}, "a": pa, "b": pb, "out": false, "mir": 1.0, "cum": _ed_cum(seq, pa, pb)})
 		ed = {"was": was, "tg": tg, "sc": sc, "sl": sl, "i": 0, "u": 0.0, "pp": Vector3.ZERO, "seq": seq}
+		if _ev("EDDBG") != "":
+			print("EDDBG start ", seq, " t=", seqc.get("t", -1), " shots=", sl.map(func(x): return [x.a, x.b]))
 		return
 	for i in range(mini(n, order.size())):
 		sl.append({"s": ED_SHOTS[order[i]], "dur": dur, "out": true, "mir": 1.0 if randf() < 0.5 else -1.0})
